@@ -4666,6 +4666,7 @@ def workerThread(_loop):
                 if autoConnectToLights == True: # if we're set to automatically link to the lights on startup, then do it here
                     #for a in range(len(availableLights)):
                     if threadAction != "quit": # if we're not supposed to quit, then try to connect to the light(s)
+                        time.sleep(10) # let BLE adapter settle after discovery before first connect attempt
                         _loop.run_until_complete(parallelAction("connect", [-1])) # connect to each available light in parallel
 
                 threadAction = ""
