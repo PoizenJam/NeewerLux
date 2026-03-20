@@ -4235,12 +4235,21 @@ async def connectToLight(selectedLight, updateGUI=True):
               
                 if updateGUI == True:
                     if currentAttempt < maxNumOfAttempts:
-                        if mainWindow is not None: mainWindow._tableUpdateSignal.emit(["", "", "NOT\nLINKED", "There was an error connecting to the light, trying again (Attempt " + str(currentAttempt + 1) + " of " + str(maxNumOfAttempts) + ")..."], returnLightIndexesFromMacAddress(lightMAC)[0]) # there was an issue connecting this specific light to Bluetooth, so show that
+                        lightIdx = returnLightIndexesFromMacAddress(lightMAC)[0]
+                        if currentAttempt == 1:
+                            # First attempt failures are common (BLE adapter settling) — show gentle status
+                            if mainWindow is not None: mainWindow._tableUpdateSignal.emit(["", "", "", "Connecting..."], lightIdx)
+                        else:
+                            # Subsequent failures are worth reporting
+                            if mainWindow is not None: mainWindow._tableUpdateSignal.emit(["", "", "NOT\nLINKED", "There was an error connecting to the light, trying again (Attempt " + str(currentAttempt + 1) + " of " + str(maxNumOfAttempts) + ")..."], lightIdx)
                 else:
                     returnValue = False # if we're in CLI mode, and there is an error connecting to the light, return False
 
                 currentAttempt = currentAttempt + 1
-                await asyncio.sleep(4) # wait a few seconds before trying to link to the light again
+                if currentAttempt == 2:
+                    await asyncio.sleep(1) # short retry after first failure (usually just BLE settling)
+                else:
+                    await asyncio.sleep(4) # longer wait for subsequent retries
         else:
             return "quit"
 
@@ -4657,10 +4666,6 @@ def workerThread(_loop):
                 if autoConnectToLights == True: # if we're set to automatically link to the lights on startup, then do it here
                     #for a in range(len(availableLights)):
                     if threadAction != "quit": # if we're not supposed to quit, then try to connect to the light(s)
-                        # Brief pause after discovery to let the BLE adapter finalize device data.
-                        # Without this, the first connect attempt frequently fails in frozen
-                        # (PyInstaller) builds where WinRT initialization timing differs.
-                        time.sleep(2)
                         _loop.run_until_complete(parallelAction("connect", [-1])) # connect to each available light in parallel
 
                 threadAction = ""
