@@ -171,6 +171,17 @@ def pyside_exec(obj):
     else:
         return obj.exec_()
 
+# HELPER: Resolve resource file paths — works both in normal Python and PyInstaller frozen EXE.
+# PyInstaller extracts bundled data files to sys._MEIPASS; in normal Python, use script directory.
+def _resource_path(filename):
+    """Return the absolute path to a bundled resource file."""
+    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, filename)
+    return os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), filename)
+
+# Are we running as a frozen PyInstaller EXE?
+_isFrozenExe = getattr(sys, 'frozen', False)
+
 CCTSlider = -1 # the current slider moved in the CCT window - 1 - Brightness / 2 - Hue / -1 - Both Brightness and Hue
 sendValue = [120, 135, 2, 20, 56, 157] # an array to hold the values to be sent to the light - the default is CCT / 5600K / 20%
 lastAnimButtonPressed = 1 # which animation button you clicked last - if none, then it defaults to 1 (the police sirens)
@@ -403,9 +414,8 @@ try: # try to load the GUI
             self.themeToggleBtn.setText("\u263E")  # moon symbol
 
             # Set window icon (shown in taskbar and title bar)
-            _iconDir = os.path.dirname(os.path.abspath(sys.argv[0])) + os.sep
             for _iconName in ("com.github.poizenjam.NeewerLux.png", "com.github.poizenjam.NeewerLux.ico"):
-                _iconPath = _iconDir + _iconName
+                _iconPath = _resource_path(_iconName)
                 if os.path.exists(_iconPath):
                     self.setWindowIcon(QIcon(_iconPath))
                     break
@@ -2070,6 +2080,10 @@ try: # try to load the GUI
                 self.livePreview_check.setChecked(livePreview)
                 self.autoReconnect_check.setChecked(autoReconnectOnDisconnect)
                 self.hideConsoleOnLaunch_check.setChecked(hideConsoleOnLaunch)
+                if _isFrozenExe:
+                    self.hideConsoleOnLaunch_check.setChecked(False)
+                    self.hideConsoleOnLaunch_check.setEnabled(False)
+                    self.hideConsoleOnLaunch_check.setToolTip("Not applicable when running as an EXE (no console window exists)")
                 self.minimizeToTrayOnClose_check.setChecked(minimizeToTrayOnClose)
                 self.httpAutoStart_check.setChecked(httpAutoStart)
                 self.cctFallbackCombo.setCurrentIndex(0 if cctFallbackMode == "convert" else 1)
@@ -2948,7 +2962,9 @@ try: # try to load the GUI
             self._trayIcon = QSystemTrayIcon(self)
 
             # Try to use the app icon, fall back to a generic one
-            iconPath = os.path.dirname(os.path.abspath(sys.argv[0])) + os.sep + "com.github.poizenjam.NeewerLux.png"
+            iconPath = _resource_path("com.github.poizenjam.NeewerLux.png")
+            if not os.path.exists(iconPath):
+                iconPath = _resource_path("com.github.poizenjam.NeewerLux.ico")
             if os.path.exists(iconPath):
                 self._trayIcon.setIcon(QIcon(iconPath))
             else:
