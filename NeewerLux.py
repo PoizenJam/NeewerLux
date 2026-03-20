@@ -2082,8 +2082,7 @@ try: # try to load the GUI
                 self.hideConsoleOnLaunch_check.setChecked(hideConsoleOnLaunch)
                 if _isFrozenExe:
                     self.hideConsoleOnLaunch_check.setChecked(False)
-                    self.hideConsoleOnLaunch_check.setEnabled(False)
-                    self.hideConsoleOnLaunch_check.setToolTip("Not applicable when running as an EXE (no console window exists)")
+                    self.hideConsoleOnLaunch_check.setVisible(False)
                 self.minimizeToTrayOnClose_check.setChecked(minimizeToTrayOnClose)
                 self.httpAutoStart_check.setChecked(httpAutoStart)
                 self.cctFallbackCombo.setCurrentIndex(0 if cctFallbackMode == "convert" else 1)
@@ -6580,7 +6579,7 @@ def writeHTMLSections(self, theSection, errorMsg = ""):
         if theSection == "quicklinks-timer": # write the "This page will refresh..." timer
             self.wfile.write(bytes("<CENTER><strong><em><span id='refreshDisplay'><BR></span></em></strong></CENTER><HR>\n", "utf-8"))
     elif theSection == "htmlendheaders":
-        self.wfile.write(bytes("<CENTER><A HREF='https://github.com/poizenjam/NeewerLux/'>NeewerLux 1.0.0</A> / based on <A HREF='https://github.com/taburineagle/NeewerLite-Python/'>NeewerLite-Python</A> by Zach Glenwright / originally from <A HREF='https://github.com/keefo/NeewerLite'>NeewerLite</A> by Xu Lian<BR></CENTER>\n", "utf-8"))
+        self.wfile.write(bytes("<CENTER><A HREF='https://github.com/poizenjam/NeewerLux/'>NeewerLux 1.0.0</A><BR>based on <A HREF='https://github.com/taburineagle/NeewerLite-Python/'>NeewerLite-Python</A> (v0.12d) by Zach Glenwright / originally from <A HREF='https://github.com/keefo/NeewerLite'>NeewerLite</A> by Xu Lian<BR></CENTER>\n", "utf-8"))
         self.wfile.write(bytes("</BODY>\n</HTML>", "utf-8"))
 
 def formatStringForConsole(theString, maxLength):
@@ -6736,12 +6735,12 @@ if __name__ == '__main__':
     # Display the version of NeewerLux we're using
     print("---------------------------------------------------------")
     print("               NeewerLux ver. 1.0.0")
-    print("        A NeewerLite-Python Extension")
+    print("  Cross-platform Neewer LED light control")
+    print("  https://github.com/poizenjam/NeewerLux/")
     print("")
-    print("  Based on NeewerLite-Python 0.12d by Zach Glenwright")
-    print("  > https://github.com/taburineagle/NeewerLite-Python <")
+    print("  Based on NeewerLite-Python (v0.12d)")
+    print("    by Zach Glenwright (@taburineagle)")
     print("  Originally from NeewerLite by Xu Lian (@keefo)")
-    print("  > https://github.com/keefo/NeewerLite <")
     print("---------------------------------------------------------")
 
     singleInstanceLock() # make a lockfile if one doesn't exist yet, and quit out if one does

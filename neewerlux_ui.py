@@ -890,21 +890,35 @@ class Ui_MainWindow(object):
         infoText.setOpenExternalLinks(True)
         infoText.setHtml("""
 <h2 style="color:#9100ff;">NeewerLux 1.0.0</h2>
-<p>Cross-platform Neewer LED light control with custom animations, presets, and HTTP API.</p>
-<p>Based on <a href="https://github.com/taburineagle/NeewerLite-Python/">NeewerLite-Python</a> by Zach Glenwright &mdash;
-Originally from <a href="https://github.com/keefo/NeewerLite">NeewerLite</a> by Xu Lian</p>
+<p>Cross-platform Neewer LED light control for streamers and content creators.</p>
 <hr>
-<h3>Quick Start</h3>
+<h3>Features</h3>
 <ul>
-<li><b>Scan</b> for Neewer lights via Bluetooth, then <b>Connect</b></li>
-<li>Use the <b>CCT</b>, <b>HSI</b>, or <b>Scene</b> tabs to control lights</li>
-<li>Create and play <b>Animations</b> with keyframe-based color sequences</li>
-<li>Save up to unlimited <b>Presets</b> — right-click to save, left-click to recall, middle-click to rename</li>
-<li>Enable the <b>HTTP server</b> for remote control via the web dashboard or API</li>
+<li><b>Bluetooth Light Control</b> &mdash; Scan, connect, and control Neewer LED lights via CCT, HSI, and Scene modes</li>
+<li><b>Animation Engine</b> &mdash; Keyframe-based animations with smooth interpolation, parallel BLE writes, and 101 built-in presets across emergency, performance, holiday, studio, and ambient categories</li>
+<li><b>Visual Animation Editor</b> &mdash; Color-coded keyframe table, GradientSlider controls, per-light targeting, copy/paste, live preview, and synced JSON editor</li>
+<li><b>Preset System</b> &mdash; Unlimited presets with right-click save, left-click recall, middle-click rename, and a visual Preset Editor with per-light targeting</li>
+<li><b>Light Aliases &amp; Preferred IDs</b> &mdash; Assign names and numeric IDs to lights for consistent ordering and easy targeting in animations, presets, and HTTP commands</li>
+<li><b>Global CCT Range</b> &mdash; Configurable min/max color temperature bounds (2700K&ndash;8500K) with per-light overrides</li>
+<li><b>CCT Clamping</b> &mdash; Software-side enforcement of CCT bounds with convert/clamp or ignore/skip modes for mixed light setups</li>
+<li><b>WebUI Dashboard</b> &mdash; Browser-based control at <code>http://localhost:8080/</code> with live light table, sliders, preset grid, animation browser, and API reference</li>
+<li><b>HTTP API</b> &mdash; RESTful control via GET/POST &mdash; discover, link, set mode, presets, animations, and batch multi-light commands</li>
+<li><b>System Tray</b> &mdash; Minimize to tray on close, with show/hide and HTTP server toggle from the tray menu</li>
+<li><b>Update Checker</b> &mdash; Check for new releases from within the GUI or WebUI</li>
+<li><b>Logging</b> &mdash; Thread-safe buffered log with auto-scroll, clear, save, and optional file output</li>
 </ul>
 <hr>
+<h3>Quick Start</h3>
+<ol>
+<li><b>Scan</b> for Neewer lights via Bluetooth</li>
+<li><b>Connect</b> to discovered lights (auto-connect available in Global Preferences)</li>
+<li>Use the <b>CCT</b>, <b>HSI</b>, or <b>Scene</b> tabs to control lights</li>
+<li>Right-click a <b>Preset</b> button to save current settings; left-click to recall</li>
+<li>Open the <b>Animations</b> tab to browse and play animations</li>
+<li>Enable the <b>HTTP server</b> for remote control via the web dashboard or API</li>
+</ol>
+<hr>
 <h3>HTTP API Reference</h3>
-<p>Start the HTTP server from the toolbar button or Global Preferences ("Start HTTP server automatically on launch").</p>
 <p><b>Base URL:</b> <code>http://localhost:8080/NeewerLux/doAction?</code></p>
 <table cellpadding="4">
 <tr><td><b>discover</b></td><td>Scan for new lights</td></tr>
@@ -920,8 +934,21 @@ Originally from <a href="https://github.com/keefo/NeewerLite">NeewerLite</a> by 
 <p>POST to <code>/NeewerLux/batch</code> for multi-light JSON commands.
 POST to <code>/NeewerLux/animate</code> for JSON animation control.</p>
 <hr>
-<p><b>Repository:</b> <a href="https://github.com/poizenjam/NeewerLux/">github.com/poizenjam/NeewerLux</a></p>
-<p><b>Releases:</b> <a href="https://github.com/poizenjam/NeewerLux/releases">github.com/poizenjam/NeewerLux/releases</a></p>
+<h3>Helpful Notes</h3>
+<ul>
+<li>Preset and animation files are stored in the <code>light_prefs/</code> folder alongside the application and can be manually edited with any text editor</li>
+<li>Per-light preferences (custom name, CCT range, preferred ID) are saved as individual files in <code>light_prefs/</code> keyed by MAC address</li>
+<li>Animations support targeting by light alias name, preferred ID number, MAC address, or <code>"*"</code> wildcard for all lights</li>
+<li>CCT-only lights automatically participate in HSI animations via color temperature mapping</li>
+<li>The HTTP server can be started automatically on launch via Global Preferences</li>
+</ul>
+<hr>
+<p style="color:#888; font-size:0.9em;">
+<b>Repository:</b> <a href="https://github.com/poizenjam/NeewerLux/">github.com/poizenjam/NeewerLux</a><br>
+<b>Releases:</b> <a href="https://github.com/poizenjam/NeewerLux/releases">github.com/poizenjam/NeewerLux/releases</a><br><br>
+Based on <a href="https://github.com/taburineagle/NeewerLite-Python/">NeewerLite-Python</a> (v0.12d) by Zach Glenwright &mdash;
+Originally from <a href="https://github.com/keefo/NeewerLite">NeewerLite</a> by Xu Lian
+</p>
 """)
         infoLay.addWidget(infoText)
         self.ColorModeTabWidget.addTab(self.infoTab, "Info")

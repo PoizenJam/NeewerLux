@@ -503,18 +503,25 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
         </div>
         <div class="card-body" style="display:none">
             <h3 style="color:var(--accent);margin-top:0">NeewerLux 1.0.0</h3>
-            <p>Cross-platform Neewer LED light control with custom animations, presets, and HTTP API.</p>
-            <p style="color:var(--muted)">Based on <a href="https://github.com/taburineagle/NeewerLite-Python/" style="color:var(--accent)">NeewerLite-Python</a> by Zach Glenwright &mdash;
-            Originally from <a href="https://github.com/keefo/NeewerLite" style="color:var(--accent)">NeewerLite</a> by Xu Lian</p>
+            <p>Cross-platform Neewer LED light control for streamers and content creators.</p>
             <hr style="border-color:var(--border)">
-            <h4>Quick Start</h4>
+            <h4>Features</h4>
             <ul style="padding-left:20px;line-height:1.8">
-                <li><b>Scan</b> for lights, then <b>Connect</b> them via the light table</li>
-                <li>Use the <b>CCT</b>, <b>HSI</b>, or <b>Scene</b> controls to adjust lights</li>
-                <li>Play <b>Animations</b> &mdash; 65 built-in presets across HSI, CCT, and mixed modes</li>
-                <li><b>Custom Presets</b> &mdash; click to recall, right-click to save a snapshot</li>
-                <li>Lights can be addressed by <b>index</b>, <b>alias name</b>, or <b>MAC address</b></li>
-                <li><b>CCT-only lights</b> participate in HSI animations via automatic color temperature mapping</li>
+                <li><b>Bluetooth Light Control</b> &mdash; Scan, connect, and control Neewer LED lights via CCT, HSI, and Scene modes</li>
+                <li><b>Animation Engine</b> &mdash; Keyframe-based animations with smooth interpolation, parallel BLE writes, and 101 built-in presets</li>
+                <li><b>Visual Animation Editor</b> &mdash; Color-coded keyframe table, GradientSlider controls, per-light targeting, copy/paste, and live preview</li>
+                <li><b>Preset System</b> &mdash; Unlimited presets with right-click save, left-click recall, middle-click rename, and a visual Preset Editor</li>
+                <li><b>Light Aliases &amp; Preferred IDs</b> &mdash; Assign names and IDs for consistent ordering and targeting</li>
+                <li><b>Global CCT Range</b> &mdash; Configurable min/max color temperature (2700K&ndash;8500K) with per-light overrides</li>
+                <li><b>CCT Clamping</b> &mdash; Software-side enforcement with convert/clamp or ignore/skip modes</li>
+                <li><b>WebUI Dashboard</b> &mdash; This page! Live light table, sliders, preset grid, animation browser, and API reference</li>
+                <li><b>HTTP API</b> &mdash; RESTful control via GET/POST for automation and integration</li>
+            </ul>
+            <h4>Helpful Notes</h4>
+            <ul style="padding-left:20px;line-height:1.8">
+                <li>Preset and animation files are in <code>light_prefs/</code> alongside the application and can be manually edited</li>
+                <li>Animations support targeting by alias name, preferred ID, MAC address, or <code>"*"</code> for all lights</li>
+                <li>CCT-only lights automatically participate in HSI animations via color temperature mapping</li>
             </ul>
             <h4>Keyboard Shortcuts (Desktop GUI)</h4>
             <table style="width:100%;font-size:12px;border-collapse:collapse">
@@ -523,13 +530,18 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
                 <tr><td style="padding:3px 8px"><b>Middle-click</b> preset</td><td>Quick rename</td></tr>
                 <tr><td style="padding:3px 8px"><b>Alt+1/2/3/4</b></td><td>Switch to CCT / HSI / Scene / Light Prefs tab</td></tr>
             </table>
-            <p><b>Repository:</b> <a href="https://github.com/poizenjam/NeewerLux/" style="color:var(--accent)">github.com/poizenjam/NeewerLux</a></p>
-            <p><b>Releases:</b> <a href="https://github.com/poizenjam/NeewerLux/releases" style="color:var(--accent)">github.com/poizenjam/NeewerLux/releases</a></p>
             <hr style="border-color:var(--border)">
             <div id="updateCheckArea">
                 <button class="btn" onclick="checkForUpdates()">Check for Updates</button>
                 <span id="updateResult" style="margin-left:10px;font-size:12px;"></span>
             </div>
+            <hr style="border-color:var(--border)">
+            <p style="color:var(--muted);font-size:0.9em;">
+                <b>Repository:</b> <a href="https://github.com/poizenjam/NeewerLux/" style="color:var(--accent)">github.com/poizenjam/NeewerLux</a><br>
+                <b>Releases:</b> <a href="https://github.com/poizenjam/NeewerLux/releases" style="color:var(--accent)">github.com/poizenjam/NeewerLux/releases</a><br><br>
+                Based on <a href="https://github.com/taburineagle/NeewerLite-Python/" style="color:var(--accent)">NeewerLite-Python</a> (v0.12d) by Zach Glenwright &mdash;
+                Originally from <a href="https://github.com/keefo/NeewerLite" style="color:var(--accent)">NeewerLite</a> by Xu Lian
+            </p>
         </div>
     </div>
 
@@ -919,7 +931,8 @@ window.addEventListener('load', () => {
 </script>
 <div style="text-align:center;padding:16px 0 8px;font-size:11px;color:var(--muted);">
     NeewerLux 1.0.0 &mdash;
-    Based on <a href="https://github.com/taburineagle/NeewerLite-Python/" style="color:var(--accent)">NeewerLite-Python</a> by Zach Glenwright &mdash;
+    <a href="https://github.com/poizenjam/NeewerLux/" style="color:var(--accent)">github.com/poizenjam/NeewerLux</a><br>
+    Based on <a href="https://github.com/taburineagle/NeewerLite-Python/" style="color:var(--accent)">NeewerLite-Python</a> (v0.12d) by Zach Glenwright &mdash;
     Originally from <a href="https://github.com/keefo/NeewerLite" style="color:var(--accent)">NeewerLite</a> by Xu Lian
 </div>
 </body>
