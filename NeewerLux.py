@@ -2573,7 +2573,7 @@ try: # try to load the GUI
                     self.lightTable.item(currentRow, 2).setText(infoArray[2])
                     self.lightTable.item(currentRow, 2).setTextAlignment(Qt.AlignCenter) # align the light status info to be center-justified
             if infoArray[3] != "": # the current status message of the light
-                if rowToChange == -1 or (rowToChange != -1 and infoArray[2] != self.returnTableInfo(rowToChange, 3)):
+                if rowToChange == -1 or (rowToChange != -1 and infoArray[3] != self.returnTableInfo(rowToChange, 3)):
                     self.lightTable.item(currentRow, 3).setText(infoArray[3])
 
             self.lightTable.resizeRowsToContents()
@@ -4595,10 +4595,13 @@ def workerThread(_loop):
                                 anyConnected = True
                                 reconnectCooldown.pop(a, None)  # light is connected, clear any cooldown
                                 if not availableLights[a][0].name in lightsToNotCheckPower: # if the name of the current light is not in the list to skip checking
-                                    _loop.run_until_complete(getLightChannelandPower(a)) # then check the power and light status of that light
-                                    if hasGUI: mainWindow._tableUpdateSignal.emit(["", "", "LINKED\n" + availableLights[a][7][0] + " / ᴄʜ. " + str(availableLights[a][7][1]), ""], a)
+                                    try:
+                                        _loop.run_until_complete(getLightChannelandPower(a)) # then check the power and light status of that light
+                                    except Exception as e:
+                                        printDebugString("Error reading power/channel for light " + str(a + 1) + ": " + str(e))
+                                    if hasGUI: mainWindow._tableUpdateSignal.emit(["", "", "LINKED\n" + availableLights[a][7][0] + " / ᴄʜ. " + str(availableLights[a][7][1]), "Waiting to send..."], a)
                                 else: # if the light we're scanning doesn't supply power or channel status, then just show "LINKED"
-                                    if hasGUI: mainWindow._tableUpdateSignal.emit(["", "", "LINKED", ""], a)
+                                    if hasGUI: mainWindow._tableUpdateSignal.emit(["", "", "LINKED", "Waiting to send..."], a)
                         else:
                             # Bleak object is empty - light was previously cleared; check cooldown for retry
                             if autoReconnectOnDisconnect and a not in reconnectCooldown:
@@ -4654,6 +4657,10 @@ def workerThread(_loop):
                 if autoConnectToLights == True: # if we're set to automatically link to the lights on startup, then do it here
                     #for a in range(len(availableLights)):
                     if threadAction != "quit": # if we're not supposed to quit, then try to connect to the light(s)
+                        # Brief pause after discovery to let the BLE adapter finalize device data.
+                        # Without this, the first connect attempt frequently fails in frozen
+                        # (PyInstaller) builds where WinRT initialization timing differs.
+                        time.sleep(2)
                         _loop.run_until_complete(parallelAction("connect", [-1])) # connect to each available light in parallel
 
                 threadAction = ""
