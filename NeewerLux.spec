@@ -1,59 +1,48 @@
 # -*- mode: python ; coding: utf-8 -*-
 # NeewerLux PyInstaller spec file
-# Build: pyinstaller NeewerLux.spec
-# Output: dist/NeewerLux/ (onedir)
+# Build with:  pyinstaller NeewerLux.spec
+# Produces:    dist/NeewerLux/  (--onedir mode)
 
 import sys
 from PyInstaller.utils.hooks import collect_all
 
-# Collect all bleak submodules and WinRT DLLs
-bleak_datas, bleak_binaries, bleak_hiddenimports = collect_all('bleak')
+block_cipher = None
 
-# On Windows, bleak needs winrt backend
-winrt_datas = []
-winrt_binaries = []
-winrt_hiddenimports = []
-if sys.platform == 'win32':
-    try:
-        wd, wb, wh = collect_all('bleak_winrt')
-        winrt_datas += wd; winrt_binaries += wb; winrt_hiddenimports += wh
-    except Exception:
-        pass
-    # Some bleak versions use winrt directly
-    for pkg in ['winrt', 'winrt.windows.devices.bluetooth',
-                'winrt.windows.devices.bluetooth.genericattributeprofile',
-                'winrt.windows.devices.bluetooth.advertisement',
-                'winrt.windows.devices.enumeration',
-                'winrt.windows.foundation',
-                'winrt.windows.storage.streams']:
-        try:
-            wd2, wb2, wh2 = collect_all(pkg)
-            winrt_datas += wd2; winrt_binaries += wb2; winrt_hiddenimports += wh2
-        except Exception:
-            pass
+# Collect all bleak subpackages/data (WinRT backends, etc.)
+bleak_datas, bleak_binaries, bleak_hiddenimports = collect_all('bleak')
 
 a = Analysis(
     ['NeewerLux.py'],
     pathex=[],
-    binaries=bleak_binaries + winrt_binaries,
-    datas=bleak_datas + winrt_datas,
+    binaries=bleak_binaries,
+    datas=[
+        ('neewerlux_ui.py', '.'),
+        ('neewerlux_theme.py', '.'),
+        ('neewerlux_webui.py', '.'),
+        ('neewerlux_anim_editor.py', '.'),
+        ('com.github.poizenjam.NeewerLux.ico', '.'),
+        ('com.github.poizenjam.NeewerLux.png', '.'),
+    ] + bleak_datas,
     hiddenimports=[
-        'PySide6.QtCore', 'PySide6.QtGui', 'PySide6.QtWidgets',
-        'neewerlux_ui', 'neewerlux_theme', 'neewerlux_webui', 'neewerlux_anim_editor',
-    ] + bleak_hiddenimports + winrt_hiddenimports,
+        'bleak',
+        'bleak.backends.winrt',
+        'PySide6',
+        'PySide6.QtWidgets',
+        'PySide6.QtCore',
+        'PySide6.QtGui',
+        'PySide6.QtSvg',
+    ] + bleak_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[
-        'tkinter', 'unittest', 'xmlrpc', 'pydoc', 'doctest',
-        'PySide6.QtQml', 'PySide6.QtQuick', 'PySide6.QtDesigner',
-        'PySide6.Qt3D', 'PySide6.QtCharts', 'PySide6.QtDataVisualization',
-        'PySide6.QtMultimedia', 'PySide6.QtWebEngine', 'PySide6.QtPdf',
-    ],
+    excludes=[],
+    win_no_prefer_redirects=False,
+    win_private_assemblies=False,
+    cipher=block_cipher,
     noarchive=False,
 )
 
-pyz = PYZ(a.pure)
+pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 exe = EXE(
     pyz,
@@ -65,10 +54,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    # --console: allows optional console visibility via hideConsoleOnLaunch preference
-    # The app hides the console on startup if the preference is enabled.
-    # Users who want debug output can disable hideConsoleOnLaunch in Global Preferences.
-    console=True,
+    console=False,           # No console window — GUI app
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
@@ -80,6 +66,7 @@ exe = EXE(
 coll = COLLECT(
     exe,
     a.binaries,
+    a.zipfiles,
     a.datas,
     strip=False,
     upx=True,

@@ -179,7 +179,7 @@ lastSortingField = -1 # the last field used for sorting purposes
 
 availableLights = [] # the list of Neewer lights currently available to control
 # List Subitems (for ^^^^^^):
-# [0] - Bleak Scan Object (can use .name / .rssi / .address to get specifics)
+# [0] - Bleak Scan Object (can use .name / .address to get specifics; RSSI stored separately at index [9])
 # [1] - Bleak Connection (the actual Bluetooth connection to the light itself)
 # [2] - Custom Name for Light (string)
 # [3] - Last Used Parameters (list)
@@ -187,6 +187,8 @@ availableLights = [] # the list of Neewer lights currently available to control
 # [5] - Whether or not to send Brightness and Hue independently for old lights (boolean)
 # [6] - Whether or not this light has been manually turned ON/OFF (boolean)
 # [7] - The Power and Channel data returned for this light (list)
+# [8] - Preferred ID for sorting (int)
+# [9] - Last known RSSI value in dBm (int or str "?")
 
 # Light Preset ***Default*** Settings (for sections below):
 # NOTE: The list is 0-based, so the preset itself is +1 from the subitem
@@ -264,7 +266,7 @@ maxNumOfAttempts = 6 # the maximum attempts the program will attempt an action b
 rememberLightsOnExit = False # whether or not to save the currently set light settings (mode/hue/brightness/etc.) when quitting out
 rememberPresetsOnExit = True # whether or not to save the custom preset list when quitting out
 livePreview = True # whether sliders send values in real-time or require clicking Apply
-hideConsoleOnLaunch = getattr(sys, 'frozen', False)  # auto-hide console for exe builds; visible for source
+hideConsoleOnLaunch = False # whether to auto-hide the console window on GUI startup
 minimizeToTrayOnClose = True # whether closing the window minimizes to tray (True) or quits (False)
 httpAutoStart = False # whether to automatically start the HTTP server on launch
 cctFallbackMode = "convert" # how to handle HSI/ANM commands sent to CCT-only lights: "ignore" or "convert"
@@ -357,6 +359,8 @@ def singleInstanceUnlockandQuit(exitCode):
         printDebugString("Lockfile not found in temp directory, so we're going to skip deleting it!")
 
     sys.exit(exitCode) # quit out, with the specified exitCode
+    # If sys.exit was somehow caught, force-kill the process
+    os._exit(exitCode)
 
 def doAnotherInstanceCheck():
     if anotherInstance == True: # if we're running a 2nd instance, but we shouldn't be
@@ -1740,7 +1744,7 @@ try: # try to load the GUI
 
                     sortingList.append([availableLights[a][0], availableLights[a][1], availableLights[a][2], availableLights[a][3], \
                                         availableLights[a][4], availableLights[a][5], availableLights[a][6], availableLights[a][7], \
-                                        availableLights[a][0].name, availableLights[a][0].address, availableLights[a][0].rssi])
+                                        availableLights[a][0].name, availableLights[a][0].address, _get_light_rssi(availableLights[a])])
             else: # we clicked on the "Linked" or "Status" headers, which do not allow sorting
                 sortingField = -1
 
@@ -2006,10 +2010,10 @@ try: # try to load the GUI
 
                 # IF A CUSTOM NAME IS SET UP FOR THIS LIGHT, THEN CHANGE THE TABLE TO REFLECT THAT
                 if availableLights[selectedRows[0]][2] != "":
-                    self.setTheTable([availableLights[selectedRows[0]][2] + " (" + availableLights[selectedRows[0]][0].name + ")" "\n  [ʀssɪ: " + str(availableLights[selectedRows[0]][0].rssi) + " dBm]",
+                    self.setTheTable([availableLights[selectedRows[0]][2] + " (" + availableLights[selectedRows[0]][0].name + ")" "\n  [ʀssɪ: " + _get_light_rssi(availableLights[selectedRows[0]]) + " dBm]",
                                     "", "", ""], selectedRows[0])
                 else: # if there is no custom name, then reset the table to show that
-                    self.setTheTable([availableLights[selectedRows[0]][0].name + "\n  [ʀssɪ: " + str(availableLights[selectedRows[0]][0].rssi) + " dBm]",
+                    self.setTheTable([availableLights[selectedRows[0]][0].name + "\n  [ʀssɪ: " + _get_light_rssi(availableLights[selectedRows[0]]) + " dBm]",
                                     "", "", ""], selectedRows[0])
 
                 if self.colorTempRange.isChecked(): # if we've asked to save a custom temperature range for this light
@@ -2858,22 +2862,23 @@ try: # try to load the GUI
                     self.statusBar.showMessage("We didn't locate any Neewer lights on the last search")
 
             for a in range(len(availableLights)):
+                _rssi_str = _get_light_rssi(availableLights[a])
                 if availableLights[a][1] == "": # the light does not currently have a Bleak object connected to it
                     if availableLights[a][2] != "": # the light has a custom name, so add the custom name to the light
-                        self.setTheTable([availableLights[a][2] + " (" + availableLights[a][0].name + ")" + "\n  [ʀssɪ: " + str(availableLights[a][0].rssi) + " dBm]", availableLights[a][0].address, "Waiting", "Waiting to connect..."])
+                        self.setTheTable([availableLights[a][2] + " (" + availableLights[a][0].name + ")" + "\n  [ʀssɪ: " + _rssi_str + " dBm]", availableLights[a][0].address, "Waiting", "Waiting to connect..."])
                     else: # the light does not have a custom name, so just use the model # of the light
-                        self.setTheTable([availableLights[a][0].name + "\n  [ʀssɪ: " + str(availableLights[a][0].rssi) + " dBm]", availableLights[a][0].address, "Waiting", "Waiting to connect..."])
+                        self.setTheTable([availableLights[a][0].name + "\n  [ʀssɪ: " + _rssi_str + " dBm]", availableLights[a][0].address, "Waiting", "Waiting to connect..."])
                 else: # the light does have a Bleak object connected to it
                     if availableLights[a][2] != "": # the light has a custom name, so add the custom name to the light
                         if availableLights[a][1].is_connected: # we have a connection to the light
-                            self.setTheTable([availableLights[a][2] + " (" + availableLights[a][0].name + ")" + "\n  [ʀssɪ: " + str(availableLights[a][0].rssi) + " dBm]", availableLights[a][0].address, "LINKED", "Waiting to send..."])
+                            self.setTheTable([availableLights[a][2] + " (" + availableLights[a][0].name + ")" + "\n  [ʀssɪ: " + _rssi_str + " dBm]", availableLights[a][0].address, "LINKED", "Waiting to send..."])
                         else: # we're still trying to connect, or haven't started trying yet
-                            self.setTheTable([availableLights[a][2] + " (" + availableLights[a][0].name + ")" + "\n  [ʀssɪ: " + str(availableLights[a][0].rssi) + " dBm]", availableLights[a][0].address, "Waiting", "Waiting to connect..."])
+                            self.setTheTable([availableLights[a][2] + " (" + availableLights[a][0].name + ")" + "\n  [ʀssɪ: " + _rssi_str + " dBm]", availableLights[a][0].address, "Waiting", "Waiting to connect..."])
                     else: # the light does not have a custom name, so just use the model # of the light
                         if availableLights[a][1].is_connected:
-                            self.setTheTable([availableLights[a][0].name + "\n  [ʀssɪ: " + str(availableLights[a][0].rssi) + " dBm]", availableLights[a][0].address, "LINKED", "Waiting to send..."])
+                            self.setTheTable([availableLights[a][0].name + "\n  [ʀssɪ: " + _rssi_str + " dBm]", availableLights[a][0].address, "LINKED", "Waiting to send..."])
                         else:
-                            self.setTheTable([availableLights[a][0].name + "\n  [ʀssɪ: " + str(availableLights[a][0].rssi) + " dBm]", availableLights[a][0].address, "Waiting", "Waiting to connect..."])
+                            self.setTheTable([availableLights[a][0].name + "\n  [ʀssɪ: " + _rssi_str + " dBm]", availableLights[a][0].address, "Waiting", "Waiting to connect..."])
 
             # Update vertical header labels to show effective IDs (preferred ID if set, else row number)
             headerLabels = []
@@ -3140,7 +3145,11 @@ try: # try to load the GUI
                 stopAnimation()
 
             # WAIT UNTIL THE BACKGROUND THREAD SETS THE threadAction FLAG TO finished SO WE CAN UNLINK THE LIGHTS
+            _quit_deadline = time.time() + 10  # give the thread 10 seconds max
             while threadAction != "finished": # wait until the background thread has a chance to terminate
+                if time.time() > _quit_deadline:
+                    printDebugString("Background thread did not finish in time — forcing exit")
+                    break
                 printDebugString("Waiting for the background thread to terminate...")
                 threadAction = "quit" # make sure to tell the thread to quit again (if it missed it the first time)
                 time.sleep(2)
@@ -3805,6 +3814,29 @@ def returnMACname():
     else:
         return "MAC Address:"
 
+def _get_rssi(device, adv_data=None):
+    """Safely extract RSSI from a BLEDevice or AdvertisementData.
+    Newer Bleak (0.21+) removed BLEDevice.rssi; it's on AdvertisementData instead."""
+    if adv_data is not None:
+        try:
+            return adv_data.rssi
+        except (AttributeError, TypeError):
+            pass
+    try:
+        return device.rssi
+    except (AttributeError, TypeError):
+        return "?"
+
+def _get_light_rssi(light_entry):
+    """Get the RSSI display string for an availableLights entry.
+    Uses stored RSSI at index [9] if available, falls back to device object."""
+    if len(light_entry) > 9 and light_entry[9] is not None:
+        return str(light_entry[9])
+    try:
+        return str(light_entry[0].rssi)
+    except (AttributeError, TypeError):
+        return "?"
+
 # TEST TO MAKE SURE THE VALUE GIVEN TO THE FUNCTION IS VALID OR IN BOUNDS
 def testValid(theParam, theValue, defaultValue, startBounds, endBounds, returnDefault = False):
     if theParam == "temp":
@@ -3974,43 +4006,54 @@ async def findDevices():
     printDebugString("Searching for new lights")
 
     currentScan = [] # add all the current scan's lights detected to a standby array (to check against the main one)
-    devices = await BleakScanner.discover() # scan all available Bluetooth devices nearby
 
-    for d in devices: # go through all of the devices Bleak just found
+    # Use return_adv=True to get AdvertisementData (which carries RSSI in newer Bleak)
+    try:
+        scan_results = await BleakScanner.discover(return_adv=True)  # returns dict[str, tuple[BLEDevice, AdvertisementData]]
+    except TypeError:
+        # Very old Bleak that doesn't support return_adv — fall back
+        scan_results_list = await BleakScanner.discover()
+        scan_results = {d.address: (d, None) for d in scan_results_list}
+
+    for addr, (d, adv) in scan_results.items(): # go through all of the devices Bleak just found
         if d.address in whiteListedMACs: # if the MAC address is in the list of whitelisted addresses, add this device
             printDebugString("Matching whitelisted address found - " + returnMACname() + " " + d.address + ", adding to the list")
-            currentScan.append(d)
+            currentScan.append((d, adv))
         else: # if this device is not whitelisted, check to see if it's valid (contains "NEEWER" in the name)
             if d.name != None and "NEEWER" in d.name: # if Bleak returned a proper string, and the string has "NEEWER" in the name
-                currentScan.append(d) # add this light to this session's available lights            
+                currentScan.append((d, adv)) # add this light to this session's available lights            
 
     for a in range(len(currentScan)): # scan the newly found NEEWER devices
+        device, adv_data = currentScan[a]
+        rssi = _get_rssi(device, adv_data)
         newLight = True # initially mark this light as a "new light"
 
         # check the "new light" against the global list
         for b in range(len(availableLights)):
-            if currentScan[a].address == availableLights[b][0].address: # if the new light's MAC address matches one already in the global list
-                printDebugString("Light found! [" + currentScan[a].name + "] " + returnMACname() + " " + currentScan[a].address + " but it's already in the list.  It may have disconnected, so relinking might be necessary.")
+            if device.address == availableLights[b][0].address: # if the new light's MAC address matches one already in the global list
+                printDebugString("Light found! [" + device.name + "] " + returnMACname() + " " + device.address + " but it's already in the list.  It may have disconnected, so relinking might be necessary.")
                 newLight = False # then don't add another instance of it
 
                 # if we found the light *again*, it's most likely the light disconnected, so we need to link it again
-                try:
-                    availableLights[b][0].rssi = currentScan[a].rssi # update the RSSI information
-                except (AttributeError, TypeError):
-                    availableLights[b][0] = currentScan[a]  # newer bleak: rssi is read-only, replace device object
+                availableLights[b][0] = device  # replace with fresh device object
+                # Update stored RSSI (index 9), extending list if needed
+                if len(availableLights[b]) > 9:
+                    availableLights[b][9] = rssi
+                else:
+                    availableLights[b].append(rssi)
                 availableLights[b][1] = "" # clear the Bleak connection (as it's changed) to force the light to need re-linking
 
                 break # stop checking if we've found a negative result
 
         if newLight == True: # if this light was not found in the global list, then we need to add it
-            printDebugString("Found new light! [" + currentScan[a].name + "] " + returnMACname() + " " + currentScan[a].address + " RSSI: " + str(currentScan[a].rssi) + " dBm")
-            customPrefs = getCustomLightPrefs(currentScan[a].address, currentScan[a].name)
+            printDebugString("Found new light! [" + device.name + "] " + returnMACname() + " " + device.address + " RSSI: " + str(rssi) + " dBm")
+            customPrefs = getCustomLightPrefs(device.address, device.name)
             prefID = customPrefs[4] if len(customPrefs) > 4 else 0
 
             if customPrefs[3] is not None and isinstance(customPrefs[3], list): # we have previously stored parameters
-                availableLights.append([currentScan[a], "", customPrefs[0], customPrefs[3], customPrefs[1], customPrefs[2], True, ["---", "---"], prefID])
+                availableLights.append([device, "", customPrefs[0], customPrefs[3], customPrefs[1], customPrefs[2], True, ["---", "---"], prefID, rssi])
             else: # no stored parameters — use defaults
-                availableLights.append([currentScan[a], "", customPrefs[0], [120, 135, 2, 20, 56, 157], customPrefs[1], customPrefs[2], True, ["---", "---"], prefID])
+                availableLights.append([device, "", customPrefs[0], [120, 135, 2, 20, 56, 157], customPrefs[1], customPrefs[2], True, ["---", "---"], prefID, rssi])
 
     if threadAction != "quit":
         return "" # once the device scan is over, set the threadAction to nothing
@@ -6243,7 +6286,7 @@ class NLPythonServer(BaseHTTPRequestHandler):
                                 self.wfile.write(bytes("     <TD STYLE='background-color:rgb(240,248,255)'><button onclick='editLight(" + str(a) + ", \"" + availableLights[a][0].name + "\", \"" + availableLights[a][2] + "\")'>Edit</button>&nbsp;&nbsp;" + availableLights[a][2] + "</TD>\n", "utf-8")) # light custom name
                                 self.wfile.write(bytes("     <TD STYLE='background-color:rgb(240,248,255)'>" + availableLights[a][0].name + "</TD>\n", "utf-8")) # light type
                                 self.wfile.write(bytes("     <TD STYLE='background-color:rgb(240,248,255)'>" + availableLights[a][0].address + "</TD>\n", "utf-8")) # light MAC address
-                                self.wfile.write(bytes("     <TD STYLE='background-color:rgb(240,248,255)'>" + str(availableLights[a][0].rssi) + " dbM</TD>\n", "utf-8")) # light RSSI (signal quality)
+                                self.wfile.write(bytes("     <TD STYLE='background-color:rgb(240,248,255)'>" + _get_light_rssi(availableLights[a]) + " dBm</TD>\n", "utf-8")) # light RSSI (signal quality)
 
                                 try:
                                     if availableLights[a][1].is_connected:
@@ -6586,7 +6629,7 @@ def loadPrefsFile(globalPrefsFile = ""):
     prefsParser.add_argument("--rememberPresetsOnExit", default=1)
     prefsParser.add_argument("--livePreview", default=1)
     prefsParser.add_argument("--autoReconnectOnDisconnect", default=1)
-    prefsParser.add_argument("--hideConsoleOnLaunch", default=-1)
+    prefsParser.add_argument("--hideConsoleOnLaunch", default=0)
     prefsParser.add_argument("--minimizeToTrayOnClose", default=1)
     prefsParser.add_argument("--httpAutoStart", default=0)
     prefsParser.add_argument("--cctFallbackMode", default="convert")
@@ -6637,11 +6680,7 @@ def loadPrefsFile(globalPrefsFile = ""):
     rememberPresetsOnExit = bool(int(mainPrefs.rememberPresetsOnExit)) # whether or not to remember the custom presets when quitting out
     livePreview = bool(int(mainPrefs.livePreview)) # whether sliders send in real-time
     autoReconnectOnDisconnect = bool(int(mainPrefs.autoReconnectOnDisconnect)) # whether or not to auto-reconnect after disconnection
-    _hcol = int(mainPrefs.hideConsoleOnLaunch)
-    if _hcol == -1:
-        hideConsoleOnLaunch = getattr(sys, 'frozen', False)  # exe default: hide; source default: show
-    else:
-        hideConsoleOnLaunch = bool(_hcol)
+    hideConsoleOnLaunch = bool(int(mainPrefs.hideConsoleOnLaunch)) # whether to auto-hide the console window on GUI startup
     minimizeToTrayOnClose = bool(int(mainPrefs.minimizeToTrayOnClose))
     httpAutoStart = bool(int(mainPrefs.httpAutoStart))
     cctFallbackMode = mainPrefs.cctFallbackMode if mainPrefs.cctFallbackMode in ("convert", "ignore") else "convert"
@@ -6789,7 +6828,7 @@ if __name__ == '__main__':
                     print(formatStringForConsole(lightName, nameCharsAllowed) + " " + \
                           formatStringForConsole(availableLights[a][0].address, addressCharsAllowed))
 
-                    print(formatStringForConsole(" > RSSI: " + str(availableLights[a][0].rssi) + "dBm", nameCharsAllowed))
+                    print(formatStringForConsole(" > RSSI: " + _get_light_rssi(availableLights[a]) + "dBm", nameCharsAllowed))
             else:
                 print("We did not find any Neewer lights on the last search.")
 
@@ -6890,7 +6929,7 @@ if __name__ == '__main__':
                 print("[TRACE] animRefreshList() complete")
 
                 # START THE BACKGROUND THREAD
-                workerThread = threading.Thread(target=workerThread, args=(asyncioEventLoop,), name="workerThread")
+                workerThread = threading.Thread(target=workerThread, args=(asyncioEventLoop,), name="workerThread", daemon=True)
                 workerThread.start()
                 print("[TRACE] workerThread started, entering event loop...")
 
