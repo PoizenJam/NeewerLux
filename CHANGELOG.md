@@ -2,100 +2,142 @@
 
 All changes relative to upstream [NeewerLite-Python v0.12d](https://github.com/taburineagle/NeewerLite-Python).
 
+## v1.0.0 — 2026-03-20
+
+First public release. Complete rewrite of UI, preset system, animation engine, threading model, and WebUI.
+
+### Preset Editor (New)
+- **Visual Preset Editor** — table-based dialog matching the animation editor's layout. Entry table with color-coded mode cells, toolbar (Add/Duplicate/Delete/Up/Down/Copy/Paste), and a shared editor panel with GradientSlider controls.
+- **Per-light entries** — presets can target individual lights or "All Lights". Each entry has independent mode (CCT/HSI/Scene) and parameter settings.
+- **Target guardrails** — "All Lights" auto-disabled when multiple entries exist. Duplicate target selection prevented across entries.
+- **Copy/paste** — copies mode + parameter values (not target), enabling quick replication of settings across light entries.
+- **Duplicate Preset** — right-click context menu option, deep-copies preset data and name with "(copy)" suffix.
+- Ships with 8 default presets: Warm Studio, Daylight, Cool White, Candlelight, Red Alert, Blue Mood, Purple Haze, Green Screen.
+
+### Animation System — 101 Presets
+- **79 new animation presets** added (101 total, up from 22 in PJ5), organized by category:
+  - Emergency: Police Flash, Ambulance, Fire Truck, Hazard
+  - Rock Performance: Guitar Solo, Drum Solo, Metal Mosh, Encore, Power Ballad, Spotlight, Rock Anthem, Concert Build
+  - Holidays: Christmas, Halloween, Valentine's, Easter, Hanukkah, New Year's Eve, St. Patrick's, Fourth of July
+  - Practical/Studio: Interview, Warm Studio, Focus, Reading Light, Product Photo, Film Noir, Key Fill Rim, Dawn Simulator, Magic Hour, Golden Hour
+  - Multi-Light Utility: Color Chase, Ping Pong, Ripple, Alternating Flash, Gradient Sweep, Warm Cascade, Identify Lights
+  - Ambient/Smooth: Sunset Beach, Deep Sea, Cyberpunk, Synthwave, Romance, Aurora Multi, Matrix, Underwater, and many more
+- **Identify Lights** — CCT-only utility animation that blinks each light N times matching its ID (1-4) for easy identification.
+- Animations grouped in UI by category with bold non-selectable section headers.
+
+### Animation Editor Enhancements
+- **Light filter combo** — "Show light:" dropdown above the keyframe table. Switches which light's parameters are displayed across all table rows for multi-light animations.
+- **GradientSlider controls** — replaced spinboxes with visual gradient sliders (hue rainbow, saturation white→red, brightness black→white, CCT warm→cool) that dynamically switch gradients, suffixes, and endpoint labels based on mode.
+- **Copy/paste between keyframes** — Copy button grabs current light's params from selected frame, Paste applies to another frame's current light.
+- **Scene dropdown** — named scene selector (Police, Ambulance, Fire Truck, etc.) replaces raw number input in ANM/Scene mode.
+- **Dynamic suffix fix** — GradientSlider `setSuffix()` method ensures value labels show correct units (°, %, 00K) when switching between modes.
+
+### GradientSlider Widget (New)
+- **Reusable widget** in `neewerlux_ui.py` — gradient bar + slider + value label + min/max endpoint labels, all in a grid layout so the gradient and slider share exact column width.
+- Used consistently across the main GUI CCT/HSI tabs, Preset Editor, and Animation Editor.
+- Supports `setSuffix()`, `setGradientStops()`, `setMinMaxLabels()`, `setRange()`, `setValue()`.
+
+### SpinBoxWithButtons Widget (New)
+- **DPI-safe spinbox** — `QSpinBox(NoButtons)` with external `QPushButton("+")` / `QPushButton("-")` placed outside the spinbox frame, eliminating the overlap/click-through issue at 150%+ scaling that affected Qt's built-in PlusMinus and UpDownArrows styles.
+- `SizePolicy.Expanding` vertically so buttons match spinbox height.
+- Used for animation tab controls: Loops, Rate, Brightness.
+
+### Global CCT Range
+- **User-editable CCT bounds** in Global Preferences (2700K–8500K, default 3200K–5600K).
+- Flows to CCT tab slider, Preset Editor, and Animation Editor.
+- Per-light CCT range overrides in Light Preferences take precedence.
+- Full prefs pipeline: global var → UI spinbox → save/load → prefsParser.
+
+### CCT Clamping
+- **Software-side CCT clamping** on all BLE write paths (`writeToLight`, `parallelWriteToLights`).
+- `clampCCTForLight()` checks temp against the light's effective range (per-light override or global default).
+- Honors the existing "Incompatible command handling" setting: Convert mode clamps to nearest boundary, Ignore mode skips the light.
+- `hsiToCCTByteVal()` now maps hue to the global CCT range instead of hardcoded 32–56.
+
+### Thread Safety
+- **`_updateResultSignal`** — dedicated `QtSignal(str, str, str, str)` for update checker results, replacing the unreliable `QTimer.singleShot` approach from a background thread. Button always re-enables regardless of success/failure/404.
+- **`_tableUpdateSignal`** / **`_logSignal`** — all 16+ background-thread `setTheTable` calls and log writes use Qt signals.
+
+### Update Checker
+- **GUI** — "Check for Updates" button on the Info tab. Hits GitHub Releases API in a background thread, shows green/blue/orange banner with download link.
+- **WebUI** — "Check for Updates" button in the collapsible Info card, same GitHub API via `fetch()`.
+- Version constant `NEEWERLUX_VERSION` defined once, referenced everywhere.
+
+### UI Polish
+- **Select All button** — light table corner widget replaced with a visible styled "☐ All" button with hover effect and tooltip.
+- **Combo box dropdown arrows** — `QComboBox::down-arrow` CSS triangle added to both dark and light themes globally, fixing blank dropdown indicators.
+- **"Bri:" → "Brightness:"** — full label on animation tab.
+- **Info tab** — `QTextBrowser` with `setOpenExternalLinks(True)` for clickable links. Added Releases link.
+- **Log tab** — Consolas 9pt, clear/save buttons, buffered file writes (flush every 10s or 50 lines), auto-scroll only when at bottom, background thread log throttled to ~30s intervals.
+
+### Build & Distribution
+- **PyInstaller spec** (`NeewerLux.spec`) — `--onedir` build with `--collect-all bleak` for WinRT DLLs, `.ico` icon, excludes unused PySide6 modules.
+- **GitHub Actions CI** (`.github/workflows/release.yml`) — triggered on `v*` tags, builds exe on `windows-latest`, packages with `light_prefs/`, creates GitHub Release with download.
+- **Console visibility** — exe built with `console=True`, but `hideConsoleOnLaunch` defaults to `True` for frozen exe builds and `False` for source. Toggle in Global Preferences.
+- `.bat` launchers removed — exe replaces them entirely.
+- `requirements.txt` — `PySide6>=6.5.0`, `bleak>=0.21.0`.
+- `.gitignore` — ignores runtime files, keeps shipped defaults tracked.
+
+### Naming & Compatibility
+- Full rename NeewerLite → NeewerLux throughout codebase.
+- `pyside_exec()` compatibility wrapper for PySide2/6 `exec()` API difference.
+- `shiboken` bare import crash fix, `setWeight` crash fix, stdout/stderr redirect for pythonw.exe.
+- Broadened exception handling throughout.
+
+---
+
 ## v0.12d-PJ5 — 2026-03-04
 
 ### UI Overhaul
-- **Dark/Light theme toggle** — full QSS theme system with PoizenJam brand colors (#9100ff purple + #00ff91 green). Stream Guardian-inspired aesthetic with proper styling for all widgets including tables, tabs, sliders, buttons, scrollbars, and tooltips. Toggle via moon/sun button in the toolbar.
-- **System tray integration** — closing the window minimizes to system tray instead of quitting. Double-click tray icon to restore. Tray context menu provides Show/Hide, Toggle HTTP Server, Show/Hide Console, and Quit.
-- **Console window management** — hide/show the Windows console window (cmd.exe) from the tray menu, eliminating the need for AutoHotkey workarounds.
-- **Scene button highlighting** — replaced inline `setStyleSheet` calls with QSS property-based `activeScene` styling that works correctly with both dark and light themes.
+- **Dark/Light theme toggle** — full QSS theme system with PoizenJam brand colors. Toggle via moon/sun button in the toolbar.
+- **System tray integration** — closing the window minimizes to system tray. Double-click to restore. Tray context menu: Show/Hide, Toggle HTTP Server, Show/Hide Console, Quit.
+- **Console window management** — hide/show the Windows console window from the tray menu.
+- **Scene button highlighting** — QSS property-based `activeScene` styling for dark/light theme compatibility.
 
 ### HTTP Server
-- **GUI HTTP toggle** — start/stop the HTTP server directly from the toolbar button without restarting the program. Runs as a daemon thread. Button shows live ON/OFF state with green/grey indicator styling.
-- **Modern web dashboard** — navigating to `http://localhost:8080/` now serves a full PoizenJam-themed control panel with live light table, CCT/HSI/Scene controls with sliders, animation browser with play/stop, command log, and collapsible API reference. All controls use the existing HTTP API endpoints.
-- **JSON API endpoint** — new `list_json` endpoint returns structured JSON with light status, animation list, and playback state for the web dashboard (with HTML fallback for legacy clients).
+- **GUI HTTP toggle** — start/stop HTTP server from toolbar without restarting.
+- **Modern web dashboard** — full themed control panel at `http://localhost:8080/` with light table, sliders, animation browser, command log, and API reference.
+- **JSON API endpoint** — `list_json` returns structured JSON with light status, animation list, and playback state.
 
 ### Animation Editor
-- **Visual keyframe editor** — the Edit button now opens a full visual editor (pj_anim_editor.py) with a color-coded keyframe table, per-frame mode/parameter controls with live color preview, add/duplicate/delete/reorder frame buttons, and a synced JSON tab for power users. Falls back to the original JSON-only editor if the module is missing.
-
-### Launchers
-- `NeewerLux.bat` — launches the GUI via `pythonw` (no console window) with `python` fallback
-- `NeewerLux-HTTP.bat` — launches HTTP-only mode on port 8080
+- **Visual keyframe editor** — color-coded keyframe table, per-frame controls with live color preview, add/duplicate/delete/reorder, synced JSON tab.
 
 ### New Files
-- `pj_theme.py` — dark/light QSS theme definitions
-- `pj_webui.py` — modern web dashboard HTML/JS
-- `pj_anim_editor.py` — visual keyframe editor dialog
+- `neewerlux_theme.py` — dark/light QSS theme definitions
+- `neewerlux_webui.py` — modern web dashboard HTML/JS
+- `neewerlux_anim_editor.py` — visual keyframe editor dialog
 
 ## v0.12d-PJ4 — 2026-03-04
 
 ### Light Aliases
-- **Preferred ID in Light Preferences** — the existing Light Preferences tab now includes a "Preferred ID" spinbox (0-99, 0=auto). Combined with the existing custom name field, this provides persistent light aliasing through the same prefs sidecar files that already store custom names, CCT ranges, and last-used parameters. No separate configuration file needed.
-- **GUI reorder by preferred ID** — lights with preferred IDs are automatically sorted to the top of the table in ID order. The vertical row headers show each light's effective ID (preferred ID if set, else row number), so the numbers in the GUI match the IDs used in animations and HTTP commands.
-- Aliases are rebuilt from prefs files on startup and refreshed immediately when preferences are saved or a custom name is set via HTTP.
-- `returnLightIndexesFromMacAddress()` rewritten to resolve alias names (case-insensitive), preferred IDs, discovery-order numeric IDs, and raw MAC addresses. Works everywhere: animation keyframes, HTTP batch commands, all existing command paths.
+- **Preferred ID in Light Preferences** — persistent light aliasing via custom name + preferred ID (0-99). GUI reorders by preferred ID. Aliases work in animations, HTTP commands, and all command paths.
 
 ### Animation Performance
-- **Parallel BLE writes** — animation frames now send to all lights simultaneously via `asyncio.gather()`. With 4 lights, per-frame BLE time drops from ~200ms to ~50ms. Toggle-able via "Parallel" checkbox or HTTP `"parallel"` param for legacy adapter compatibility.
-- **Status column restored** — the `psend` (parallel send) worker handler now calls `updateStatus()` + `setTheTable()` after each write, so the main light table shows live animation values again. This was an oversight in PJ3's parallel write implementation.
-
-### GUI Fixes
-- **Animations tab layout reworked** — fixed overlapping text between Loop/Parallel checkboxes, gave Export/Import JSON buttons adequate width (106px), repositioned all controls with proper spacing.
-- **Speed tooltip added** — explains that the multiplier affects both hold and fade durations.
-- **Rate tooltip updated** — now mentions that with Parallel enabled, throughput is ~15 updates/s regardless of light count.
-- **Consistent label convention** — Speed:, Rate:, Bri: all use colons.
+- **Parallel BLE writes** — `asyncio.gather()` for simultaneous multi-light commands.
+- **Status column restored** — live animation values displayed in main light table.
 
 ### New Animation Presets (6 ambient)
-- **Campfire** — multi-light staggered warm flicker with independent per-light timing.
-- **Candlelight** — gentle warm candle flicker with subtle hue and brightness movement.
-- **Ocean Waves** — slow blue-green-teal undulation simulating ocean light reflections.
-- **Thunderstorm** — dark moody blue ambient with random-feeling bright white lightning flashes.
-- **Northern Lights** — slow-moving greens and purples across 4 independently addressed lights.
-- **Lava Lamp** — deep saturated colors slowly morphing through reds, magentas, and purples.
-
-Total preset count: 22 (up from 16 in PJ3).
+- Campfire, Candlelight, Ocean Waves, Thunderstorm, Northern Lights, Lava Lamp (22 total).
 
 ## v0.12d-PJ3 — 2026-03-03
 
 ### Animation Performance
-- **Parallel BLE writes** — animation frames now send commands to all lights simultaneously via `asyncio.gather()` instead of sequentially. With 4 lights, per-frame BLE time drops from ~200ms to ~50ms. Toggle-able via "Parallel" checkbox or HTTP `"parallel"` param for legacy adapter compatibility.
-- **Removed double-blocking in `animationSendFrame`** — the function previously waited for the worker to be free, signaled it, then waited *again* for completion. The second wait was unnecessary (the next call's first wait handles sequencing) and was doubling effective per-frame latency.
-- **Throttled GUI status updates** — `animStatusLabel.setText()` was being called from the animation thread on every keyframe. Cross-thread Qt widget calls can block on the GUI event loop, introducing stutters. Now throttled to max once per second.
-- **10ms poll granularity** — worker-busy polling reduced from 50ms to 10ms sleep intervals, cutting average wait from ~25ms to ~5ms.
-- **Frame drop logging** — dropped frames are now logged (`"Animation frame dropped: worker busy"`) instead of silently skipped.
-
-### Animation Features
-- **Brightness scaling** — new "Bri:" spinbox on the Animations tab (5-100%) scales all brightness values at playback time without modifying the animation JSON. Available via GUI, HTTP GET (`|brightness` as 4th pipe param), and HTTP POST (`"brightness"` or `"bri"` key, 0-100).
-- **9 new animation presets** — Concert Sweep, Bass Drop, Neon Nights, Stage Wash, Fire Flicker, Sunset Fade, DJ Pulse, Blackout Flash, Retrowave.
-- **Fixed smooth presets** — Rainbow Gradient, Color Cycle, Color Wash, Breathe, and Rainbow Chase all had `hold_ms` values (200-2000ms) creating unintentional pauses between transitions. All smooth presets now use `hold_ms: 0` for continuous motion.
-
-### Bug Fixes
-- **Fixed HTTP GET animate syntax error** — a misindented `briScale` try/except block would have crashed any GET animate request.
-- **Bleak deprecation resolved properly** — removed global `FutureWarning` suppression; the actual deprecated `BLEDevice.rssi` call was already replaced with `AdvertisementData.rssi` via `return_adv=True` in the scanner. The `warnings` import is retained only for the scoped suppression in the old-Bleak fallback path.
+- Parallel BLE writes, removed double-blocking, throttled GUI updates, 10ms poll granularity, frame drop logging.
+- **Brightness scaling** — new Bri: spinbox (5-100%) scales playback brightness.
+- **9 new presets** — Concert Sweep, Bass Drop, Neon Nights, Stage Wash, Fire Flicker, Sunset Fade, DJ Pulse, Blackout Flash, Retrowave.
+- Fixed smooth presets using `hold_ms: 0` for continuous motion.
+- Fixed HTTP GET animate syntax error, resolved bleak deprecation.
 
 ## v0.12d-PJ2 — 2026-03-02
 
 ### Animation Engine
-- **Keyframe animation system** — daemon thread running at configurable rate, iterating JSON keyframes with hold/fade timing, sending BLE commands via the worker thread's `threadAction` mechanism.
-- **HSI shortest-path interpolation** — hue fades take the short way around the 360° wheel.
-- **Loop wraparound fading** — added `prevFrameIndex` tracking so looping from the last keyframe back to frame 0 interpolates smoothly instead of snapping. Auto-borrows the last keyframe's `fade_ms` when frame 0 has `fade_ms: 0`.
-- **Worker thread wake optimization** — replaced `time.sleep(0.25)` polling with `workerWakeEvent.wait(timeout=0.25)` so the animation thread can wake the worker immediately after setting `threadAction`.
-- **Animation auto-stop** — selecting a preset, moving a slider, or sending a non-animation HTTP command stops any running animation and resets GUI button states.
-- **Rate control** — renamed from "FPS" to "Rate" with tooltip explaining BLE throughput constraints by light count.
-- **7 initial presets** — Police Flash, Strobe, Color Cycle, Rainbow Gradient, Rainbow Chase, Color Wash, Breathe.
-- **6 template generators** — GUI dialogs for creating new animations from parameterized templates.
-- **JSON editor** — inline editor tab for direct animation authoring.
-- **HTTP GET/POST animation API** — remote play/stop/list control with speed, rate, and loop parameters.
-
-### Bug Fixes
-- **Worker thread stutter** — `if animationRunning: continue` inside the status-check block was skipping `threadAction` processing, causing 2-3 second gaps. Fixed by wrapping status checks in `if not animationRunning:` instead.
+- Keyframe animation system with hold/fade timing, HSI shortest-path interpolation, loop wraparound fading, worker wake optimization, auto-stop, rate control.
+- 7 initial presets, 6 template generators, JSON editor, HTTP GET/POST API.
+- Fixed worker thread stutter from `animationRunning` skip bug.
 
 ## v0.12d-PJ1 — 2026-03-01
 
 ### Core Features
-- **Paginated presets** — arbitrary preset count with forward/back page navigation, replacing the fixed grid.
-- **User-settable preset names** — middle-click any preset button to rename it. Names persist in the prefs file.
-- **PySide6 migration** — full PySide2→PySide6 migration with transparent PySide2 fallback. `pyside_exec()` helper for API compatibility.
-- **Auto-reconnect on wake** — background worker thread monitors connections and re-links lights after sleep/wake.
-- **Batch HTTP commands** — send different parameters to different lights in a single HTTP request.
-- **Stale lock file cleanup** — orphaned `.lock` files removed on startup.
+- Paginated presets with forward/back navigation, user-settable names.
+- PySide6 migration with PySide2 fallback.
+- Auto-reconnect on wake, batch HTTP commands, stale lock cleanup.
