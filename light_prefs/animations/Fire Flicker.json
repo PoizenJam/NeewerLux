@@ -1,0 +1,103 @@
+{
+  "name": "Fire Flicker",
+  "description": "Warm flickering tones simulating firelight",
+  "loop": true,
+  "keyframes": [
+    {
+      "hold_ms": 0,
+      "fade_ms": 0,
+      "lights": {
+        "*": {
+          "mode": "HSI",
+          "hue": 20,
+          "sat": 100,
+          "bri": 90
+        }
+      }
+    },
+    {
+      "hold_ms": 0,
+      "fade_ms": 200,
+      "lights": {
+        "*": {
+          "mode": "HSI",
+          "hue": 10,
+          "sat": 100,
+          "bri": 50
+        }
+      }
+    },
+    {
+      "hold_ms": 0,
+      "fade_ms": 150,
+      "lights": {
+        "*": {
+          "mode": "HSI",
+          "hue": 30,
+          "sat": 100,
+          "bri": 100
+        }
+      }
+    },
+    {
+      "hold_ms": 0,
+      "fade_ms": 300,
+      "lights": {
+        "*": {
+          "mode": "HSI",
+          "hue": 5,
+          "sat": 100,
+          "bri": 40
+        }
+      }
+    },
+    {
+      "hold_ms": 0,
+      "fade_ms": 100,
+      "lights": {
+        "*": {
+          "mode": "HSI",
+          "hue": 25,
+          "sat": 100,
+          "bri": 95
+        }
+      }
+    },
+    {
+      "hold_ms": 0,
+      "fade_ms": 250,
+      "lights": {
+        "*": {
+          "mode": "HSI",
+          "hue": 15,
+          "sat": 100,
+          "bri": 60
+        }
+      }
+    },
+    {
+      "hold_ms": 0,
+      "fade_ms": 180,
+      "lights": {
+        "*": {
+          "mode": "HSI",
+          "hue": 35,
+          "sat": 95,
+          "bri": 85
+        }
+      }
+    },
+    {
+      "hold_ms": 0,
+      "fade_ms": 350,
+      "lights": {
+        "*": {
+          "mode": "HSI",
+          "hue": 8,
+          "sat": 100,
+          "bri": 45
+        }
+      }
+    }
+  ]
+}

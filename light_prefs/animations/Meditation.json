@@ -1,0 +1,1 @@
+{"name":"Meditation","description":"Very slow deep blue breathing for calm and focus","loop":true,"keyframes":[{"hold_ms":8000,"fade_ms":8000,"lights":{"*":{"mode":"HSI","hue":230,"sat":40,"bri":30}}},{"hold_ms":8000,"fade_ms":8000,"lights":{"*":{"mode":"HSI","hue":240,"sat":35,"bri":15}}}]}

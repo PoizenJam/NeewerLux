@@ -1,0 +1,1 @@
+{"name":"Lullaby","description":"Extremely slow warm dim fade for sleeping","loop":true,"keyframes":[{"hold_ms":15000,"fade_ms":15000,"lights":{"*":{"mode":"CCT","temp":32,"bri":10}}},{"hold_ms":15000,"fade_ms":15000,"lights":{"*":{"mode":"CCT","temp":32,"bri":5}}}]}

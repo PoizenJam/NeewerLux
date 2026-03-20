@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+
+Name=NeewerLux
+Comment=Control your Neewer light with your computer
+Categories=Utility;Amusement;
+
+Icon=com.github.poizenjam.NeewerLux
+Exec=NeewerLux.py
+Terminal=false

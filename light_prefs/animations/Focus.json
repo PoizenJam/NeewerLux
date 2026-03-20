@@ -1,0 +1,1 @@
+{"name":"Focus","description":"Cool bright daylight for concentration and productivity","loop":true,"keyframes":[{"hold_ms":15000,"fade_ms":10000,"lights":{"*":{"mode":"CCT","temp":60,"bri":95}}},{"hold_ms":15000,"fade_ms":10000,"lights":{"*":{"mode":"CCT","temp":58,"bri":90}}}]}

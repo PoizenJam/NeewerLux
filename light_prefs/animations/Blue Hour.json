@@ -1,0 +1,1 @@
+{"name":"Blue Hour","description":"Cool twilight tones for moody photography","loop":true,"keyframes":[{"hold_ms":3000,"fade_ms":4000,"lights":{"*":{"mode":"HSI","hue":225,"sat":40,"bri":50}}},{"hold_ms":3000,"fade_ms":4000,"lights":{"*":{"mode":"HSI","hue":235,"sat":35,"bri":45}}},{"hold_ms":3000,"fade_ms":4000,"lights":{"*":{"mode":"HSI","hue":215,"sat":45,"bri":55}}}]}

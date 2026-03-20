@@ -1,0 +1,1 @@
+{"name":"Warm Studio","description":"Steady warm white with gentle variation for video","loop":true,"keyframes":[{"hold_ms":5000,"fade_ms":5000,"lights":{"*":{"mode":"CCT","temp":42,"bri":90}}},{"hold_ms":5000,"fade_ms":5000,"lights":{"*":{"mode":"CCT","temp":45,"bri":85}}},{"hold_ms":5000,"fade_ms":5000,"lights":{"*":{"mode":"CCT","temp":40,"bri":92}}}]}

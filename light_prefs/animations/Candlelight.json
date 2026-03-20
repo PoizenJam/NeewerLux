@@ -1,0 +1,79 @@
+{
+  "name": "Candlelight",
+  "description": "Gentle warm candle flicker with subtle movement",
+  "loop": true,
+  "keyframes": [
+    {
+      "hold_ms": 0,
+      "fade_ms": 0,
+      "lights": {
+        "*": {
+          "mode": "HSI",
+          "hue": 30,
+          "sat": 80,
+          "bri": 60
+        }
+      }
+    },
+    {
+      "hold_ms": 0,
+      "fade_ms": 400,
+      "lights": {
+        "*": {
+          "mode": "HSI",
+          "hue": 28,
+          "sat": 85,
+          "bri": 55
+        }
+      }
+    },
+    {
+      "hold_ms": 0,
+      "fade_ms": 350,
+      "lights": {
+        "*": {
+          "mode": "HSI",
+          "hue": 32,
+          "sat": 78,
+          "bri": 65
+        }
+      }
+    },
+    {
+      "hold_ms": 0,
+      "fade_ms": 500,
+      "lights": {
+        "*": {
+          "mode": "HSI",
+          "hue": 26,
+          "sat": 82,
+          "bri": 50
+        }
+      }
+    },
+    {
+      "hold_ms": 0,
+      "fade_ms": 300,
+      "lights": {
+        "*": {
+          "mode": "HSI",
+          "hue": 34,
+          "sat": 75,
+          "bri": 62
+        }
+      }
+    },
+    {
+      "hold_ms": 0,
+      "fade_ms": 450,
+      "lights": {
+        "*": {
+          "mode": "HSI",
+          "hue": 29,
+          "sat": 80,
+          "bri": 58
+        }
+      }
+    }
+  ]
+}

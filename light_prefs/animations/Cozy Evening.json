@@ -1,0 +1,1 @@
+{"name":"Cozy Evening","description":"Warm candlelight-temperature gentle breathing","loop":true,"keyframes":[{"hold_ms":5000,"fade_ms":5000,"lights":{"*":{"mode":"CCT","temp":32,"bri":45}}},{"hold_ms":5000,"fade_ms":5000,"lights":{"*":{"mode":"CCT","temp":34,"bri":35}}},{"hold_ms":5000,"fade_ms":5000,"lights":{"*":{"mode":"CCT","temp":32,"bri":40}}}]}

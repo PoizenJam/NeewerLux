@@ -1,0 +1,17 @@
+numOfPresets=8
+customPreset0=-1|5|90|42
+customPreset1=-1|5|100|56
+customPreset2=-1|5|85|65
+customPreset3=-1|5|40|32
+customPreset4=-1|4|80|0|100
+customPreset5=-1|4|60|240|80
+customPreset6=-1|4|50|280|70
+customPreset7=-1|4|100|120|100
+presetName0=Warm Studio
+presetName1=Daylight
+presetName2=Cool White
+presetName3=Candlelight
+presetName4=Red Alert
+presetName5=Blue Mood
+presetName6=Purple Haze
+presetName7=Green Screen

@@ -1,0 +1,157 @@
+{
+  "name": "Northern Lights",
+  "description": "Slow-moving greens and purples like an aurora borealis",
+  "loop": true,
+  "keyframes": [
+    {
+      "hold_ms": 0,
+      "fade_ms": 0,
+      "lights": {
+        "1": {
+          "mode": "HSI",
+          "hue": 120,
+          "sat": 80,
+          "bri": 50
+        },
+        "2": {
+          "mode": "HSI",
+          "hue": 160,
+          "sat": 70,
+          "bri": 40
+        },
+        "3": {
+          "mode": "HSI",
+          "hue": 280,
+          "sat": 60,
+          "bri": 35
+        },
+        "4": {
+          "mode": "HSI",
+          "hue": 140,
+          "sat": 75,
+          "bri": 45
+        }
+      }
+    },
+    {
+      "hold_ms": 0,
+      "fade_ms": 3000,
+      "lights": {
+        "1": {
+          "mode": "HSI",
+          "hue": 160,
+          "sat": 70,
+          "bri": 40
+        },
+        "2": {
+          "mode": "HSI",
+          "hue": 280,
+          "sat": 60,
+          "bri": 55
+        },
+        "3": {
+          "mode": "HSI",
+          "hue": 140,
+          "sat": 75,
+          "bri": 45
+        },
+        "4": {
+          "mode": "HSI",
+          "hue": 120,
+          "sat": 80,
+          "bri": 30
+        }
+      }
+    },
+    {
+      "hold_ms": 0,
+      "fade_ms": 3500,
+      "lights": {
+        "1": {
+          "mode": "HSI",
+          "hue": 280,
+          "sat": 60,
+          "bri": 55
+        },
+        "2": {
+          "mode": "HSI",
+          "hue": 140,
+          "sat": 75,
+          "bri": 35
+        },
+        "3": {
+          "mode": "HSI",
+          "hue": 120,
+          "sat": 80,
+          "bri": 50
+        },
+        "4": {
+          "mode": "HSI",
+          "hue": 300,
+          "sat": 50,
+          "bri": 40
+        }
+      }
+    },
+    {
+      "hold_ms": 0,
+      "fade_ms": 3000,
+      "lights": {
+        "1": {
+          "mode": "HSI",
+          "hue": 140,
+          "sat": 75,
+          "bri": 35
+        },
+        "2": {
+          "mode": "HSI",
+          "hue": 120,
+          "sat": 80,
+          "bri": 50
+        },
+        "3": {
+          "mode": "HSI",
+          "hue": 300,
+          "sat": 50,
+          "bri": 40
+        },
+        "4": {
+          "mode": "HSI",
+          "hue": 160,
+          "sat": 70,
+          "bri": 55
+        }
+      }
+    },
+    {
+      "hold_ms": 0,
+      "fade_ms": 4000,
+      "lights": {
+        "1": {
+          "mode": "HSI",
+          "hue": 130,
+          "sat": 85,
+          "bri": 60
+        },
+        "2": {
+          "mode": "HSI",
+          "hue": 290,
+          "sat": 55,
+          "bri": 45
+        },
+        "3": {
+          "mode": "HSI",
+          "hue": 150,
+          "sat": 72,
+          "bri": 38
+        },
+        "4": {
+          "mode": "HSI",
+          "hue": 270,
+          "sat": 65,
+          "bri": 50
+        }
+      }
+    }
+  ]
+}

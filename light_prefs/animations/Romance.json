@@ -1,0 +1,11 @@
+{
+  "name": "Romance",
+  "description": "Warm amber and soft pink glow for intimate ambiance",
+  "loop": true,
+  "keyframes": [
+    {"hold_ms": 3000, "fade_ms": 4000, "lights": {"*": {"mode": "HSI", "hue": 15, "sat": 70, "bri": 45}}},
+    {"hold_ms": 3000, "fade_ms": 4000, "lights": {"*": {"mode": "HSI", "hue": 340, "sat": 50, "bri": 40}}},
+    {"hold_ms": 3000, "fade_ms": 4000, "lights": {"*": {"mode": "HSI", "hue": 25, "sat": 65, "bri": 50}}},
+    {"hold_ms": 3000, "fade_ms": 4000, "lights": {"*": {"mode": "HSI", "hue": 350, "sat": 55, "bri": 35}}}
+  ]
+}

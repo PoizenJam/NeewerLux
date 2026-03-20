@@ -1,0 +1,1 @@
+{"name":"Reading Light","description":"Gentle warm white reading lamp with very subtle variation","loop":true,"keyframes":[{"hold_ms":10000,"fade_ms":8000,"lights":{"*":{"mode":"CCT","temp":38,"bri":70}}},{"hold_ms":10000,"fade_ms":8000,"lights":{"*":{"mode":"CCT","temp":40,"bri":65}}}]}

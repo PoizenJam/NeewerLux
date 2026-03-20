@@ -1,0 +1,67 @@
+{
+  "name": "Color Wash",
+  "description": "Slow continuous transitions through warm and cool tones",
+  "loop": true,
+  "keyframes": [
+    {
+      "hold_ms": 0,
+      "fade_ms": 0,
+      "lights": {
+        "*": {
+          "mode": "HSI",
+          "hue": 0,
+          "sat": 80,
+          "bri": 80
+        }
+      }
+    },
+    {
+      "hold_ms": 0,
+      "fade_ms": 3000,
+      "lights": {
+        "*": {
+          "mode": "HSI",
+          "hue": 30,
+          "sat": 90,
+          "bri": 90
+        }
+      }
+    },
+    {
+      "hold_ms": 0,
+      "fade_ms": 3000,
+      "lights": {
+        "*": {
+          "mode": "HSI",
+          "hue": 210,
+          "sat": 70,
+          "bri": 85
+        }
+      }
+    },
+    {
+      "hold_ms": 0,
+      "fade_ms": 3000,
+      "lights": {
+        "*": {
+          "mode": "HSI",
+          "hue": 270,
+          "sat": 60,
+          "bri": 75
+        }
+      }
+    },
+    {
+      "hold_ms": 0,
+      "fade_ms": 3000,
+      "lights": {
+        "*": {
+          "mode": "HSI",
+          "hue": 330,
+          "sat": 85,
+          "bri": 85
+        }
+      }
+    }
+  ]
+}

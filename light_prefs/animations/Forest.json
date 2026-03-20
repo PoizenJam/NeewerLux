@@ -1,0 +1,12 @@
+{
+  "name": "Forest",
+  "description": "Dappled greens and warm earth tones like sunlight through a canopy",
+  "loop": true,
+  "keyframes": [
+    {"hold_ms": 2000, "fade_ms": 3000, "lights": {"*": {"mode": "HSI", "hue": 110, "sat": 60, "bri": 50}}},
+    {"hold_ms": 1500, "fade_ms": 2500, "lights": {"*": {"mode": "HSI", "hue": 90, "sat": 50, "bri": 65}}},
+    {"hold_ms": 1000, "fade_ms": 2000, "lights": {"*": {"mode": "HSI", "hue": 45, "sat": 55, "bri": 55}}},
+    {"hold_ms": 2000, "fade_ms": 3000, "lights": {"*": {"mode": "HSI", "hue": 130, "sat": 55, "bri": 40}}},
+    {"hold_ms": 1500, "fade_ms": 2500, "lights": {"*": {"mode": "HSI", "hue": 100, "sat": 65, "bri": 60}}}
+  ]
+}

@@ -1,0 +1,1 @@
+{"name":"Product Photo","description":"Bright neutral daylight with minimal variation","loop":true,"keyframes":[{"hold_ms":20000,"fade_ms":10000,"lights":{"*":{"mode":"CCT","temp":52,"bri":100}}},{"hold_ms":20000,"fade_ms":10000,"lights":{"*":{"mode":"CCT","temp":54,"bri":98}}}]}

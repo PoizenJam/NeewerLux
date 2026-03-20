@@ -1,0 +1,15 @@
+{
+  "name": "Haunted",
+  "description": "Creepy greens and purples with sudden flickers",
+  "loop": true,
+  "keyframes": [
+    {"hold_ms": 2000, "fade_ms": 2000, "lights": {"*": {"mode": "HSI", "hue": 120, "sat": 70, "bri": 15}}},
+    {"hold_ms": 100, "fade_ms": 50, "lights": {"*": {"mode": "HSI", "hue": 280, "sat": 80, "bri": 60}}},
+    {"hold_ms": 100, "fade_ms": 50, "lights": {"*": {"mode": "HSI", "hue": 280, "sat": 80, "bri": 5}}},
+    {"hold_ms": 3000, "fade_ms": 2000, "lights": {"*": {"mode": "HSI", "hue": 130, "sat": 65, "bri": 20}}},
+    {"hold_ms": 2000, "fade_ms": 3000, "lights": {"*": {"mode": "HSI", "hue": 270, "sat": 75, "bri": 25}}},
+    {"hold_ms": 50, "fade_ms": 30, "lights": {"*": {"mode": "HSI", "hue": 100, "sat": 90, "bri": 70}}},
+    {"hold_ms": 50, "fade_ms": 30, "lights": {"*": {"mode": "HSI", "hue": 100, "sat": 90, "bri": 8}}},
+    {"hold_ms": 2500, "fade_ms": 2000, "lights": {"*": {"mode": "HSI", "hue": 285, "sat": 60, "bri": 12}}}
+  ]
+}

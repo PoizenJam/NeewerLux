@@ -1,0 +1,127 @@
+{
+  "name": "Neon Nights",
+  "description": "Cyberpunk-style magenta and cyan with opposing light pairs",
+  "loop": true,
+  "keyframes": [
+    {
+      "hold_ms": 0,
+      "fade_ms": 0,
+      "lights": {
+        "1": {
+          "mode": "HSI",
+          "hue": 300,
+          "sat": 100,
+          "bri": 100
+        },
+        "2": {
+          "mode": "HSI",
+          "hue": 180,
+          "sat": 100,
+          "bri": 100
+        },
+        "3": {
+          "mode": "HSI",
+          "hue": 300,
+          "sat": 100,
+          "bri": 100
+        },
+        "4": {
+          "mode": "HSI",
+          "hue": 180,
+          "sat": 100,
+          "bri": 100
+        }
+      }
+    },
+    {
+      "hold_ms": 0,
+      "fade_ms": 1200,
+      "lights": {
+        "1": {
+          "mode": "HSI",
+          "hue": 180,
+          "sat": 100,
+          "bri": 100
+        },
+        "2": {
+          "mode": "HSI",
+          "hue": 300,
+          "sat": 100,
+          "bri": 100
+        },
+        "3": {
+          "mode": "HSI",
+          "hue": 180,
+          "sat": 100,
+          "bri": 100
+        },
+        "4": {
+          "mode": "HSI",
+          "hue": 300,
+          "sat": 100,
+          "bri": 100
+        }
+      }
+    },
+    {
+      "hold_ms": 0,
+      "fade_ms": 1200,
+      "lights": {
+        "1": {
+          "mode": "HSI",
+          "hue": 280,
+          "sat": 90,
+          "bri": 80
+        },
+        "2": {
+          "mode": "HSI",
+          "hue": 200,
+          "sat": 90,
+          "bri": 80
+        },
+        "3": {
+          "mode": "HSI",
+          "hue": 280,
+          "sat": 90,
+          "bri": 80
+        },
+        "4": {
+          "mode": "HSI",
+          "hue": 200,
+          "sat": 90,
+          "bri": 80
+        }
+      }
+    },
+    {
+      "hold_ms": 0,
+      "fade_ms": 1200,
+      "lights": {
+        "1": {
+          "mode": "HSI",
+          "hue": 200,
+          "sat": 90,
+          "bri": 80
+        },
+        "2": {
+          "mode": "HSI",
+          "hue": 280,
+          "sat": 90,
+          "bri": 80
+        },
+        "3": {
+          "mode": "HSI",
+          "hue": 200,
+          "sat": 90,
+          "bri": 80
+        },
+        "4": {
+          "mode": "HSI",
+          "hue": 280,
+          "sat": 90,
+          "bri": 80
+        }
+      }
+    }
+  ]
+}

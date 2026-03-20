@@ -1,0 +1,11 @@
+{
+  "name": "Golden Hour",
+  "description": "Warm golden photography light with gentle variation",
+  "loop": true,
+  "keyframes": [
+    {"hold_ms": 2000, "fade_ms": 3000, "lights": {"*": {"mode": "HSI", "hue": 35, "sat": 85, "bri": 90}}},
+    {"hold_ms": 2000, "fade_ms": 3000, "lights": {"*": {"mode": "HSI", "hue": 25, "sat": 90, "bri": 80}}},
+    {"hold_ms": 2000, "fade_ms": 3000, "lights": {"*": {"mode": "HSI", "hue": 40, "sat": 80, "bri": 95}}},
+    {"hold_ms": 2000, "fade_ms": 3000, "lights": {"*": {"mode": "HSI", "hue": 30, "sat": 88, "bri": 85}}}
+  ]
+}

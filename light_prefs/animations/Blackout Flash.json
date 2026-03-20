@@ -1,0 +1,79 @@
+{
+  "name": "Blackout Flash",
+  "description": "Dramatic blackout with sudden bright reveal",
+  "loop": true,
+  "keyframes": [
+    {
+      "hold_ms": 800,
+      "fade_ms": 0,
+      "lights": {
+        "*": {
+          "mode": "HSI",
+          "hue": 0,
+          "sat": 0,
+          "bri": 0
+        }
+      }
+    },
+    {
+      "hold_ms": 120,
+      "fade_ms": 0,
+      "lights": {
+        "*": {
+          "mode": "HSI",
+          "hue": 0,
+          "sat": 0,
+          "bri": 100
+        }
+      }
+    },
+    {
+      "hold_ms": 0,
+      "fade_ms": 600,
+      "lights": {
+        "*": {
+          "mode": "HSI",
+          "hue": 0,
+          "sat": 0,
+          "bri": 0
+        }
+      }
+    },
+    {
+      "hold_ms": 600,
+      "fade_ms": 0,
+      "lights": {
+        "*": {
+          "mode": "HSI",
+          "hue": 0,
+          "sat": 0,
+          "bri": 0
+        }
+      }
+    },
+    {
+      "hold_ms": 120,
+      "fade_ms": 0,
+      "lights": {
+        "*": {
+          "mode": "HSI",
+          "hue": 240,
+          "sat": 100,
+          "bri": 100
+        }
+      }
+    },
+    {
+      "hold_ms": 0,
+      "fade_ms": 600,
+      "lights": {
+        "*": {
+          "mode": "HSI",
+          "hue": 240,
+          "sat": 100,
+          "bri": 0
+        }
+      }
+    }
+  ]
+}
