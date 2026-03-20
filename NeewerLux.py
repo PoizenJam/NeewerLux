@@ -4666,8 +4666,19 @@ def workerThread(_loop):
                 if autoConnectToLights == True: # if we're set to automatically link to the lights on startup, then do it here
                     #for a in range(len(availableLights)):
                     if threadAction != "quit": # if we're not supposed to quit, then try to connect to the light(s)
-                        time.sleep(10) # let BLE adapter settle after discovery before first connect attempt
-                        _loop.run_until_complete(parallelAction("connect", [-1])) # connect to each available light in parallel
+                        if _isFrozenExe and len(availableLights) > 0:
+                            # In PyInstaller builds, the first BleakClient.connect() call almost
+                            # always fails (WinRT backend one-time initialization). Do a silent
+                            # warm-up attempt with no GUI updates so the user never sees the error.
+                            printDebugString("Frozen EXE detected — performing silent BLE warm-up connect...")
+                            _loop.run_until_complete(parallelAction("connect", [-1], False))  # updateGUI=False
+                            # Clear stale Bleak objects from failed warm-up so real connect creates fresh ones
+                            for _wIdx in range(len(availableLights)):
+                                if availableLights[_wIdx][1] != "" and not availableLights[_wIdx][1].is_connected:
+                                    availableLights[_wIdx][1] = ""
+                            await_time = 1  # brief pause before real attempt
+                            time.sleep(await_time)
+                        _loop.run_until_complete(parallelAction("connect", [-1])) # real connect with GUI updates
 
                 threadAction = ""
         elif threadAction == "connect":
