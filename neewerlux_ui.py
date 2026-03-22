@@ -928,7 +928,7 @@ class Ui_MainWindow(object):
 <tr><td><b>light=N&amp;mode=ANM&amp;scene=1&amp;bri=50</b></td><td>Set light to built-in scene</td></tr>
 <tr><td><b>turnoff / turnon</b></td><td>Power lights on or off</td></tr>
 <tr><td><b>use_preset=N</b></td><td>Recall preset N</td></tr>
-<tr><td><b>animate=Name|speed|rate|bri</b></td><td>Play animation (GET)</td></tr>
+<tr><td><b>animate=Name|speed|rate|bri|loop|maxLoops|revert</b></td><td>Play animation (GET). Only name is required; remaining fields are positional and optional: speed (1.0), rate (5), brightness% (80), loop (true/false), maxLoops (0=infinite), revert (true/false)</td></tr>
 <tr><td><b>list / list_json</b></td><td>List lights, presets, and animations</td></tr>
 </table>
 <p>POST to <code>/NeewerLux/batch</code> for multi-light JSON commands.

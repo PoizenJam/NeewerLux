@@ -5042,6 +5042,9 @@ def processHTMLCommands(paramsList, loop):
             speedMult = 1.0
             fps = 5
             briScale = 1.0
+            loopOverride = None
+            maxLoops = 0
+            revertOverride = None
             if "|" in animName:
                 parts = animName.split("|")
                 animName = parts[0]
@@ -5051,7 +5054,28 @@ def processHTMLCommands(paramsList, loop):
                 except (ValueError, IndexError): pass
                 try: briScale = int(parts[3]) / 100.0
                 except (ValueError, IndexError): pass
-            startAnimation(animName, loop, speedMult, fps=fps, briScale=briScale)
+                # Extended parameters: loop, maxLoops, revert
+                try:
+                    loopVal = parts[4].strip().lower()
+                    if loopVal in ("1", "true", "yes", "on"):
+                        loopOverride = True
+                    elif loopVal in ("0", "false", "no", "off"):
+                        loopOverride = False
+                except IndexError: pass
+                try: maxLoops = int(parts[5])
+                except (ValueError, IndexError): pass
+                try:
+                    revertVal = parts[6].strip().lower()
+                    if revertVal in ("1", "true", "yes", "on"):
+                        revertOverride = True
+                    elif revertVal in ("0", "false", "no", "off"):
+                        revertOverride = False
+                except IndexError: pass
+            # Apply revert override if specified
+            if revertOverride is not None:
+                global animRevertOnFinish
+                animRevertOnFinish = revertOverride
+            startAnimation(animName, loop, speedMult, loopOverride=loopOverride, fps=fps, briScale=briScale, maxLoops=maxLoops)
         else:
             printDebugString("HTTP: no animation name specified")
 

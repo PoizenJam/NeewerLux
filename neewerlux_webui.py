@@ -568,10 +568,12 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
             </div>
             <div class="api-section">
                 <h3>Animations</h3>
-                <div class="api-desc">Play by name (GET)</div>
-                <div class="api-code">GET /NeewerLux/doAction?animate=Concert%20Sweep</div>
+                <div class="api-desc">Play by name (GET) &mdash; <code>Name|speed|rate|bri|loop|maxLoops|revert</code></div>
+                <div class="api-code">GET /NeewerLux/doAction?animate=Concert%20Sweep|1.0|10|80</div>
+                <div class="api-desc">With loop control: play twice then revert</div>
+                <div class="api-code">GET /NeewerLux/doAction?animate=Halloween|1.0|10|50|true|2|true</div>
                 <div class="api-desc">Play/stop/list (POST JSON)</div>
-                <div class="api-code">POST /NeewerLux/animate {"action":"play","name":"Concert Sweep","loop":true}</div>
+                <div class="api-code">POST /NeewerLux/animate {"action":"play","name":"Concert Sweep","loop":true,"maxLoops":3,"revert":true}</div>
                 <div class="api-code">POST /NeewerLux/animate {"action":"stop"}</div>
             </div>
             <div class="api-section">
