@@ -5703,9 +5703,16 @@ def startAnimation(animName, loop, speedMultiplier=1.0, loopOverride=None, fps=5
     maxLoops: 0 = use animation's loop setting, N>0 = play N times then stop."""
     global animationStopFlag, savedAnimations, preAnimationStates
 
-    if animName not in savedAnimations:
+    # Case-insensitive name lookup — HTTP args get lowercased by the argument parser
+    resolvedName = None
+    for key in savedAnimations:
+        if key.lower() == animName.lower():
+            resolvedName = key
+            break
+    if resolvedName is None:
         printDebugString("Animation '" + animName + "' not found")
         return False
+    animName = resolvedName
 
     # Stop any running animation
     stopAnimation()
@@ -6454,7 +6461,15 @@ class NLPythonServer(BaseHTTPRequestHandler):
                 if "parallel" in body:
                     global animParallelWrites
                     animParallelWrites = bool(body.get("parallel", True))
-                if animName and animName in savedAnimations:
+                if animName:
+                    # Case-insensitive name resolution
+                    resolvedAnimName = None
+                    for key in savedAnimations:
+                        if key.lower() == animName.lower():
+                            resolvedAnimName = key
+                            break
+                if resolvedAnimName:
+                    animName = resolvedAnimName
                     maxLoops = int(body.get("maxLoops", body.get("max_loops", 0)))
                     # Handle revert flag from web UI
                     if "revert" in body:
@@ -6463,7 +6478,7 @@ class NLPythonServer(BaseHTTPRequestHandler):
                     startAnimation(animName, asyncioEventLoop, speed, loop, fps=int(fps), briScale=briScale, maxLoops=maxLoops)
                     resultData = {"success": True, "action": "play", "animation": animName}
                 else:
-                    resultData = {"success": False, "error": "Animation '" + animName + "' not found",
+                    resultData = {"success": False, "error": "Animation '" + str(animName) + "' not found",
                                   "available": list(savedAnimations.keys())}
             elif action == "stop":
                 stopAnimation()
