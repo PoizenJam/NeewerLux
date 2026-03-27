@@ -165,6 +165,15 @@ class singleKeySequenceEditCancel(QWidget):
         self.keySequence = QKeySequence(defaultValue)
         self.keyPressField = QKeySequenceEdit(self.keySequence)
         self.keyPressField.setMinimumWidth(150)
+        # Hide the internal clear/action button (renders as tiny empty square on some themes).
+        # We have our own external "X" reset button so the internal one is redundant.
+        try:
+            from PySide6.QtWidgets import QAbstractButton as _QAB
+        except ImportError:
+            from PySide2.QtWidgets import QAbstractButton as _QAB
+        for child in self.keyPressField.findChildren(_QAB):
+            child.setFixedSize(0, 0)
+            child.setVisible(False)
         self.keyPressField.keySequenceChanged.connect(self._onChanged)
         lay.addWidget(self.keyPressField)
         resetBtn = QPushButton("X")
@@ -740,9 +749,9 @@ class Ui_MainWindow(object):
         self.httpAutoStart_check = QCheckBox("Start HTTP server automatically on launch")
         httpPortRow = QHBoxLayout()
         httpPortLabel = QLabel("HTTP server port:")
-        self.httpPortSpin = QSpinBox()
-        self.httpPortSpin.setRange(1024, 65535); self.httpPortSpin.setValue(8080)
-        self.httpPortSpin.setToolTip("Port for the HTTP daemon (default 8080). Requires restart of HTTP server to take effect.")
+        self.httpPortField = QLineEdit("8080")
+        self.httpPortField.setFixedWidth(60)
+        self.httpPortField.setToolTip("Port for the HTTP daemon (default 8080). Requires restart of HTTP server to take effect.")
         cctFallbackRow = QHBoxLayout()
         cctFallbackLabel = QLabel("Incompatible command handling:")
         self.cctFallbackCombo = QComboBox()
@@ -854,7 +863,7 @@ class Ui_MainWindow(object):
         self.globalPrefsLay.addRow(self.hideConsoleOnLaunch_check)
         self.globalPrefsLay.addRow(self.minimizeToTrayOnClose_check)
         self.globalPrefsLay.addRow(self.httpAutoStart_check)
-        self.globalPrefsLay.addRow("HTTP server port:", self.httpPortSpin)
+        self.globalPrefsLay.addRow("HTTP server port:", self.httpPortField)
         self.globalPrefsLay.addRow(cctFallbackRow)
         self.globalPrefsLay.addRow(cctRangeRow)
         self.enableLogTab_check = QCheckBox("Enable Log tab (show debug output in GUI)")

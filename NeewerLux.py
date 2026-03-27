@@ -2204,7 +2204,7 @@ try: # try to load the GUI
                     self.hideConsoleOnLaunch_check.setVisible(False)
                 self.minimizeToTrayOnClose_check.setChecked(minimizeToTrayOnClose)
                 self.httpAutoStart_check.setChecked(httpAutoStart)
-                self.httpPortSpin.setValue(httpPort)
+                self.httpPortField.setText(str(httpPort))
                 self.cctFallbackCombo.setCurrentIndex(0 if cctFallbackMode == "convert" else 1)
                 self.enableLogTab_check.setChecked(enableLogTab)
                 self.logToFile_check.setChecked(logToFile)
@@ -2248,7 +2248,7 @@ try: # try to load the GUI
                 self.hideConsoleOnLaunch_check.setChecked(False)
                 self.minimizeToTrayOnClose_check.setChecked(True)
                 self.httpAutoStart_check.setChecked(False)
-                self.httpPortSpin.setValue(8080)
+                self.httpPortField.setText("8080")
                 self.cctFallbackCombo.setCurrentIndex(0)  # Convert
                 self.enableLogTab_check.setChecked(True)
                 self.logToFile_check.setChecked(False)
@@ -2358,11 +2358,19 @@ try: # try to load the GUI
             else:
                 httpAutoStart = False
 
-            if self.httpPortSpin.value() != 8080: # only save if non-default
-                httpPort = self.httpPortSpin.value()
-                finalPrefs.append("httpPort=" + str(httpPort))
-            else:
+            try:
+                _portVal = int(self.httpPortField.text().strip())
+                if 1024 <= _portVal <= 65535 and _portVal != 8080:
+                    httpPort = _portVal
+                    finalPrefs.append("httpPort=" + str(httpPort))
+                elif _portVal == 8080:
+                    httpPort = 8080
+                else:
+                    httpPort = 8080
+                    self.httpPortField.setText("8080")
+            except ValueError:
                 httpPort = 8080
+                self.httpPortField.setText("8080")
 
             cctFallbackMode = "convert" if self.cctFallbackCombo.currentIndex() == 0 else "ignore"
             if cctFallbackMode != "convert":  # only save non-default
