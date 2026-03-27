@@ -107,7 +107,8 @@ QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; color:
 QListWidget { background-color: #1e1e2e; border: 1px solid #3c3c50; color: #d4d4d8; alternate-background-color: #24243a; }
 QListWidget::item:selected { background-color: #3a4a6a; }
 QListWidget::item:hover { background-color: #2a2a44; }
-QKeySequenceEdit { background-color: #24243a; border: 1px solid #3c3c50; color: #d4d4d8; padding: 3px; }
+QKeySequenceEdit { background-color: #24243a; border: 1px solid #3c3c50; color: #d4d4d8; padding: 3px; min-height: 24px; }
+QKeySequenceEdit QToolButton { min-width: 20px; min-height: 20px; padding: 2px; }
 QProgressBar { border: 1px solid #3c3c50; border-radius: 3px; text-align: center; background-color: #1e1e2e; color: #d4d4d8; }
 QProgressBar::chunk { background-color: #5b8def; border-radius: 2px; }
 QGraphicsView { border: none; }
@@ -204,7 +205,8 @@ QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; color:
 QListWidget { background-color: #ffffff; border: 1px solid #c0c0d0; color: #2a2a3a; alternate-background-color: #f0f0f5; }
 QListWidget::item:selected { background-color: #d0ddf5; }
 QListWidget::item:hover { background-color: #e8ecf5; }
-QKeySequenceEdit { background-color: #ffffff; border: 1px solid #c0c0d0; color: #2a2a3a; padding: 3px; }
+QKeySequenceEdit { background-color: #ffffff; border: 1px solid #c0c0d0; color: #2a2a3a; padding: 3px; min-height: 24px; }
+QKeySequenceEdit QToolButton { min-width: 20px; min-height: 20px; padding: 2px; }
 QProgressBar { border: 1px solid #c0c0d0; border-radius: 3px; text-align: center; background-color: #f0f0f5; color: #2a2a3a; }
 QProgressBar::chunk { background-color: #4a7fd8; border-radius: 2px; }
 QGraphicsView { border: none; }

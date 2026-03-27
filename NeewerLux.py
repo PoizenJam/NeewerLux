@@ -280,6 +280,7 @@ livePreview = True # whether sliders send values in real-time or require clickin
 hideConsoleOnLaunch = False # whether to auto-hide the console window on GUI startup
 minimizeToTrayOnClose = True # whether closing the window minimizes to tray (True) or quits (False)
 httpAutoStart = False # whether to automatically start the HTTP server on launch
+httpPort = 8080 # the port for the HTTP server to listen on
 cctFallbackMode = "convert" # how to handle HSI/ANM commands sent to CCT-only lights: "ignore" or "convert"
 enableLogTab = True # whether to show and populate the Log tab
 logToFile = False # whether to also write log entries to a file
@@ -1695,30 +1696,30 @@ try: # try to load the GUI
             self.SC_Tab_PREFS.activated.connect(lambda: self.switchToTab(4))
 
             # DECREASE/INCREASE BRIGHTNESS REGARDLESS OF WHICH TAB WE'RE ON
-            self.SC_Dec_Bri_Small.activated.connect(lambda: self.changeSliderValue(0, -1))
-            self.SC_Inc_Bri_Small.activated.connect(lambda: self.changeSliderValue(0, 1))
-            self.SC_Dec_Bri_Large.activated.connect(lambda: self.changeSliderValue(0, -5))
-            self.SC_Inc_Bri_Large.activated.connect(lambda: self.changeSliderValue(0, 5))
+            self.SC_Dec_Bri_Small.activated.connect(lambda: self.adjustLightParameter(0, -1))
+            self.SC_Inc_Bri_Small.activated.connect(lambda: self.adjustLightParameter(0, 1))
+            self.SC_Dec_Bri_Large.activated.connect(lambda: self.adjustLightParameter(0, -5))
+            self.SC_Inc_Bri_Large.activated.connect(lambda: self.adjustLightParameter(0, 5))
 
             # THE SMALL INCREMENTS DO NEED A SPECIAL FUNCTION-
             # (see above) - BASICALLY, IF THEY'RE JUST ASSIGNED THE DEFAULT NUMPAD/NUMBER VALUES
             # THESE FUNCTIONS DON'T TRIGGER (THE SAME FUNCTIONS ARE HANDLED BY numberShortcuts(n))
             # BUT IF THEY ARE CUSTOM, *THEN* THESE TRIGGER INSTEAD, AND THIS FUNCTION ^^^^ JUST DOES
             # SCENE SELECTIONS IN SCENE MODE
-            self.SC_Dec_1_Small.activated.connect(lambda: self.changeSliderValue(1, -1))
-            self.SC_Inc_1_Small.activated.connect(lambda: self.changeSliderValue(1, 1))
-            self.SC_Dec_2_Small.activated.connect(lambda: self.changeSliderValue(2, -1))
-            self.SC_Inc_2_Small.activated.connect(lambda: self.changeSliderValue(2, 1))
-            self.SC_Dec_3_Small.activated.connect(lambda: self.changeSliderValue(3, -1))
-            self.SC_Inc_3_Small.activated.connect(lambda: self.changeSliderValue(3, 1))
+            self.SC_Dec_1_Small.activated.connect(lambda: self.adjustLightParameter(1, -1))
+            self.SC_Inc_1_Small.activated.connect(lambda: self.adjustLightParameter(1, 1))
+            self.SC_Dec_2_Small.activated.connect(lambda: self.adjustLightParameter(2, -1))
+            self.SC_Inc_2_Small.activated.connect(lambda: self.adjustLightParameter(2, 1))
+            self.SC_Dec_3_Small.activated.connect(lambda: self.adjustLightParameter(3, -1))
+            self.SC_Inc_3_Small.activated.connect(lambda: self.adjustLightParameter(3, 1))
 
             # THE LARGE INCREMENTS DON'T NEED A CUSTOM FUNCTION
-            self.SC_Dec_1_Large.activated.connect(lambda: self.changeSliderValue(1, -5))
-            self.SC_Inc_1_Large.activated.connect(lambda: self.changeSliderValue(1, 5))
-            self.SC_Dec_2_Large.activated.connect(lambda: self.changeSliderValue(2, -5))
-            self.SC_Inc_2_Large.activated.connect(lambda: self.changeSliderValue(2, 5))
-            self.SC_Dec_3_Large.activated.connect(lambda: self.changeSliderValue(3, -5))
-            self.SC_Inc_3_Large.activated.connect(lambda: self.changeSliderValue(3, 5))
+            self.SC_Dec_1_Large.activated.connect(lambda: self.adjustLightParameter(1, -5))
+            self.SC_Inc_1_Large.activated.connect(lambda: self.adjustLightParameter(1, 5))
+            self.SC_Dec_2_Large.activated.connect(lambda: self.adjustLightParameter(2, -5))
+            self.SC_Inc_2_Large.activated.connect(lambda: self.adjustLightParameter(2, 5))
+            self.SC_Dec_3_Large.activated.connect(lambda: self.adjustLightParameter(3, -5))
+            self.SC_Inc_3_Large.activated.connect(lambda: self.adjustLightParameter(3, 5))
 
             # THE NUMPAD SHORTCUTS ARE SET UP REGARDLESS OF WHAT THE CUSTOM INC/DEC SHORTCUTS ARE
             self.SC_Num1 = QShortcut(QKeySequence("1"), self)
@@ -1837,7 +1838,7 @@ try: # try to load the GUI
                     self.computeValueANM(1)
                 else: # if we're not, adjust the slider
                     if customKeys[16] == "1":
-                        self.changeSliderValue(3, -1) # decrement slider 3
+                        self.adjustLightParameter(3, -1) # decrement slider 3
             elif theNumber == 2:
                 if self.ColorModeTabWidget.currentIndex() == 2:
                     self.computeValueANM(2)
@@ -1846,13 +1847,13 @@ try: # try to load the GUI
                     self.computeValueANM(3)
                 else:
                     if customKeys[17] == "3":
-                        self.changeSliderValue(3, 1) # increment slider 3
+                        self.adjustLightParameter(3, 1) # increment slider 3
             elif theNumber == 4:
                 if self.ColorModeTabWidget.currentIndex() == 2:
                     self.computeValueANM(4)
                 else:
                     if customKeys[14] == "4":
-                        self.changeSliderValue(2, -1) # decrement slider 2
+                        self.adjustLightParameter(2, -1) # decrement slider 2
             elif theNumber == 5:
                 if self.ColorModeTabWidget.currentIndex() == 2:
                     self.computeValueANM(5)
@@ -1861,13 +1862,13 @@ try: # try to load the GUI
                     self.computeValueANM(6)
                 else:
                     if customKeys[15] == "6":
-                        self.changeSliderValue(2, 1) # increment slider 2
+                        self.adjustLightParameter(2, 1) # increment slider 2
             elif theNumber == 7:
                 if self.ColorModeTabWidget.currentIndex() == 2:
                     self.computeValueANM(7)
                 else:
                     if customKeys[12] == "7":
-                        self.changeSliderValue(1, -1) # decrement slider 1
+                        self.adjustLightParameter(1, -1) # decrement slider 1
             elif theNumber == 8:
                 if self.ColorModeTabWidget.currentIndex() == 2:
                     self.computeValueANM(8)
@@ -1876,7 +1877,7 @@ try: # try to load the GUI
                     self.computeValueANM(9)
                 else:
                     if customKeys[13] == "9":
-                        self.changeSliderValue(1, 1) # increment slider 1
+                        self.adjustLightParameter(1, 1) # increment slider 1
 
         def changeSliderValue(self, sliderToChange, changeAmt):
             if self.ColorModeTabWidget.currentIndex() == 0: # we have 2 sliders in CCT mode
@@ -1894,6 +1895,124 @@ try: # try to load the GUI
             elif self.ColorModeTabWidget.currentIndex() == 2:
                 if sliderToChange == 0: # the only "slider" in SCENE mode is the brightness
                     self.Slider_ANM_Brightness.setValue(self.Slider_ANM_Brightness.value() + changeAmt)
+
+        def adjustLightParameter(self, paramType, delta):
+            """Adjust a parameter on all selected lights per-light, regardless of current tab.
+            paramType: 0=brightness, 1=slider1 (temp/hue), 2=slider2 (bri/sat), 3=slider3 (intensity)
+            delta: amount to change (positive or negative)
+
+            Each light's current mode is read from its stored bytestring. The adjustment is
+            applied to the correct index for that mode. Incompatible adjustments are skipped
+            (e.g., hue on a CCT light, saturation on a Scene light).
+
+            Also syncs the GUI sliders on the active tab so they reflect the change.
+            Respects live preview setting — if off, only updates sliders (user clicks Apply).
+            """
+            global threadAction, sendValue
+
+            selectedLights = self.selectedLights()
+            if not selectedLights:
+                selectedLights = list(range(len(availableLights)))  # all lights if none selected
+
+            anyAdjusted = False
+
+            for lightIdx in selectedLights:
+                if lightIdx >= len(availableLights):
+                    continue
+                params = availableLights[lightIdx][3]
+                if not params or not isinstance(params, list) or len(params) < 4:
+                    continue
+
+                mode = params[1]  # 135=CCT, 134=HSI, 136=ANM/Scene
+                newParams = list(params)  # copy before modifying
+
+                if mode == 135:  # CCT: [120, 135, 2, brightness, temp, checksum]
+                    if paramType == 0 or paramType == 2:  # brightness
+                        newParams[3] = max(0, min(100, newParams[3] + delta))
+                    elif paramType == 1:  # color temp
+                        newParams[4] = max(32, min(85, newParams[4] + delta))
+                    else:
+                        continue  # slider 3 doesn't apply to CCT
+                elif mode == 134:  # HSI: [120, 134, 4, hue_lo, hue_hi, sat, bri, checksum]
+                    if paramType == 0 or paramType == 3:  # brightness/intensity
+                        newParams[6] = max(0, min(100, newParams[6] + delta))
+                    elif paramType == 1:  # hue
+                        hue = newParams[3] | (newParams[4] << 8)
+                        hue = (hue + delta) % 361  # wrap around 0-360
+                        if hue < 0: hue += 361
+                        newParams[3] = hue & 255
+                        newParams[4] = (hue >> 8) & 255
+                    elif paramType == 2:  # saturation
+                        newParams[5] = max(0, min(100, newParams[5] + delta))
+                    else:
+                        continue
+                elif mode == 136:  # ANM/Scene: [120, 136, 2, brightness, scene, checksum]
+                    if paramType == 0:  # brightness only
+                        newParams[3] = max(0, min(100, newParams[3] + delta))
+                    else:
+                        continue  # hue/sat/temp don't apply to Scene mode
+                else:
+                    continue  # unknown mode, skip
+
+                # Recalculate checksum
+                newParams[-1] = calculateChecksum(newParams)
+                availableLights[lightIdx][3] = newParams
+                anyAdjusted = True
+
+            if not anyAdjusted:
+                return
+
+            # Sync GUI sliders on the active tab to reflect the last adjusted light's values
+            # (use the first selected light for slider sync)
+            firstLight = selectedLights[0] if selectedLights else -1
+            if firstLight >= 0 and firstLight < len(availableLights):
+                fp = availableLights[firstLight][3]
+                if fp and isinstance(fp, list):
+                    fmode = fp[1]
+                    if fmode == 135 and self.ColorModeTabWidget.currentIndex() == 0:
+                        self.Slider_CCT_Bright.blockSignals(True)
+                        self.Slider_CCT_Hue.blockSignals(True)
+                        self.Slider_CCT_Bright.setValue(fp[3])
+                        self.Slider_CCT_Hue.setValue(fp[4])
+                        self.TFV_CCT_Bright.setText(str(fp[3]) + "%")
+                        self.TFV_CCT_Hue.setText(str(fp[4]) + "00K")
+                        self.Slider_CCT_Bright.blockSignals(False)
+                        self.Slider_CCT_Hue.blockSignals(False)
+                    elif fmode == 134 and self.ColorModeTabWidget.currentIndex() == 1:
+                        hue = fp[3] | (fp[4] << 8)
+                        self.Slider_HSI_1_H.blockSignals(True)
+                        self.Slider_HSI_2_S.blockSignals(True)
+                        self.Slider_HSI_3_L.blockSignals(True)
+                        self.Slider_HSI_1_H.setValue(hue)
+                        self.Slider_HSI_2_S.setValue(fp[5])
+                        self.Slider_HSI_3_L.setValue(fp[6])
+                        self.TFV_HSI_1_H.setText(str(hue) + "º")
+                        self.TFV_HSI_2_S.setText(str(fp[5]) + "%")
+                        self.TFV_HSI_3_L.setText(str(fp[6]) + "%")
+                        self.Slider_HSI_1_H.blockSignals(False)
+                        self.Slider_HSI_2_S.blockSignals(False)
+                        self.Slider_HSI_3_L.blockSignals(False)
+                    elif fmode == 136 and self.ColorModeTabWidget.currentIndex() == 2:
+                        self.Slider_ANM_Brightness.blockSignals(True)
+                        self.Slider_ANM_Brightness.setValue(fp[3])
+                        self.TFV_ANM_Brightness.setText(str(fp[3]) + "%")
+                        self.Slider_ANM_Brightness.blockSignals(False)
+
+            # Send the adjusted values — each light uses its own stored params
+            if not livePreview:
+                return  # user will click Apply
+
+            if animationRunning:
+                stopAnimation()
+                self.animPlayButton.setEnabled(True)
+                self.animStopButton.setEnabled(False)
+                self.animStatusLabel.setText("Stopped")
+
+            # Use the per-light stored params path (useGlobalValue=False triggers this in writeToLight)
+            if threadAction == "":
+                # Set sendValue to first light's params as a fallback, then trigger per-light send
+                sendValue = availableLights[selectedLights[0]][3]
+                threadAction = "send"
 
         def checkLightTab(self, selectedLight = -1):
             if self.ColorModeTabWidget.currentIndex() == 0: # if we're on the CCT tab, do the check
@@ -2085,6 +2204,7 @@ try: # try to load the GUI
                     self.hideConsoleOnLaunch_check.setVisible(False)
                 self.minimizeToTrayOnClose_check.setChecked(minimizeToTrayOnClose)
                 self.httpAutoStart_check.setChecked(httpAutoStart)
+                self.httpPortSpin.setValue(httpPort)
                 self.cctFallbackCombo.setCurrentIndex(0 if cctFallbackMode == "convert" else 1)
                 self.enableLogTab_check.setChecked(enableLogTab)
                 self.logToFile_check.setChecked(logToFile)
@@ -2128,6 +2248,7 @@ try: # try to load the GUI
                 self.hideConsoleOnLaunch_check.setChecked(False)
                 self.minimizeToTrayOnClose_check.setChecked(True)
                 self.httpAutoStart_check.setChecked(False)
+                self.httpPortSpin.setValue(8080)
                 self.cctFallbackCombo.setCurrentIndex(0)  # Convert
                 self.enableLogTab_check.setChecked(True)
                 self.logToFile_check.setChecked(False)
@@ -2163,7 +2284,7 @@ try: # try to load the GUI
 
         def saveGlobalPrefs(self):
             # change these global values to the new values in Prefs
-            global customKeys, autoConnectToLights, printDebug, rememberLightsOnExit, rememberPresetsOnExit, autoReconnectOnDisconnect, maxNumOfAttempts, acceptable_HTTP_IPs, whiteListedMACs, hideConsoleOnLaunch, minimizeToTrayOnClose, httpAutoStart, cctFallbackMode, enableLogTab, logToFile, globalCCTMin, globalCCTMax, globalCCTMin, globalCCTMax, enableLogTab, logToFile, globalCCTMin, globalCCTMax, cctFallbackMode
+            global customKeys, autoConnectToLights, printDebug, rememberLightsOnExit, rememberPresetsOnExit, autoReconnectOnDisconnect, maxNumOfAttempts, acceptable_HTTP_IPs, whiteListedMACs, hideConsoleOnLaunch, minimizeToTrayOnClose, httpAutoStart, httpPort, cctFallbackMode, enableLogTab, logToFile, globalCCTMin, globalCCTMax, globalCCTMin, globalCCTMax, enableLogTab, logToFile, globalCCTMin, globalCCTMax, cctFallbackMode
 
             finalPrefs = [] # list of final prefs to merge together at the end
 
@@ -2236,6 +2357,12 @@ try: # try to load the GUI
                 finalPrefs.append("httpAutoStart=1")
             else:
                 httpAutoStart = False
+
+            if self.httpPortSpin.value() != 8080: # only save if non-default
+                httpPort = self.httpPortSpin.value()
+                finalPrefs.append("httpPort=" + str(httpPort))
+            else:
+                httpPort = 8080
 
             cctFallbackMode = "convert" if self.cctFallbackCombo.currentIndex() == 0 else "ignore"
             if cctFallbackMode != "convert":  # only save non-default
@@ -2936,7 +3063,7 @@ try: # try to load the GUI
             else:
                 # Start the server
                 try:
-                    httpServerInstance = ThreadingHTTPServer(("", 8080), NLPythonServer)
+                    httpServerInstance = ThreadingHTTPServer(("", httpPort), NLPythonServer)
                     httpServerThread = threading.Thread(target=httpServerInstance.serve_forever, name="httpServerThread", daemon=True)
                     httpServerThread.start()
                     httpServerRunning = True
@@ -2944,8 +3071,8 @@ try: # try to load the GUI
                     self.httpToggleBtn.setProperty("httpActive", True)
                     self.httpToggleBtn.style().unpolish(self.httpToggleBtn)
                     self.httpToggleBtn.style().polish(self.httpToggleBtn)
-                    printDebugString("HTTP server started on port 8080")
-                    self.statusBar.showMessage("HTTP server running on port 8080")
+                    printDebugString("HTTP server started on port " + str(httpPort))
+                    self.statusBar.showMessage("HTTP server running on port " + str(httpPort))
                 except OSError as e:
                     printDebugString("Could not start HTTP server: " + str(e))
                     self.statusBar.showMessage("HTTP server failed: " + str(e))
@@ -6666,7 +6793,7 @@ def createLightPrefsFolder():
 def loadPrefsFile(globalPrefsFile = ""):
     global findLightsOnStartup, autoConnectToLights, printDebug, maxNumOfAttempts, \
            rememberLightsOnExit, acceptable_HTTP_IPs, customKeys, enableTabsOnLaunch, \
-           whiteListedMACs, rememberPresetsOnExit, autoReconnectOnDisconnect, livePreview, hideConsoleOnLaunch, minimizeToTrayOnClose, httpAutoStart, cctFallbackMode, enableLogTab, logToFile, globalCCTMin, globalCCTMax
+           whiteListedMACs, rememberPresetsOnExit, autoReconnectOnDisconnect, livePreview, hideConsoleOnLaunch, minimizeToTrayOnClose, httpAutoStart, httpPort, cctFallbackMode, enableLogTab, logToFile, globalCCTMin, globalCCTMax
 
     if globalPrefsFile != "":
         printDebugString("Loading global preferences from file...")
@@ -6679,7 +6806,7 @@ def loadPrefsFile(globalPrefsFile = ""):
             "SC_Dec_Bri_Small", "SC_Inc_Bri_Small", "SC_Dec_Bri_Large", "SC_Inc_Bri_Large", \
             "SC_Dec_1_Small", "SC_Inc_1_Small", "SC_Dec_2_Small", "SC_Inc_2_Small", "SC_Dec_3_Small", "SC_Inc_3_Small", \
             "SC_Dec_1_Large", "SC_Inc_1_Large", "SC_Dec_2_Large", "SC_Inc_2_Large", "SC_Dec_3_Large", "SC_Inc_3_Large", \
-            "enableTabsOnLaunch", "whiteListedMACs", "rememberPresetsOnExit", "autoReconnectOnDisconnect", "hideConsoleOnLaunch", "minimizeToTrayOnClose", "livePreview", "httpAutoStart", "cctFallbackMode", "enableLogTab", "logToFile", "globalCCTMin", "globalCCTMax"]
+            "enableTabsOnLaunch", "whiteListedMACs", "rememberPresetsOnExit", "autoReconnectOnDisconnect", "hideConsoleOnLaunch", "minimizeToTrayOnClose", "livePreview", "httpAutoStart", "httpPort", "cctFallbackMode", "enableLogTab", "logToFile", "globalCCTMin", "globalCCTMax"]
 
         # KICK OUT ANY PARAMETERS THAT AREN'T IN THE "ACCEPTABLE ARGUMENTS" LIST ABOVE
         # THIS SECTION OF CODE IS *SLIGHTLY* DIFFERENT THAN THE CLI KICK OUT CODE
@@ -6710,6 +6837,7 @@ def loadPrefsFile(globalPrefsFile = ""):
     prefsParser.add_argument("--hideConsoleOnLaunch", default=0)
     prefsParser.add_argument("--minimizeToTrayOnClose", default=1)
     prefsParser.add_argument("--httpAutoStart", default=0)
+    prefsParser.add_argument("--httpPort", default=8080)
     prefsParser.add_argument("--cctFallbackMode", default="convert")
     prefsParser.add_argument("--enableLogTab", default=1)
     prefsParser.add_argument("--logToFile", default=0)
@@ -6761,6 +6889,7 @@ def loadPrefsFile(globalPrefsFile = ""):
     hideConsoleOnLaunch = bool(int(mainPrefs.hideConsoleOnLaunch)) # whether to auto-hide the console window on GUI startup
     minimizeToTrayOnClose = bool(int(mainPrefs.minimizeToTrayOnClose))
     httpAutoStart = bool(int(mainPrefs.httpAutoStart))
+    httpPort = int(mainPrefs.httpPort)
     cctFallbackMode = mainPrefs.cctFallbackMode if mainPrefs.cctFallbackMode in ("convert", "ignore") else "convert"
     enableLogTab = bool(int(mainPrefs.enableLogTab))
     logToFile = bool(int(mainPrefs.logToFile))
@@ -6839,10 +6968,10 @@ if __name__ == '__main__':
             httpWorker = threading.Thread(target=workerThread, args=(asyncioEventLoop,), name="workerThread", daemon=True)
             httpWorker.start()
 
-            webServer = ThreadingHTTPServer(("", 8080), NLPythonServer)
+            webServer = ThreadingHTTPServer(("", httpPort), NLPythonServer)
 
             try:
-                printDebugString("Starting the HTTP Server on Port 8080...")
+                printDebugString("Starting the HTTP Server on Port " + str(httpPort) + "...")
                 printDebugString("-------------------------------------------------------------------------------------")
 
                 # start the HTTP server and wait for requests
