@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 #############################################################
-## NeewerLux ver. 1.0.0
-NEEWERLUX_VERSION = "1.0.0"
+## NeewerLux ver. 1.0.4
+NEEWERLUX_VERSION = "1.0.4"
 NEEWERLUX_REPO_URL = "https://github.com/poizenjam/NeewerLux/"
 NEEWERLUX_RELEASES_API = "https://api.github.com/repos/poizenjam/NeewerLux/releases/latest"
 ## A NeewerLite-Python Extension
