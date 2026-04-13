@@ -164,16 +164,6 @@ class singleKeySequenceEditCancel(QWidget):
         self.defaultValue = defaultValue
         self.keySequence = QKeySequence(defaultValue)
         self.keyPressField = QKeySequenceEdit(self.keySequence)
-        self.keyPressField.setMinimumWidth(150)
-        # Hide the internal clear/action button (renders as tiny empty square on some themes).
-        # We have our own external "X" reset button so the internal one is redundant.
-        try:
-            from PySide6.QtWidgets import QAbstractButton as _QAB
-        except ImportError:
-            from PySide2.QtWidgets import QAbstractButton as _QAB
-        for child in self.keyPressField.findChildren(_QAB):
-            child.setFixedSize(0, 0)
-            child.setVisible(False)
         self.keyPressField.keySequenceChanged.connect(self._onChanged)
         lay.addWidget(self.keyPressField)
         resetBtn = QPushButton("X")
@@ -424,7 +414,7 @@ class Ui_MainWindow(object):
         self.httpToggleBtn.setObjectName("httpToggleBtn")
         self.httpToggleBtn.setProperty("httpActive", False)
         self.httpToggleBtn.setMinimumWidth(100)
-        self.httpToggleBtn.setToolTip("Start/stop the HTTP control server")
+        self.httpToggleBtn.setToolTip("Start/stop the HTTP control server on port 8080")
         toolbar.addWidget(self.httpToggleBtn)
 
         self.themeToggleBtn = QPushButton("\u263E")
@@ -747,11 +737,6 @@ class Ui_MainWindow(object):
         self.minimizeToTrayOnClose_check = QCheckBox("Minimize to system tray on close (uncheck to quit on close)")
         self.minimizeToTrayOnClose_check.setChecked(True)
         self.httpAutoStart_check = QCheckBox("Start HTTP server automatically on launch")
-        httpPortRow = QHBoxLayout()
-        httpPortLabel = QLabel("HTTP server port:")
-        self.httpPortField = QLineEdit("8080")
-        self.httpPortField.setFixedWidth(60)
-        self.httpPortField.setToolTip("Port for the HTTP daemon (default 8080). Requires restart of HTTP server to take effect.")
         cctFallbackRow = QHBoxLayout()
         cctFallbackLabel = QLabel("Incompatible command handling:")
         self.cctFallbackCombo = QComboBox()
@@ -863,7 +848,6 @@ class Ui_MainWindow(object):
         self.globalPrefsLay.addRow(self.hideConsoleOnLaunch_check)
         self.globalPrefsLay.addRow(self.minimizeToTrayOnClose_check)
         self.globalPrefsLay.addRow(self.httpAutoStart_check)
-        self.globalPrefsLay.addRow("HTTP server port:", self.httpPortField)
         self.globalPrefsLay.addRow(cctFallbackRow)
         self.globalPrefsLay.addRow(cctRangeRow)
         self.enableLogTab_check = QCheckBox("Enable Log tab (show debug output in GUI)")
@@ -917,7 +901,7 @@ class Ui_MainWindow(object):
 <li><b>Light Aliases &amp; Preferred IDs</b> &mdash; Assign names and numeric IDs to lights for consistent ordering and easy targeting in animations, presets, and HTTP commands</li>
 <li><b>Global CCT Range</b> &mdash; Configurable min/max color temperature bounds (2700K&ndash;8500K) with per-light overrides</li>
 <li><b>CCT Clamping</b> &mdash; Software-side enforcement of CCT bounds with convert/clamp or ignore/skip modes for mixed light setups</li>
-<li><b>WebUI Dashboard</b> &mdash; Browser-based control at <code>http://localhost:PORT/</code> with live light table, sliders, preset grid, animation browser, and API reference (port configurable in Global Preferences, default 8080)</li>
+<li><b>WebUI Dashboard</b> &mdash; Browser-based control at <code>http://localhost:8080/</code> with live light table, sliders, preset grid, animation browser, and API reference</li>
 <li><b>HTTP API</b> &mdash; RESTful control via GET/POST &mdash; discover, link, set mode, presets, animations, and batch multi-light commands</li>
 <li><b>System Tray</b> &mdash; Minimize to tray on close, with show/hide and HTTP server toggle from the tray menu</li>
 <li><b>Update Checker</b> &mdash; Check for new releases from within the GUI or WebUI</li>
