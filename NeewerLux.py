@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 #############################################################
 ## NeewerLux ver. 1.0.5
-NEEWERLUX_VERSION = "1.0.6"
+NEEWERLUX_VERSION = "1.0.7"
 NEEWERLUX_REPO_URL = "https://github.com/poizenjam/NeewerLux/"
 NEEWERLUX_RELEASES_API = "https://api.github.com/repos/poizenjam/NeewerLux/releases/latest"
 ## A NeewerLite-Python Extension
@@ -117,7 +117,7 @@ except ImportError:
 # SET WINDOWS APP ID SO THE TASKBAR SHOWS OUR ICON INSTEAD OF PYTHON'S
 try:
     import ctypes
-    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("poizenjam.NeewerLux.1.0.0")
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("poizenjam.NeewerLux." + NEEWERLUX_VERSION)
 except Exception:
     pass  # not Windows
 
@@ -232,7 +232,6 @@ presetNames = {} # dict of {preset_index: "custom name"} for user-assigned names
 # ============================================================================
 animationRunning = False       # whether an animation is currently playing
 animationStopFlag = False      # set True to request the animation to stop
-_animChainStop = False         # set True when stopping to chain into another animation (skip revert)
 currentAnimationName = ""      # name of the currently playing animation
 savedAnimations = {}           # dict of {name: animation_dict} loaded from disk
 animationsDir = os.path.dirname(os.path.abspath(sys.argv[0])) + os.sep + "light_prefs" + os.sep + "animations"
@@ -394,6 +393,9 @@ try: # try to load the GUI
         def __init__(self):
             QMainWindow.__init__(self)
             self.setupUi(self) # set up the main UI
+            self.setWindowTitle("NeewerLux " + NEEWERLUX_VERSION)
+            # Inject version into Info tab
+            self.infoText.setHtml(self.infoText.toHtml().replace("{VERSION}", NEEWERLUX_VERSION))
             self.connectMe() # connect the function handlers to the widgets
 
             # Connect the thread-safe table update signal
@@ -2970,7 +2972,7 @@ try: # try to load the GUI
             else:
                 self._trayIcon.setIcon(self.windowIcon())
 
-            self._trayIcon.setToolTip("NeewerLux 1.0.0")
+            self._trayIcon.setToolTip("NeewerLux " + NEEWERLUX_VERSION)
 
             trayMenu = QMenu()
             showAction = trayMenu.addAction("Show / Hide")
@@ -5564,7 +5566,7 @@ def animationSendFrame(frameCommands, loop):
 def animationEngineThread(animation, loop, speedMultiplier=1.0, loopOverride=None, fps=5, briScale=1.0, maxLoops=0):
     """Main animation playback thread. Runs keyframes with timing and interpolation.
     maxLoops: 0 = infinite (if shouldLoop), N>0 = play exactly N times then stop."""
-    global animationRunning, animationStopFlag, currentAnimationName, preAnimationStates, threadAction, _animChainStop
+    global animationRunning, animationStopFlag, currentAnimationName, preAnimationStates, threadAction
 
     animationRunning = True
     animationStopFlag = False
@@ -5703,8 +5705,7 @@ def animationEngineThread(animation, loop, speedMultiplier=1.0, loopOverride=Non
     printDebugString("Animation '" + animName + "' stopped" + (" (completed " + str(completedLoops) + " loop(s))" if completedLoops > 0 else ""))
 
     # Revert lights to pre-animation state if enabled (both natural finish and user stop)
-    # BUT NOT if we're chaining into another animation — the new animation will inherit our preAnimationStates
-    if animRevertOnFinish and preAnimationStates and not _animChainStop:
+    if animRevertOnFinish and preAnimationStates:
         printDebugString("Reverting lights to pre-animation state")
         changedLights = []
         for lightIdx, savedState in preAnimationStates.items():
@@ -5727,7 +5728,7 @@ def animationEngineThread(animation, loop, speedMultiplier=1.0, loopOverride=Non
 def startAnimation(animName, loop, speedMultiplier=1.0, loopOverride=None, fps=5, briScale=1.0, maxLoops=0):
     """Start an animation by name. Stops any currently running animation first.
     maxLoops: 0 = use animation's loop setting, N>0 = play N times then stop."""
-    global animationStopFlag, savedAnimations, preAnimationStates, _animChainStop
+    global animationStopFlag, savedAnimations, preAnimationStates
 
     # Case-insensitive name lookup — HTTP args get lowercased by the argument parser
     resolvedName = None
@@ -5743,10 +5744,7 @@ def startAnimation(animName, loop, speedMultiplier=1.0, loopOverride=None, fps=5
     # Stop any running animation — but remember if one was running so we preserve
     # the original pre-animation states (captured before the FIRST animation in a chain)
     wasRunning = animationRunning
-    if wasRunning:
-        _animChainStop = True  # tell the stopping thread: don't revert, we're chaining
     stopAnimation()
-    _animChainStop = False  # reset for future non-chain stops
 
     # Only capture pre-animation states if we're starting fresh. If we're interrupting
     # an existing animation, light[3] would contain that animation's last keyframe values,
@@ -6133,7 +6131,7 @@ class NLPythonServer(BaseHTTPRequestHandler):
                     self.send_header("Content-Type", "text/html;charset=UTF-8")
                     self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
                     self.end_headers()
-                    self.wfile.write(getWebDashboardHTML().encode("utf-8"))
+                    self.wfile.write(getWebDashboardHTML(version=NEEWERLUX_VERSION).encode("utf-8"))
                 else:
                     self.send_response(302)
                     self.send_header('Location', acceptableURL)
@@ -6570,7 +6568,7 @@ def writeHTMLSections(self, theSection, errorMsg = ""):
     elif theSection == "htmlheaders":
         self.wfile.write(bytes("<!DOCTYPE html>\n", "utf-8"))
         self.wfile.write(bytes("<HTML>\n<HEAD>\n", "utf-8"))
-        self.wfile.write(bytes("<TITLE>NeewerLux 1.0.0 — based on NeewerLite-Python by Zach Glenwright / NeewerLite by Xu Lian</TITLE>\n</HEAD>\n", "utf-8"))
+        self.wfile.write(bytes("<TITLE>NeewerLux " + NEEWERLUX_VERSION + " — based on NeewerLite-Python by Zach Glenwright / NeewerLite by Xu Lian</TITLE>\n</HEAD>\n", "utf-8"))
         self.wfile.write(bytes("<BODY>\n", "utf-8"))
     elif theSection == "errorHelp":
         self.wfile.write(bytes("<H1>Invalid request!</H1>\n", "utf-8"))
@@ -6652,7 +6650,7 @@ def writeHTMLSections(self, theSection, errorMsg = ""):
         if theSection == "quicklinks-timer": # write the "This page will refresh..." timer
             self.wfile.write(bytes("<CENTER><strong><em><span id='refreshDisplay'><BR></span></em></strong></CENTER><HR>\n", "utf-8"))
     elif theSection == "htmlendheaders":
-        self.wfile.write(bytes("<CENTER><A HREF='https://github.com/poizenjam/NeewerLux/'>NeewerLux 1.0.0</A><BR>based on <A HREF='https://github.com/taburineagle/NeewerLite-Python/'>NeewerLite-Python</A> (v0.12d) by Zach Glenwright / originally from <A HREF='https://github.com/keefo/NeewerLite'>NeewerLite</A> by Xu Lian<BR></CENTER>\n", "utf-8"))
+        self.wfile.write(bytes("<CENTER><A HREF='https://github.com/poizenjam/NeewerLux/'>NeewerLux " + NEEWERLUX_VERSION + "</A><BR>based on <A HREF='https://github.com/taburineagle/NeewerLite-Python/'>NeewerLite-Python</A> (v0.12d) by Zach Glenwright / originally from <A HREF='https://github.com/keefo/NeewerLite'>NeewerLite</A> by Xu Lian<BR></CENTER>\n", "utf-8"))
         self.wfile.write(bytes("</BODY>\n</HTML>", "utf-8"))
 
 def formatStringForConsole(theString, maxLength):
@@ -6807,7 +6805,7 @@ def loadPrefsFile(globalPrefsFile = ""):
 if __name__ == '__main__':
     # Display the version of NeewerLux we're using
     print("---------------------------------------------------------")
-    print("               NeewerLux ver. 1.0.0")
+    print("               NeewerLux ver. " + NEEWERLUX_VERSION)
     print("  Cross-platform Neewer LED light control")
     print("  https://github.com/poizenjam/NeewerLux/")
     print("")
@@ -6878,7 +6876,7 @@ if __name__ == '__main__':
         if cmdReturn[0] == "LIST":
             doAnotherInstanceCheck() # check to see if another instance is running, and if it is, then error out and quit
 
-            print("NeewerLux 1.0.0 — based on NeewerLite-Python 0.12d by Zach Glenwright / NeewerLite by Xu Lian")
+            print("NeewerLux " + NEEWERLUX_VERSION + " — based on NeewerLite-Python 0.12d by Zach Glenwright / NeewerLite by Xu Lian")
             print("Searching for nearby Neewer lights...")
             asyncioEventLoop.run_until_complete(findDevices())
 

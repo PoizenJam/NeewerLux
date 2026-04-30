@@ -5,9 +5,9 @@ plain-HTML landing page. Provides interactive light control, animation
 playback, preset recall, and status monitoring.
 """
 
-def getWebDashboardHTML(serverAddr=""):
+def getWebDashboardHTML(serverAddr="", version="0.0.0"):
     """Return the complete HTML for the web dashboard."""
-    return WEB_DASHBOARD_HTML.replace("{{SERVER}}", serverAddr)
+    return WEB_DASHBOARD_HTML.replace("{{SERVER}}", serverAddr).replace("{NLVERSION}", version)
 
 
 WEB_DASHBOARD_HTML = r"""<!DOCTYPE html>
@@ -328,7 +328,7 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
 <body>
 
 <div class="header">
-    <h1><span>Neewer</span>Lux <small style="color:#888;font-size:12px">1.0.0</small></h1>
+    <h1><span>Neewer</span>Lux <small style="color:#888;font-size:12px">{NLVERSION}</small></h1>
     <div class="spacer"></div>
     <span class="status-pill" id="connStatus">Loading...</span>
     <button class="refresh-btn" onclick="scanForLights()" title="Scan for new Bluetooth lights">&#x1F50D; Scan</button>
@@ -502,7 +502,7 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
             &#x2139;&#xFE0F; About NeewerLux <span style="color:#888;font-size:11px">(click to expand)</span>
         </div>
         <div class="card-body" style="display:none">
-            <h3 style="color:var(--accent);margin-top:0">NeewerLux 1.0.0</h3>
+            <h3 style="color:var(--accent);margin-top:0">NeewerLux {NLVERSION}</h3>
             <p>Cross-platform Neewer LED light control for streamers and content creators.</p>
             <hr style="border-color:var(--border)">
             <h4>Features</h4>
@@ -840,7 +840,7 @@ async function checkForUpdates() {
         const data = await r.json();
         const tag = (data.tag_name || '').replace(/^[vV]/, '');
         const url = data.html_url || 'https://github.com/poizenjam/NeewerLux/releases';
-        const local = '1.0.0';
+        const local = '{NLVERSION}';
         if (tag && tag !== local) {
             const rv = tag.split('.').map(Number);
             const lv = local.split('.').map(Number);
@@ -932,7 +932,7 @@ window.addEventListener('load', () => {
 });
 </script>
 <div style="text-align:center;padding:16px 0 8px;font-size:11px;color:var(--muted);">
-    NeewerLux 1.0.0 &mdash;
+    NeewerLux {NLVERSION} &mdash;
     <a href="https://github.com/poizenjam/NeewerLux/" style="color:var(--accent)">github.com/poizenjam/NeewerLux</a><br>
     Based on <a href="https://github.com/taburineagle/NeewerLite-Python/" style="color:var(--accent)">NeewerLite-Python</a> (v0.12d) by Zach Glenwright &mdash;
     Originally from <a href="https://github.com/keefo/NeewerLite" style="color:var(--accent)">NeewerLite</a> by Xu Lian

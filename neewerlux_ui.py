@@ -376,7 +376,7 @@ class Ui_MainWindow(object):
         # === WINDOW ===
         MainWindow.setMinimumSize(780, 620)
         MainWindow.resize(900, 800)
-        MainWindow.setWindowTitle("NeewerLux 1.0.0")
+        MainWindow.setWindowTitle("NeewerLux")
 
         self.centralwidget = QWidget(MainWindow)
         MainWindow.setCentralWidget(self.centralwidget)
@@ -836,31 +836,44 @@ class Ui_MainWindow(object):
         self.bottomButtonsLay.addWidget(self.resetGlobalPrefsButton, 1, 1)
         self.bottomButtonsLay.addWidget(self.saveGlobalPrefsButton, 1, 2)
 
-        # Build form
-        self.globalPrefsLay.addRow(QLabel("<strong><u>Main Program Options</u></strong>", alignment=Qt.AlignCenter))
+        # Build form — organized into logical sections
+        self.globalPrefsLay.addRow(QLabel("<strong>Startup &amp; Connection</strong>"))
         self.globalPrefsLay.addRow(self.findLightsOnStartup_check)
         self.globalPrefsLay.addRow(self.autoConnectToLights_check)
-        self.globalPrefsLay.addRow(self.printDebug_check)
+        self.globalPrefsLay.addRow(self.autoReconnect_check)
+        self.globalPrefsLay.addRow("Max connection retries:", self.maxNumOfAttempts_field)
+
+        self.globalPrefsLay.addRow(QLabel("<br><strong>Control &amp; Presets</strong>"))
+        self.globalPrefsLay.addRow(self.livePreview_check)
         self.globalPrefsLay.addRow(self.rememberLightsOnExit_check)
         self.globalPrefsLay.addRow(self.rememberPresetsOnExit_check)
-        self.globalPrefsLay.addRow(self.livePreview_check)
-        self.globalPrefsLay.addRow(self.autoReconnect_check)
-        self.globalPrefsLay.addRow(self.hideConsoleOnLaunch_check)
-        self.globalPrefsLay.addRow(self.minimizeToTrayOnClose_check)
-        self.globalPrefsLay.addRow(self.httpAutoStart_check)
+
+        self.globalPrefsLay.addRow(QLabel("<br><strong>Light Behaviour</strong>"))
         self.globalPrefsLay.addRow(cctFallbackRow)
         self.globalPrefsLay.addRow(cctRangeRow)
+
+        self.globalPrefsLay.addRow(QLabel("<br><strong>HTTP Server</strong>"))
+        self.globalPrefsLay.addRow(self.httpAutoStart_check)
+
+        self.globalPrefsLay.addRow(QLabel("<br><strong>Window &amp; Display</strong>"))
+        self.globalPrefsLay.addRow(self.hideConsoleOnLaunch_check)
+        self.globalPrefsLay.addRow(self.minimizeToTrayOnClose_check)
+
+        self.globalPrefsLay.addRow(QLabel("<br><strong>Logging</strong>"))
         self.enableLogTab_check = QCheckBox("Enable Log tab (show debug output in GUI)")
         self.enableLogTab_check.setChecked(True)
         self.logToFile_check = QCheckBox("Also write log to file (light_prefs/NeewerLux.log)")
         self.globalPrefsLay.addRow(self.enableLogTab_check)
         self.globalPrefsLay.addRow(self.logToFile_check)
-        self.globalPrefsLay.addRow("Max connection retries:", self.maxNumOfAttempts_field)
-        self.globalPrefsLay.addRow(QLabel("<hr><strong><u>Acceptable IPs for HTTP Server</u></strong>"))
+        self.globalPrefsLay.addRow(self.printDebug_check)
+
+        self.globalPrefsLay.addRow(QLabel("<br><strong>Filtering</strong>"))
+        self.globalPrefsLay.addRow(QLabel("Acceptable IPs for HTTP Server:"))
         self.globalPrefsLay.addRow(self.acceptable_HTTP_IPs_field)
-        self.globalPrefsLay.addRow(QLabel("<hr><strong><u>Whitelisted MAC Addresses</u></strong>"))
+        self.globalPrefsLay.addRow(QLabel("Whitelisted MAC Addresses:"))
         self.globalPrefsLay.addRow(self.whiteListedMACs_field)
-        self.globalPrefsLay.addRow(QLabel("<hr><strong><u>Keyboard Shortcuts</u></strong>"))
+
+        self.globalPrefsLay.addRow(QLabel("<br><strong>Keyboard Shortcuts</strong>"))
         self.globalPrefsLay.addRow(self.windowButtonsCW)
         self.globalPrefsLay.addRow(self.tabSwitchCW)
         self.globalPrefsLay.addRow(self.brightnessCW)
@@ -885,11 +898,11 @@ class Ui_MainWindow(object):
         self.checkUpdateButton.setToolTip("Check GitHub for a newer version of NeewerLux")
         infoLay.addWidget(self.checkUpdateButton)
 
-        infoText = QTextBrowser()
-        infoText.setReadOnly(True)
-        infoText.setOpenExternalLinks(True)
-        infoText.setHtml("""
-<h2 style="color:#9100ff;">NeewerLux 1.0.0</h2>
+        self.infoText = QTextBrowser()
+        self.infoText.setReadOnly(True)
+        self.infoText.setOpenExternalLinks(True)
+        self.infoText.setHtml("""
+<h2 style="color:#9100ff;">NeewerLux {VERSION}</h2>
 <p>Cross-platform Neewer LED light control for streamers and content creators.</p>
 <hr>
 <h3>Features</h3>
@@ -950,7 +963,7 @@ Based on <a href="https://github.com/taburineagle/NeewerLite-Python/">NeewerLite
 Originally from <a href="https://github.com/keefo/NeewerLite">NeewerLite</a> by Xu Lian
 </p>
 """)
-        infoLay.addWidget(infoText)
+        infoLay.addWidget(self.infoText)
         self.ColorModeTabWidget.addTab(self.infoTab, "Info")
 
         # --- LOG TAB ---
