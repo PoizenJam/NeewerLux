@@ -414,8 +414,12 @@ class Ui_MainWindow(object):
         self.httpToggleBtn.setObjectName("httpToggleBtn")
         self.httpToggleBtn.setProperty("httpActive", False)
         self.httpToggleBtn.setMinimumWidth(100)
-        self.httpToggleBtn.setToolTip("Start/stop the HTTP control server on port 8080")
+        self.httpToggleBtn.setToolTip("Start/stop the HTTP control server")
         toolbar.addWidget(self.httpToggleBtn)
+        self.httpOpenWebUIBtn = QPushButton("WebUI")
+        self.httpOpenWebUIBtn.setToolTip("Open the web dashboard in your browser")
+        self.httpOpenWebUIBtn.setEnabled(False)
+        toolbar.addWidget(self.httpOpenWebUIBtn)
 
         self.themeToggleBtn = QPushButton("\u263E")
         self.themeToggleBtn.setObjectName("themeToggleBtn")

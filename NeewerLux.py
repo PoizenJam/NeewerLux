@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 #############################################################
 ## NeewerLux ver. 1.0.5
-NEEWERLUX_VERSION = "1.0.7"
+NEEWERLUX_VERSION = "1.0.8"
 NEEWERLUX_REPO_URL = "https://github.com/poizenjam/NeewerLux/"
 NEEWERLUX_RELEASES_API = "https://api.github.com/repos/poizenjam/NeewerLux/releases/latest"
 ## A NeewerLite-Python Extension
@@ -1651,6 +1651,7 @@ try: # try to load the GUI
 
             # HTTP SERVER TOGGLE
             self.httpToggleBtn.clicked.connect(self.toggleHTTPServer)
+            self.httpOpenWebUIBtn.clicked.connect(self.openWebUI)
 
             # SHORTCUT KEYS - MAKE THEM HERE, SET THEIR ASSIGNMENTS BELOW WITH self.setupShortcutKeys()
             # IN CASE WE NEED TO CHANGE THEM AFTER CHANGING PREFERENCES
@@ -2935,7 +2936,11 @@ try: # try to load the GUI
                 self.httpToggleBtn.setProperty("httpActive", False)
                 self.httpToggleBtn.style().unpolish(self.httpToggleBtn)
                 self.httpToggleBtn.style().polish(self.httpToggleBtn)
+                self.httpOpenWebUIBtn.setEnabled(False)
                 self.statusBar.showMessage("HTTP server stopped")
+                # Disable tray WebUI action if present
+                if hasattr(self, '_trayWebUIAction'):
+                    self._trayWebUIAction.setEnabled(False)
             else:
                 # Start the server
                 try:
@@ -2947,13 +2952,22 @@ try: # try to load the GUI
                     self.httpToggleBtn.setProperty("httpActive", True)
                     self.httpToggleBtn.style().unpolish(self.httpToggleBtn)
                     self.httpToggleBtn.style().polish(self.httpToggleBtn)
+                    self.httpOpenWebUIBtn.setEnabled(True)
                     printDebugString("HTTP server started on port 8080")
                     self.statusBar.showMessage("HTTP server running on port 8080")
+                    # Enable tray WebUI action if present
+                    if hasattr(self, '_trayWebUIAction'):
+                        self._trayWebUIAction.setEnabled(True)
                 except OSError as e:
                     printDebugString("Could not start HTTP server: " + str(e))
                     self.statusBar.showMessage("HTTP server failed: " + str(e))
                     httpServerInstance = None
                     httpServerThread = None
+
+        def openWebUI(self):
+            """Open the WebUI dashboard in the default browser."""
+            import webbrowser
+            webbrowser.open("http://localhost:8080/")
 
         # === SYSTEM TRAY ===
         def setupSystemTray(self):
@@ -2980,6 +2994,9 @@ try: # try to load the GUI
             trayMenu.addSeparator()
             httpAction = trayMenu.addAction("Toggle HTTP Server")
             httpAction.triggered.connect(self.toggleHTTPServer)
+            self._trayWebUIAction = trayMenu.addAction("Open WebUI")
+            self._trayWebUIAction.triggered.connect(self.openWebUI)
+            self._trayWebUIAction.setEnabled(httpServerRunning)
             self._consoleAction = None
             self._consoleVisible = not _hasConsole  # False if no console (pythonw)
             if _hasConsole:
