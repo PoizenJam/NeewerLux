@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 #############################################################
 ## NeewerLux ver. 1.0.5
-NEEWERLUX_VERSION = "1.0.8"
+NEEWERLUX_VERSION = "1.0.9"
 NEEWERLUX_REPO_URL = "https://github.com/poizenjam/NeewerLux/"
 NEEWERLUX_RELEASES_API = "https://api.github.com/repos/poizenjam/NeewerLux/releases/latest"
 ## A NeewerLite-Python Extension
@@ -232,6 +232,7 @@ presetNames = {} # dict of {preset_index: "custom name"} for user-assigned names
 # ============================================================================
 animationRunning = False       # whether an animation is currently playing
 animationStopFlag = False      # set True to request the animation to stop
+_animChainStop = False         # set True when stopping to chain into another animation (skip revert)
 currentAnimationName = ""      # name of the currently playing animation
 savedAnimations = {}           # dict of {name: animation_dict} loaded from disk
 animationsDir = os.path.dirname(os.path.abspath(sys.argv[0])) + os.sep + "light_prefs" + os.sep + "animations"
@@ -5583,10 +5584,11 @@ def animationSendFrame(frameCommands, loop):
 def animationEngineThread(animation, loop, speedMultiplier=1.0, loopOverride=None, fps=5, briScale=1.0, maxLoops=0):
     """Main animation playback thread. Runs keyframes with timing and interpolation.
     maxLoops: 0 = infinite (if shouldLoop), N>0 = play exactly N times then stop."""
-    global animationRunning, animationStopFlag, currentAnimationName, preAnimationStates, threadAction
+    global animationRunning, animationStopFlag, currentAnimationName, preAnimationStates, threadAction, _animChainStop
 
     animationRunning = True
     animationStopFlag = False
+    _animChainStop = False  # new thread is running — safe to clear the chain flag now
     shouldLoop = loopOverride if loopOverride is not None else animation.get("loop", False)
     keyframes = animation.get("keyframes", [])
     animName = animation.get("name", "Untitled")
@@ -5717,12 +5719,14 @@ def animationEngineThread(animation, loop, speedMultiplier=1.0, loopOverride=Non
         printDebugString("Animation engine error: " + str(e))
 
     userStopped = animationStopFlag  # was this a user-initiated stop?
+    isChaining = _animChainStop     # are we stopping because another animation is about to start?
     animationRunning = False
     currentAnimationName = ""
     printDebugString("Animation '" + animName + "' stopped" + (" (completed " + str(completedLoops) + " loop(s))" if completedLoops > 0 else ""))
 
     # Revert lights to pre-animation state if enabled (both natural finish and user stop)
-    if animRevertOnFinish and preAnimationStates:
+    # BUT NOT if we're chaining into another animation — the new animation will inherit our preAnimationStates
+    if animRevertOnFinish and preAnimationStates and not isChaining:
         printDebugString("Reverting lights to pre-animation state")
         changedLights = []
         for lightIdx, savedState in preAnimationStates.items():
@@ -5745,7 +5749,7 @@ def animationEngineThread(animation, loop, speedMultiplier=1.0, loopOverride=Non
 def startAnimation(animName, loop, speedMultiplier=1.0, loopOverride=None, fps=5, briScale=1.0, maxLoops=0):
     """Start an animation by name. Stops any currently running animation first.
     maxLoops: 0 = use animation's loop setting, N>0 = play N times then stop."""
-    global animationStopFlag, savedAnimations, preAnimationStates
+    global animationStopFlag, savedAnimations, preAnimationStates, _animChainStop
 
     # Case-insensitive name lookup — HTTP args get lowercased by the argument parser
     resolvedName = None
@@ -5761,7 +5765,11 @@ def startAnimation(animName, loop, speedMultiplier=1.0, loopOverride=None, fps=5
     # Stop any running animation — but remember if one was running so we preserve
     # the original pre-animation states (captured before the FIRST animation in a chain)
     wasRunning = animationRunning
+    if wasRunning:
+        _animChainStop = True  # tell the dying thread: don't revert or clear preAnimationStates
     stopAnimation()
+    # NOTE: _animChainStop is cleared at the start of the NEW animation thread,
+    # not here — clearing here would race with the dying thread's revert check.
 
     # Only capture pre-animation states if we're starting fresh. If we're interrupting
     # an existing animation, light[3] would contain that animation's last keyframe values,
