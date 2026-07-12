@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 #############################################################
 ## NeewerLux ver. 1.0.5
-NEEWERLUX_VERSION = "1.0.9"
+NEEWERLUX_VERSION = "1.1.0"
 NEEWERLUX_REPO_URL = "https://github.com/poizenjam/NeewerLux/"
 NEEWERLUX_RELEASES_API = "https://api.github.com/repos/poizenjam/NeewerLux/releases/latest"
 ## A NeewerLite-Python Extension
@@ -2591,7 +2591,7 @@ try: # try to load the GUI
             if enableLogTab:
                 sb = self.logTextEdit.verticalScrollBar()
                 atBottom = sb.value() >= sb.maximum() - 10
-                self.logTextEdit.append(msg)
+                self.logTextEdit.appendPlainText(msg)
                 if atBottom:
                     sb.setValue(sb.maximum())
 

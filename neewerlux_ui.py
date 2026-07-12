@@ -13,7 +13,7 @@ try:
         QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QFormLayout,
         QSplitter, QSizePolicy, QAbstractItemView, QAbstractScrollArea,
         QPushButton, QLabel, QSlider, QTableWidget, QTableWidgetItem,
-        QTabWidget, QCheckBox, QLineEdit, QTextEdit, QSpinBox, QComboBox,
+        QTabWidget, QCheckBox, QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QComboBox,
         QGraphicsView, QGraphicsScene, QScrollArea, QKeySequenceEdit,
         QListWidget, QListWidgetItem, QStatusBar, QHeaderView, QFrame,
         QSystemTrayIcon, QMenu, QTextBrowser
@@ -28,7 +28,7 @@ except ImportError:
             QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QFormLayout,
             QSplitter, QSizePolicy, QAbstractItemView, QAbstractScrollArea,
             QPushButton, QLabel, QSlider, QTableWidget, QTableWidgetItem,
-            QTabWidget, QCheckBox, QLineEdit, QTextEdit, QSpinBox, QComboBox,
+            QTabWidget, QCheckBox, QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QComboBox,
             QGraphicsView, QGraphicsScene, QScrollArea, QKeySequenceEdit,
             QListWidget, QListWidgetItem, QStatusBar, QHeaderView, QFrame,
             QSystemTrayIcon, QMenu, QTextBrowser
@@ -984,10 +984,11 @@ Originally from <a href="https://github.com/keefo/NeewerLite">NeewerLite</a> by 
         logToolbar.addWidget(self.logSaveButton)
         logToolbar.addStretch(1)
         logLay.addLayout(logToolbar)
-        self.logTextEdit = QTextEdit()
+        self.logTextEdit = QPlainTextEdit()
         self.logTextEdit.setReadOnly(True)
         self.logTextEdit.setFont(QFont("Consolas", 9))
-        self.logTextEdit.setLineWrapMode(QTextEdit.NoWrap)
+        self.logTextEdit.setLineWrapMode(QPlainTextEdit.NoWrap)
+        self.logTextEdit.setMaximumBlockCount(2000)  # cap log at 2000 lines to prevent unbounded growth (CPU creep)
         logLay.addWidget(self.logTextEdit)
         self.ColorModeTabWidget.addTab(self.logTab, "Log")
 
