@@ -1,8 +1,6 @@
-"""Web Dashboard for NeewerLux HTTP Server.
+"""Web dashboard served by the NeewerLux HTTP server.
 
-Generates a modern, responsive control panel that replaces the old
-plain-HTML landing page. Provides interactive light control, animation
-playback, preset recall, and status monitoring.
+Light control, animation playback, preset recall, and status monitoring.
 """
 
 def getWebDashboardHTML(serverAddr="", version="0.0.0"):

@@ -1,8 +1,4 @@
-"""Visual Animation Keyframe Editor for NeewerLux.
-
-Provides a GUI dialog for creating/editing animation keyframes
-with visual controls instead of raw JSON editing.
-"""
+"""Visual keyframe editor dialog for NeewerLux animations."""
 
 import json
 import copy
@@ -656,11 +652,11 @@ class AnimationEditorDialog(QDialog):
         if not existing:
             newKey = "*"
         elif hasWildcard:
-            # Currently have "*" — adding a specific light means replacing wildcard
+            # Currently have "*", adding a specific light means replacing wildcard
             # with per-light entries. Suggest "1".
             newKey = "1"
         else:
-            # Have specific lights — suggest next unused number
+            # Have specific lights, suggest next unused number
             newKey = None
             for i in range(1, 20):
                 if str(i) not in existing:
@@ -845,7 +841,7 @@ class AnimationEditorDialog(QDialog):
         for kf in self._keyframes:
             lights = kf.get("lights", {})
             if len(lights) > 1 and "*" in lights:
-                # Wildcard mixed with specific lights — remove wildcard
+                # Wildcard mixed with specific lights, remove wildcard
                 lights.pop("*")
             # Remove duplicate keys (shouldn't happen, but defensive)
             if not lights:

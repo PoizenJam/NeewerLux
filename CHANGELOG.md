@@ -2,6 +2,70 @@
 
 All changes relative to upstream [NeewerLite-Python v0.12d](https://github.com/taburineagle/NeewerLite-Python).
 
+## v1.2.0 — 2026-07-16
+
+Restores three features that were lost to a packaging error, plus a codebase cleanup pass.
+
+### Restored
+- **Mode-aware hotkeys** — brightness and slider shortcuts now act on each selected light according to that light's own mode, rather than only driving the sliders on the currently visible tab. A brightness nudge reaches CCT, HSI and Scene lights in one press. Adjustments that don't apply to a light's mode are skipped, so a hue change leaves CCT lights alone and a saturation change leaves Scene lights alone. Respects the Live Preview setting.
+- **Configurable HTTP port** — the server port is now set in Global Preferences (1024-65535, default 8080) and persists in the prefs file. Useful when 8080 is already taken. Restart the HTTP server to apply.
+- **Hotkey field rendering** — the shortcut fields in Global Preferences no longer draw Qt's internal clear button as an empty square. The external X button was always the one that worked.
+
+### Fixed
+- Replaced four blocks of repeated `if mainWindow is not None:` guards, two of which nested the identical check inside itself.
+- Removed a stale `## NeewerLux ver. 1.0.5` header comment that contradicted the real version constant and had no way to stay in sync. Version now lives in exactly one place.
+- Merged the file banner back into one block; the version constants had been splitting it in two.
+- Dropped the now-unused `changeSliderValue`, superseded by the mode-aware hotkey path.
+
+### Changed
+- Module docstrings now describe what each module is rather than narrating past refactors.
+- Trimmed commentary that restated the line beneath it or recounted bug-hunt history.
+- Removed em-dashes from code comments. User-facing strings keep theirs.
+
+## v1.1.0 — 2026-07-15
+
+### Fixed
+- **Idle CPU creep** — CPU would climb from near-zero to 2-3% over a long session and reset on restart. The Log tab used an uncapped `QTextEdit`, and the worker thread appends to it continuously, so the document grew without bound and every append and repaint got progressively more expensive. The Log tab now uses `QPlainTextEdit` with `setMaximumBlockCount(2000)`, which keeps the document size and its cost flat regardless of uptime.
+
+## v1.0.9 — 2026-07-14
+
+### Fixed
+- **Chained animation revert** — interrupting one animation with another left the lights stranded on the final frame instead of reverting to the pre-animation state. The stopping thread set `animationRunning = False` (releasing `stopAnimation()`) before it read the chain flag, so the flag could be cleared underneath it and the revert would run anyway, wiping the saved states. The flag is now read into a local before that release, making the decision immune to the race.
+
+## v1.0.8 — 2026-07-14
+
+### Added
+- **Open WebUI** button in the toolbar and system tray menu, enabled only while the HTTP server is running.
+
+## v1.0.7 — 2026-07-14
+
+### Changed
+- **Single-source versioning** — the version string was hardcoded in 13 places across 3 files. Everything now derives from `NEEWERLUX_VERSION`: title bar, Info tab, tray tooltip, WebUI header/footer/about, legacy HTTP pages, console banner, and the Windows AppUserModelID.
+- **Global Preferences reorganized** into Startup & Connection, Control & Presets, Light Behaviour, HTTP Server, Window & Display, Logging, Filtering, and Keyboard Shortcuts. No settings added or removed.
+
+## v1.0.4 — 2026-07-13
+
+### Fixed
+- **Chained animation revert (first attempt)** — animations no longer re-capture the pre-animation state when interrupting a running animation, so a chain reverts to the state that preceded the whole chain rather than an intermediate frame. Superseded by v1.0.9, which fixed the underlying thread race this attempt missed.
+
+## v1.0.3 — 2026-07-13
+
+### Added
+- Configurable HTTP port, mode-aware hotkeys, and a fix for the shortcut fields rendering an empty square.
+
+> **These changes did not survive into the shipped code.** Subsequent releases were packaged from a base that predated them, silently reverting all three. They were restored in v1.2.0. If you are reading this history to understand behaviour, treat v1.0.3 through v1.1.0 as not having these features.
+
+## v1.0.2 — 2026-07-13
+
+### Added
+- **Animation loop control over HTTP GET** — the `animate` endpoint accepts `Name|speed|rate|bri|loop|maxLoops|revert`. All fields after the name are positional and optional, so `?animate=Halloween|1.0|10|50|true|2|true` plays twice at 50% and reverts. Previously loop and revert were reachable only via the POST JSON endpoint, which hardware like a Stream Deck cannot send directly.
+
+## v1.0.1 — 2026-07-13
+
+### Fixed
+- **Animation names over HTTP** — the argument parser lowercases GET parameters, but animation names are stored with their original casing, so every `?animate=` request failed to match. Name lookup is now case-insensitive on both the GET and POST paths.
+- **First-connect error in the exe** — the first `BleakClient.connect()` reliably fails in frozen builds while the WinRT backend initializes. A silent warm-up connect now absorbs that failure before the real connect runs, and a genuine first-attempt failure shows "Connecting..." rather than an error.
+
 ## v1.0.0 — 2026-03-20
 
 First public release. Complete rewrite of UI, preset system, animation engine, threading model, and WebUI.
@@ -71,12 +135,11 @@ First public release. Complete rewrite of UI, preset system, animation engine, t
 - **Log tab** — Consolas 9pt, clear/save buttons, buffered file writes (flush every 10s or 50 lines), auto-scroll only when at bottom, background thread log throttled to ~30s intervals.
 
 ### Build & Distribution
-- **PyInstaller spec** (`NeewerLux.spec`) — `--onedir` build with `--collect-all bleak` for WinRT DLLs, `.ico` icon, excludes unused PySide6 modules.
-- **GitHub Actions CI** (`.github/workflows/release.yml`) — triggered on `v*` tags, builds exe on `windows-latest`, packages with `light_prefs/`, creates GitHub Release with download.
-- **Console visibility** — exe built with `console=True`, but `hideConsoleOnLaunch` defaults to `True` for frozen exe builds and `False` for source. Toggle in Global Preferences.
-- `.bat` launchers removed — exe replaces them entirely.
-- `requirements.txt` — `PySide6>=6.5.0`, `bleak>=0.21.0`.
-- `.gitignore` — ignores runtime files, keeps shipped defaults tracked.
+- **PyInstaller spec** (`NeewerLux.spec`) — `--onedir` build with `--collect-all bleak` for WinRT DLLs, `.ico` icon.
+- **GitHub Actions CI** (`.github/workflows/release.yml`) — triggered on `v*` tags, builds exe on `windows-latest`, packages with `light_prefs/`, creates a draft GitHub Release.
+- **Console visibility** — exe is built windowed (`console=False`); the "hide console on startup" preference applies only to source runs and is hidden in the exe.
+- `.bat` launchers retained for source runs, excluded from the exe release zip.
+- `light_prefs/` ships alongside the exe and stays user-editable.
 
 ### Naming & Compatibility
 - Full rename NeewerLite → NeewerLux throughout codebase.

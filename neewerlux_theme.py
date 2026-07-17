@@ -1,8 +1,4 @@
-"""Theme System for NeewerLux.
-
-Provides clean dark and light QSS stylesheets optimized for readability.
-Accent colors are kept subtle — user-customizable themes planned for a future release.
-"""
+"""Dark and light QSS stylesheets for NeewerLux."""
 
 # Default accent colors (subtle, readable)
 ACCENT = "#5b8def"

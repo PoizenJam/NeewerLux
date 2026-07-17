@@ -1,8 +1,7 @@
-"""NeewerLux UI — PJ Overhaul (Layout-based, Resizable, Themed)
+"""NeewerLux main window UI.
 
-Completely rewritten from fixed QRect geometry to QLayout managers.
-All widget attribute names are preserved for backward compatibility
-with NeewerLux.py signal connections.
+Builds the widget tree and layouts. Widget attribute names are the
+contract with NeewerLux.py, which connects the signal handlers.
 """
 
 try:
@@ -13,7 +12,7 @@ try:
         QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QFormLayout,
         QSplitter, QSizePolicy, QAbstractItemView, QAbstractScrollArea,
         QPushButton, QLabel, QSlider, QTableWidget, QTableWidgetItem,
-        QTabWidget, QCheckBox, QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QComboBox,
+        QTabWidget, QCheckBox, QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QComboBox, QAbstractButton,
         QGraphicsView, QGraphicsScene, QScrollArea, QKeySequenceEdit,
         QListWidget, QListWidgetItem, QStatusBar, QHeaderView, QFrame,
         QSystemTrayIcon, QMenu, QTextBrowser
@@ -28,14 +27,14 @@ except ImportError:
             QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QFormLayout,
             QSplitter, QSizePolicy, QAbstractItemView, QAbstractScrollArea,
             QPushButton, QLabel, QSlider, QTableWidget, QTableWidgetItem,
-            QTabWidget, QCheckBox, QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QComboBox,
+            QTabWidget, QCheckBox, QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QComboBox, QAbstractButton,
             QGraphicsView, QGraphicsScene, QScrollArea, QKeySequenceEdit,
             QListWidget, QListWidgetItem, QStatusBar, QHeaderView, QFrame,
             QSystemTrayIcon, QMenu, QTextBrowser
         )
         customSignal = Signal
     except ImportError:
-        raise  # let it propagate — NeewerLux.py will handle the error
+        raise  # let it propagate, NeewerLux.py will handle the error
 
 
 # === HELPER WIDGETS ===
@@ -164,6 +163,12 @@ class singleKeySequenceEditCancel(QWidget):
         self.defaultValue = defaultValue
         self.keySequence = QKeySequence(defaultValue)
         self.keyPressField = QKeySequenceEdit(self.keySequence)
+        self.keyPressField.setMinimumWidth(150)
+        # Qt draws an internal clear button that renders as an empty square on this theme.
+        # The external X button below covers the same job.
+        for _btn in self.keyPressField.findChildren(QAbstractButton):
+            _btn.setFixedSize(0, 0)
+            _btn.setVisible(False)
         self.keyPressField.keySequenceChanged.connect(self._onChanged)
         lay.addWidget(self.keyPressField)
         resetBtn = QPushButton("X")
@@ -741,6 +746,9 @@ class Ui_MainWindow(object):
         self.minimizeToTrayOnClose_check = QCheckBox("Minimize to system tray on close (uncheck to quit on close)")
         self.minimizeToTrayOnClose_check.setChecked(True)
         self.httpAutoStart_check = QCheckBox("Start HTTP server automatically on launch")
+        self.httpPortField = QLineEdit("8080")
+        self.httpPortField.setFixedWidth(70)
+        self.httpPortField.setToolTip("Port for the HTTP server (1024-65535, default 8080). Restart the server to apply.")
         cctFallbackRow = QHBoxLayout()
         cctFallbackLabel = QLabel("Incompatible command handling:")
         self.cctFallbackCombo = QComboBox()
@@ -840,7 +848,7 @@ class Ui_MainWindow(object):
         self.bottomButtonsLay.addWidget(self.resetGlobalPrefsButton, 1, 1)
         self.bottomButtonsLay.addWidget(self.saveGlobalPrefsButton, 1, 2)
 
-        # Build form — organized into logical sections
+        # Build form, organized into logical sections
         self.globalPrefsLay.addRow(QLabel("<strong>Startup &amp; Connection</strong>"))
         self.globalPrefsLay.addRow(self.findLightsOnStartup_check)
         self.globalPrefsLay.addRow(self.autoConnectToLights_check)
@@ -858,6 +866,7 @@ class Ui_MainWindow(object):
 
         self.globalPrefsLay.addRow(QLabel("<br><strong>HTTP Server</strong>"))
         self.globalPrefsLay.addRow(self.httpAutoStart_check)
+        self.globalPrefsLay.addRow("HTTP server port:", self.httpPortField)
 
         self.globalPrefsLay.addRow(QLabel("<br><strong>Window &amp; Display</strong>"))
         self.globalPrefsLay.addRow(self.hideConsoleOnLaunch_check)
@@ -918,7 +927,7 @@ class Ui_MainWindow(object):
 <li><b>Light Aliases &amp; Preferred IDs</b> &mdash; Assign names and numeric IDs to lights for consistent ordering and easy targeting in animations, presets, and HTTP commands</li>
 <li><b>Global CCT Range</b> &mdash; Configurable min/max color temperature bounds (2700K&ndash;8500K) with per-light overrides</li>
 <li><b>CCT Clamping</b> &mdash; Software-side enforcement of CCT bounds with convert/clamp or ignore/skip modes for mixed light setups</li>
-<li><b>WebUI Dashboard</b> &mdash; Browser-based control at <code>http://localhost:8080/</code> with live light table, sliders, preset grid, animation browser, and API reference</li>
+<li><b>WebUI Dashboard</b> &mdash; Browser-based control at <code>http://localhost:8080/</code> with live light table, sliders, preset grid, animation browser, and API reference. Port is configurable in Global Preferences.</li>
 <li><b>HTTP API</b> &mdash; RESTful control via GET/POST &mdash; discover, link, set mode, presets, animations, and batch multi-light commands</li>
 <li><b>System Tray</b> &mdash; Minimize to tray on close, with show/hide and HTTP server toggle from the tray menu</li>
 <li><b>Update Checker</b> &mdash; Check for new releases from within the GUI or WebUI</li>
@@ -936,7 +945,7 @@ class Ui_MainWindow(object):
 </ol>
 <hr>
 <h3>HTTP API Reference</h3>
-<p><b>Base URL:</b> <code>http://localhost:8080/NeewerLux/doAction?</code></p>
+<p><b>Base URL:</b> <code>http://localhost:8080/NeewerLux/doAction?</code> (8080 is the default port; change it in Global Preferences)</p>
 <table cellpadding="4">
 <tr><td><b>discover</b></td><td>Scan for new lights</td></tr>
 <tr><td><b>link=N</b></td><td>Connect to light N (or <code>all</code>)</td></tr>
@@ -995,7 +1004,7 @@ Originally from <a href="https://github.com/keefo/NeewerLite">NeewerLite</a> by 
         # === ASSEMBLE ===
         bottomLay.addWidget(self.ColorModeTabWidget, 1)
         
-        # Apply button — shown when live preview is disabled
+        # Apply button, shown when live preview is disabled
         self.applyButton = QPushButton("Apply Settings")
         self.applyButton.setObjectName("applyButton")
         self.applyButton.setMinimumHeight(32)

@@ -1,9 +1,6 @@
 #!/usr/bin/python3
-#############################################################
-## NeewerLux ver. 1.0.5
-NEEWERLUX_VERSION = "1.1.0"
-NEEWERLUX_REPO_URL = "https://github.com/poizenjam/NeewerLux/"
-NEEWERLUX_RELEASES_API = "https://api.github.com/repos/poizenjam/NeewerLux/releases/latest"
+############################################################
+## NeewerLux
 ## A NeewerLite-Python Extension
 ############################################################
 ## Based on NeewerLite-Python ver. 0.12d by Zach Glenwright
@@ -17,6 +14,10 @@ NEEWERLUX_RELEASES_API = "https://api.github.com/repos/poizenjam/NeewerLux/relea
 ## Bluetooth on multiple platforms -
 ##          Windows, Linux/Ubuntu, MacOS and RPi
 ############################################################
+
+NEEWERLUX_VERSION = "1.2.0"
+NEEWERLUX_REPO_URL = "https://github.com/poizenjam/NeewerLux/"
+NEEWERLUX_RELEASES_API = "https://api.github.com/repos/poizenjam/NeewerLux/releases/latest"
 
 import os
 import sys
@@ -122,7 +123,7 @@ except Exception:
     pass  # not Windows
 
 # CONSOLE MANAGEMENT
-# When launched via pythonw.exe (or NeewerLux.bat), there is no console — these are no-ops.
+# When launched via pythonw.exe (or NeewerLux.bat), there is no console, these are no-ops.
 # When launched via python.exe directly, SW_HIDE works on legacy conhost but NOT on
 # Windows Terminal (which intercepts and downgrades to minimize).
 _hasConsole = False
@@ -164,17 +165,15 @@ try:
 except ImportError:
     getWebDashboardHTML = None
 
-# HELPER: PySide6 uses .exec(), PySide2 uses .exec_() — this calls the right one
+# HELPER: PySide6 uses .exec(), PySide2 uses .exec_(), this calls the right one
 def pyside_exec(obj):
     if hasattr(obj, 'exec'):
         return obj.exec()
     else:
         return obj.exec_()
 
-# HELPER: Resolve resource file paths — works both in normal Python and PyInstaller frozen EXE.
-# PyInstaller extracts bundled data files to sys._MEIPASS; in normal Python, use script directory.
 def _resource_path(filename):
-    """Return the absolute path to a bundled resource file."""
+    """Absolute path to a bundled resource. PyInstaller unpacks to _MEIPASS; source runs use the script dir."""
     if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
         return os.path.join(sys._MEIPASS, filename)
     return os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), filename)
@@ -232,11 +231,11 @@ presetNames = {} # dict of {preset_index: "custom name"} for user-assigned names
 # ============================================================================
 animationRunning = False       # whether an animation is currently playing
 animationStopFlag = False      # set True to request the animation to stop
-_animChainStop = False         # set True when stopping to chain into another animation (skip revert)
+_animChainStop = False         # set when stopping to chain into another animation (skips revert)
 currentAnimationName = ""      # name of the currently playing animation
 savedAnimations = {}           # dict of {name: animation_dict} loaded from disk
 animationsDir = os.path.dirname(os.path.abspath(sys.argv[0])) + os.sep + "light_prefs" + os.sep + "animations"
-lightAliases = {}  # {MAC: {"id": int, "name": str}} — built from per-light prefs sidecar files
+lightAliases = {}  # {MAC: {"id": int, "name": str}}, built from per-light prefs sidecar files
 workerWakeEvent = threading.Event()  # signaled by animation thread to wake the worker immediately
 animParallelWrites = True  # send BLE commands to all lights simultaneously during animations
 animRevertOnFinish = True  # revert lights to pre-animation state when a non-looping animation finishes
@@ -281,6 +280,7 @@ livePreview = True # whether sliders send values in real-time or require clickin
 hideConsoleOnLaunch = False # whether to auto-hide the console window on GUI startup
 minimizeToTrayOnClose = True # whether closing the window minimizes to tray (True) or quits (False)
 httpAutoStart = False # whether to automatically start the HTTP server on launch
+httpPort = 8080 # port the HTTP server listens on
 cctFallbackMode = "convert" # how to handle HSI/ANM commands sent to CCT-only lights: "ignore" or "convert"
 enableLogTab = True # whether to show and populate the Log tab
 logToFile = False # whether to also write log entries to a file
@@ -324,14 +324,14 @@ def singleInstanceLock():
                 # Use PROCESS_QUERY_LIMITED_INFORMATION to check if process is truly alive
                 handle = kernel32.OpenProcess(0x1000, False, oldPid)
                 if handle:
-                    # Check exit code — STILL_ACTIVE (259) means genuinely running
+                    # Check exit code, STILL_ACTIVE (259) means genuinely running
                     exitCode = ctypes.c_ulong()
                     if kernel32.GetExitCodeProcess(handle, ctypes.byref(exitCode)):
                         pidAlive = (exitCode.value == 259)  # 259 = STILL_ACTIVE
                     kernel32.CloseHandle(handle)
             else:
                 try:
-                    os.kill(oldPid, 0) # signal 0 doesn't kill — just checks if PID exists
+                    os.kill(oldPid, 0) # signal 0 doesn't kill, just checks if PID exists
                     pidAlive = True
                 except OSError:
                     pidAlive = False
@@ -339,14 +339,14 @@ def singleInstanceLock():
             if pidAlive:
                 anotherInstance = True # genuinely another instance running
             else:
-                # Stale lock file — remove it and create a fresh one
+                # Stale lock file, remove it and create a fresh one
                 print("Found stale lock file (PID " + str(oldPid) + " is no longer running). Cleaning up...")
                 os.remove(lockFile)
                 lf = os.open(lockFile, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
                 with os.fdopen(lf, 'w') as lockfile:
                     lockfile.write(str(os.getpid()))
         except (ValueError, IOError, OSError):
-            # Lock file exists but can't be read or PID is invalid — remove and recreate
+            # Lock file exists but can't be read or PID is invalid, remove and recreate
             try:
                 os.remove(lockFile)
                 lf = os.open(lockFile, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
@@ -431,7 +431,7 @@ try: # try to load the GUI
                 self.ColorModeTabWidget.setTabEnabled(0, False) # disable the CCT tab on launch
                 self.ColorModeTabWidget.setTabEnabled(1, False) # disable the HSI tab on launch
                 self.ColorModeTabWidget.setTabEnabled(2, False) # disable the SCENE tab on launch
-                # Animations tab (index 3) is always enabled — no light selection needed
+                # Animations tab (index 3) is always enabled, no light selection needed
                 self.ColorModeTabWidget.setTabEnabled(4, False) # disable the LIGHT PREFS tab on launch
                 self.ColorModeTabWidget.setCurrentIndex(6)  # default to Info tab
 
@@ -618,7 +618,7 @@ try: # try to load the GUI
             printDebugString("Duplicated preset " + str(idx + 1) + " → " + str(newIdx + 1))
 
         def _openPresetEditor(self, idx):
-            """Open a dialog to edit preset settings — mirrors animation editor layout."""
+            """Open a dialog to edit preset settings. Mirrors the animation editor layout."""
             global customLightPresets
             from neewerlux_ui import GradientSlider as GSL
             if PYSIDE_VERSION == 6:
@@ -1700,30 +1700,30 @@ try: # try to load the GUI
             self.SC_Tab_PREFS.activated.connect(lambda: self.switchToTab(4))
 
             # DECREASE/INCREASE BRIGHTNESS REGARDLESS OF WHICH TAB WE'RE ON
-            self.SC_Dec_Bri_Small.activated.connect(lambda: self.changeSliderValue(0, -1))
-            self.SC_Inc_Bri_Small.activated.connect(lambda: self.changeSliderValue(0, 1))
-            self.SC_Dec_Bri_Large.activated.connect(lambda: self.changeSliderValue(0, -5))
-            self.SC_Inc_Bri_Large.activated.connect(lambda: self.changeSliderValue(0, 5))
+            self.SC_Dec_Bri_Small.activated.connect(lambda: self.adjustLightParameter(0, -1))
+            self.SC_Inc_Bri_Small.activated.connect(lambda: self.adjustLightParameter(0, 1))
+            self.SC_Dec_Bri_Large.activated.connect(lambda: self.adjustLightParameter(0, -5))
+            self.SC_Inc_Bri_Large.activated.connect(lambda: self.adjustLightParameter(0, 5))
 
             # THE SMALL INCREMENTS DO NEED A SPECIAL FUNCTION-
             # (see above) - BASICALLY, IF THEY'RE JUST ASSIGNED THE DEFAULT NUMPAD/NUMBER VALUES
             # THESE FUNCTIONS DON'T TRIGGER (THE SAME FUNCTIONS ARE HANDLED BY numberShortcuts(n))
             # BUT IF THEY ARE CUSTOM, *THEN* THESE TRIGGER INSTEAD, AND THIS FUNCTION ^^^^ JUST DOES
             # SCENE SELECTIONS IN SCENE MODE
-            self.SC_Dec_1_Small.activated.connect(lambda: self.changeSliderValue(1, -1))
-            self.SC_Inc_1_Small.activated.connect(lambda: self.changeSliderValue(1, 1))
-            self.SC_Dec_2_Small.activated.connect(lambda: self.changeSliderValue(2, -1))
-            self.SC_Inc_2_Small.activated.connect(lambda: self.changeSliderValue(2, 1))
-            self.SC_Dec_3_Small.activated.connect(lambda: self.changeSliderValue(3, -1))
-            self.SC_Inc_3_Small.activated.connect(lambda: self.changeSliderValue(3, 1))
+            self.SC_Dec_1_Small.activated.connect(lambda: self.adjustLightParameter(1, -1))
+            self.SC_Inc_1_Small.activated.connect(lambda: self.adjustLightParameter(1, 1))
+            self.SC_Dec_2_Small.activated.connect(lambda: self.adjustLightParameter(2, -1))
+            self.SC_Inc_2_Small.activated.connect(lambda: self.adjustLightParameter(2, 1))
+            self.SC_Dec_3_Small.activated.connect(lambda: self.adjustLightParameter(3, -1))
+            self.SC_Inc_3_Small.activated.connect(lambda: self.adjustLightParameter(3, 1))
 
             # THE LARGE INCREMENTS DON'T NEED A CUSTOM FUNCTION
-            self.SC_Dec_1_Large.activated.connect(lambda: self.changeSliderValue(1, -5))
-            self.SC_Inc_1_Large.activated.connect(lambda: self.changeSliderValue(1, 5))
-            self.SC_Dec_2_Large.activated.connect(lambda: self.changeSliderValue(2, -5))
-            self.SC_Inc_2_Large.activated.connect(lambda: self.changeSliderValue(2, 5))
-            self.SC_Dec_3_Large.activated.connect(lambda: self.changeSliderValue(3, -5))
-            self.SC_Inc_3_Large.activated.connect(lambda: self.changeSliderValue(3, 5))
+            self.SC_Dec_1_Large.activated.connect(lambda: self.adjustLightParameter(1, -5))
+            self.SC_Inc_1_Large.activated.connect(lambda: self.adjustLightParameter(1, 5))
+            self.SC_Dec_2_Large.activated.connect(lambda: self.adjustLightParameter(2, -5))
+            self.SC_Inc_2_Large.activated.connect(lambda: self.adjustLightParameter(2, 5))
+            self.SC_Dec_3_Large.activated.connect(lambda: self.adjustLightParameter(3, -5))
+            self.SC_Inc_3_Large.activated.connect(lambda: self.adjustLightParameter(3, 5))
 
             # THE NUMPAD SHORTCUTS ARE SET UP REGARDLESS OF WHAT THE CUSTOM INC/DEC SHORTCUTS ARE
             self.SC_Num1 = QShortcut(QKeySequence("1"), self)
@@ -1842,7 +1842,7 @@ try: # try to load the GUI
                     self.computeValueANM(1)
                 else: # if we're not, adjust the slider
                     if customKeys[16] == "1":
-                        self.changeSliderValue(3, -1) # decrement slider 3
+                        self.adjustLightParameter(3, -1) # decrement slider 3
             elif theNumber == 2:
                 if self.ColorModeTabWidget.currentIndex() == 2:
                     self.computeValueANM(2)
@@ -1851,13 +1851,13 @@ try: # try to load the GUI
                     self.computeValueANM(3)
                 else:
                     if customKeys[17] == "3":
-                        self.changeSliderValue(3, 1) # increment slider 3
+                        self.adjustLightParameter(3, 1) # increment slider 3
             elif theNumber == 4:
                 if self.ColorModeTabWidget.currentIndex() == 2:
                     self.computeValueANM(4)
                 else:
                     if customKeys[14] == "4":
-                        self.changeSliderValue(2, -1) # decrement slider 2
+                        self.adjustLightParameter(2, -1) # decrement slider 2
             elif theNumber == 5:
                 if self.ColorModeTabWidget.currentIndex() == 2:
                     self.computeValueANM(5)
@@ -1866,13 +1866,13 @@ try: # try to load the GUI
                     self.computeValueANM(6)
                 else:
                     if customKeys[15] == "6":
-                        self.changeSliderValue(2, 1) # increment slider 2
+                        self.adjustLightParameter(2, 1) # increment slider 2
             elif theNumber == 7:
                 if self.ColorModeTabWidget.currentIndex() == 2:
                     self.computeValueANM(7)
                 else:
                     if customKeys[12] == "7":
-                        self.changeSliderValue(1, -1) # decrement slider 1
+                        self.adjustLightParameter(1, -1) # decrement slider 1
             elif theNumber == 8:
                 if self.ColorModeTabWidget.currentIndex() == 2:
                     self.computeValueANM(8)
@@ -1881,24 +1881,119 @@ try: # try to load the GUI
                     self.computeValueANM(9)
                 else:
                     if customKeys[13] == "9":
-                        self.changeSliderValue(1, 1) # increment slider 1
+                        self.adjustLightParameter(1, 1) # increment slider 1
 
-        def changeSliderValue(self, sliderToChange, changeAmt):
-            if self.ColorModeTabWidget.currentIndex() == 0: # we have 2 sliders in CCT mode
-                if sliderToChange == 1:
-                    self.Slider_CCT_Hue.setValue(self.Slider_CCT_Hue.value() + changeAmt)
-                elif sliderToChange == 2 or sliderToChange == 0:
-                    self.Slider_CCT_Bright.setValue(self.Slider_CCT_Bright.value() + changeAmt)
-            elif self.ColorModeTabWidget.currentIndex() == 1: # we have 3 sliders in HSI mode
-                if sliderToChange == 1:
-                    self.Slider_HSI_1_H.setValue(self.Slider_HSI_1_H.value() + changeAmt)
-                elif sliderToChange == 2:
-                    self.Slider_HSI_2_S.setValue(self.Slider_HSI_2_S.value() + changeAmt)
-                elif sliderToChange == 3 or sliderToChange == 0:
-                    self.Slider_HSI_3_L.setValue(self.Slider_HSI_3_L.value() + changeAmt)
-            elif self.ColorModeTabWidget.currentIndex() == 2:
-                if sliderToChange == 0: # the only "slider" in SCENE mode is the brightness
-                    self.Slider_ANM_Brightness.setValue(self.Slider_ANM_Brightness.value() + changeAmt)
+        def adjustLightParameter(self, paramType, delta):
+            """Adjust a parameter on each selected light according to that light's own mode.
+
+            paramType: 0=brightness, 1=temp/hue, 2=brightness/saturation, 3=intensity.
+            Lights whose mode has no such parameter are skipped, so a hue nudge leaves
+            CCT lights alone and a saturation nudge leaves Scene lights alone.
+            """
+            global threadAction, sendValue
+
+            selectedLights = self.selectedLights()
+            if not selectedLights:
+                selectedLights = list(range(len(availableLights)))
+
+            adjusted = []
+            for lightIdx in selectedLights:
+                if lightIdx >= len(availableLights):
+                    continue
+                params = availableLights[lightIdx][3]
+                if not params or not isinstance(params, list) or len(params) < 4:
+                    continue
+
+                mode = params[1]
+                newParams = list(params)
+
+                if mode == 135: # CCT: [120, 135, 2, bri, temp, checksum]
+                    if paramType in (0, 2):
+                        newParams[3] = max(0, min(100, newParams[3] + delta))
+                    elif paramType == 1:
+                        minK, maxK = getEffectiveCCTRange(lightIdx)
+                        newParams[4] = max(minK // 100, min(maxK // 100, newParams[4] + delta))
+                    else:
+                        continue
+                elif mode == 134: # HSI: [120, 134, 4, hueLo, hueHi, sat, bri, checksum]
+                    if paramType in (0, 3):
+                        newParams[6] = max(0, min(100, newParams[6] + delta))
+                    elif paramType == 1:
+                        hue = (newParams[3] | (newParams[4] << 8)) + delta
+                        hue %= 361
+                        newParams[3] = hue & 255
+                        newParams[4] = (hue >> 8) & 255
+                    elif paramType == 2:
+                        newParams[5] = max(0, min(100, newParams[5] + delta))
+                    else:
+                        continue
+                elif mode == 136: # ANM/Scene: [120, 136, 2, bri, scene, checksum]
+                    if paramType == 0:
+                        newParams[3] = max(0, min(100, newParams[3] + delta))
+                    else:
+                        continue
+                else:
+                    continue
+
+                newParams[-1] = calculateChecksum(newParams)
+                availableLights[lightIdx][3] = newParams
+                adjusted.append(lightIdx)
+
+            if not adjusted:
+                return
+
+            self._syncSlidersToLight(adjusted[0])
+
+            if not livePreview:
+                return
+
+            if animationRunning:
+                stopAnimation()
+                try:
+                    if mainWindow is not None:
+                        mainWindow.animPlayButton.setEnabled(True)
+                        mainWindow.animStopButton.setEnabled(False)
+                        mainWindow.animStatusLabel.setText("Stopped")
+                except Exception:
+                    pass
+
+            if threadAction == "":
+                threadAction = "psend|" + "|".join(map(str, adjusted))
+
+        def _syncSlidersToLight(self, lightIdx):
+            """Move the active tab's sliders to match a light's stored values, without re-sending."""
+            if lightIdx < 0 or lightIdx >= len(availableLights):
+                return
+            params = availableLights[lightIdx][3]
+            if not params or not isinstance(params, list):
+                return
+            mode = params[1]
+            tab = self.ColorModeTabWidget.currentIndex()
+
+            if mode == 135 and tab == 0:
+                widgets = (self.Slider_CCT_Bright, self.Slider_CCT_Hue)
+                for w in widgets: w.blockSignals(True)
+                self.Slider_CCT_Bright.setValue(params[3])
+                self.Slider_CCT_Hue.setValue(params[4])
+                self.TFV_CCT_Bright.setText(str(params[3]) + "%")
+                self.TFV_CCT_Hue.setText(str(params[4]) + "00K")
+                for w in widgets: w.blockSignals(False)
+            elif mode == 134 and tab == 1:
+                hue = params[3] | (params[4] << 8)
+                widgets = (self.Slider_HSI_1_H, self.Slider_HSI_2_S, self.Slider_HSI_3_L)
+                for w in widgets: w.blockSignals(True)
+                self.Slider_HSI_1_H.setValue(hue)
+                self.Slider_HSI_2_S.setValue(params[5])
+                self.Slider_HSI_3_L.setValue(params[6])
+                self.TFV_HSI_1_H.setText(str(hue) + "\u00B0")
+                self.TFV_HSI_2_S.setText(str(params[5]) + "%")
+                self.TFV_HSI_3_L.setText(str(params[6]) + "%")
+                for w in widgets: w.blockSignals(False)
+            elif mode == 136 and tab == 2:
+                self.Slider_ANM_Brightness.blockSignals(True)
+                self.Slider_ANM_Brightness.setValue(params[3])
+                self.TFV_ANM_Brightness.setText(str(params[3]) + "%")
+                self.Slider_ANM_Brightness.blockSignals(False)
 
         def checkLightTab(self, selectedLight = -1):
             if self.ColorModeTabWidget.currentIndex() == 0: # if we're on the CCT tab, do the check
@@ -2090,6 +2185,7 @@ try: # try to load the GUI
                     self.hideConsoleOnLaunch_check.setVisible(False)
                 self.minimizeToTrayOnClose_check.setChecked(minimizeToTrayOnClose)
                 self.httpAutoStart_check.setChecked(httpAutoStart)
+                self.httpPortField.setText(str(httpPort))
                 self.cctFallbackCombo.setCurrentIndex(0 if cctFallbackMode == "convert" else 1)
                 self.enableLogTab_check.setChecked(enableLogTab)
                 self.logToFile_check.setChecked(logToFile)
@@ -2133,6 +2229,7 @@ try: # try to load the GUI
                 self.hideConsoleOnLaunch_check.setChecked(False)
                 self.minimizeToTrayOnClose_check.setChecked(True)
                 self.httpAutoStart_check.setChecked(False)
+                self.httpPortField.setText("8080")
                 self.cctFallbackCombo.setCurrentIndex(0)  # Convert
                 self.enableLogTab_check.setChecked(True)
                 self.logToFile_check.setChecked(False)
@@ -2168,7 +2265,7 @@ try: # try to load the GUI
 
         def saveGlobalPrefs(self):
             # change these global values to the new values in Prefs
-            global customKeys, autoConnectToLights, printDebug, rememberLightsOnExit, rememberPresetsOnExit, autoReconnectOnDisconnect, maxNumOfAttempts, acceptable_HTTP_IPs, whiteListedMACs, hideConsoleOnLaunch, minimizeToTrayOnClose, httpAutoStart, cctFallbackMode, enableLogTab, logToFile, globalCCTMin, globalCCTMax, globalCCTMin, globalCCTMax, enableLogTab, logToFile, globalCCTMin, globalCCTMax, cctFallbackMode
+            global customKeys, autoConnectToLights, printDebug, rememberLightsOnExit, rememberPresetsOnExit, autoReconnectOnDisconnect, maxNumOfAttempts, acceptable_HTTP_IPs, whiteListedMACs, hideConsoleOnLaunch, minimizeToTrayOnClose, httpAutoStart, httpPort, cctFallbackMode, enableLogTab, logToFile, globalCCTMin, globalCCTMax, globalCCTMin, globalCCTMax, enableLogTab, logToFile, globalCCTMin, globalCCTMax, cctFallbackMode
 
             finalPrefs = [] # list of final prefs to merge together at the end
 
@@ -2241,6 +2338,17 @@ try: # try to load the GUI
                 finalPrefs.append("httpAutoStart=1")
             else:
                 httpAutoStart = False
+
+            try:
+                _port = int(self.httpPortField.text().strip())
+                if not 1024 <= _port <= 65535:
+                    raise ValueError
+            except ValueError:
+                _port = 8080
+                self.httpPortField.setText("8080")
+            httpPort = _port
+            if httpPort != 8080: # only save non-default
+                finalPrefs.append("httpPort=" + str(httpPort))
 
             cctFallbackMode = "convert" if self.cctFallbackCombo.currentIndex() == 0 else "ignore"
             if cctFallbackMode != "convert":  # only save non-default
@@ -2685,11 +2793,11 @@ try: # try to load the GUI
         def startSend(self):
             global threadAction
 
-            # If live preview is off, don't auto-send — user clicks Apply instead
+            # If live preview is off, don't auto-send, user clicks Apply instead
             if not livePreview:
                 return
 
-            # If an animation is playing, stop it — user is taking manual control
+            # If an animation is playing, stop it, user is taking manual control
             if animationRunning:
                 stopAnimation()
                 self.animPlayButton.setEnabled(True)
@@ -2945,7 +3053,7 @@ try: # try to load the GUI
             else:
                 # Start the server
                 try:
-                    httpServerInstance = ThreadingHTTPServer(("", 8080), NLPythonServer)
+                    httpServerInstance = ThreadingHTTPServer(("", httpPort), NLPythonServer)
                     httpServerThread = threading.Thread(target=httpServerInstance.serve_forever, name="httpServerThread", daemon=True)
                     httpServerThread.start()
                     httpServerRunning = True
@@ -2954,8 +3062,8 @@ try: # try to load the GUI
                     self.httpToggleBtn.style().unpolish(self.httpToggleBtn)
                     self.httpToggleBtn.style().polish(self.httpToggleBtn)
                     self.httpOpenWebUIBtn.setEnabled(True)
-                    printDebugString("HTTP server started on port 8080")
-                    self.statusBar.showMessage("HTTP server running on port 8080")
+                    printDebugString("HTTP server started on port " + str(httpPort))
+                    self.statusBar.showMessage("HTTP server running on port " + str(httpPort))
                     # Enable tray WebUI action if present
                     if hasattr(self, '_trayWebUIAction'):
                         self._trayWebUIAction.setEnabled(True)
@@ -2968,7 +3076,7 @@ try: # try to load the GUI
         def openWebUI(self):
             """Open the WebUI dashboard in the default browser."""
             import webbrowser
-            webbrowser.open("http://localhost:8080/")
+            webbrowser.open("http://localhost:" + str(httpPort) + "/")
 
         # === SYSTEM TRAY ===
         def setupSystemTray(self):
@@ -3116,7 +3224,7 @@ try: # try to load the GUI
                 self._trayToggleVisibility()
 
         def _trayQuit(self):
-            """Quit for real — don't minimize to tray."""
+            """Quit for real, bypassing minimize-to-tray."""
             self._forceQuit = True
             if self._trayIcon:
                 self._trayIcon.hide()
@@ -3499,7 +3607,7 @@ def saveLightPrefs(lightID, deleteFile = False): # save a sidecar file with the 
         else:
             exportString += "|" # empty lastSettings field so preferredID stays in correct position
 
-        # Preferred ID (5th pipe field) — 0 means auto/no preference
+        # Preferred ID (5th pipe field), 0 means auto/no preference
         preferredID = availableLights[lightID][8] if len(availableLights[lightID]) > 8 else 0
         exportString += "|" + str(preferredID)
 
@@ -3594,13 +3702,14 @@ def recallCustomPreset(numOfPreset, updateGUI=True, loop=None):
     global lastSelection
     global threadAction
 
-    # If an animation is playing, stop it — user is recalling a preset
+    # If an animation is playing, stop it, user is recalling a preset
     if animationRunning:
         stopAnimation()
         try:
-            if mainWindow is not None: mainWindow.animPlayButton.setEnabled(True)
-            if mainWindow is not None: mainWindow.animStopButton.setEnabled(False)
-            if mainWindow is not None: mainWindow.animStatusLabel.setText("Stopped")
+            if mainWindow is not None:
+                mainWindow.animPlayButton.setEnabled(True)
+                mainWindow.animStopButton.setEnabled(False)
+                mainWindow.animStatusLabel.setText("Stopped")
         except Exception:
             pass
 
@@ -3650,7 +3759,7 @@ def recallCustomPreset(numOfPreset, updateGUI=True, loop=None):
                     changedLights.append(b) # add each light to changedLights
                     availableLights[b][3] = computedValue # set each light's "last" parameter to the computed value above
             else:
-                # Presets always send immediately — force a send even if livePreview is off
+                # Presets always send immediately, force a send even if livePreview is off
                 if not livePreview:
                     threadAction = "send"
 
@@ -3691,7 +3800,7 @@ def recallCustomPreset(numOfPreset, updateGUI=True, loop=None):
             mainWindow.lightTable.setFocus() # set the focus to the light table, in order to show which rows are selected
             mainWindow.selectRows(changedLights) # select those rows affected by the lights above
 
-        # Always use the threadAction approach — this is safe from both GUI and HTTP threads
+        # Always use the threadAction approach, this is safe from both GUI and HTTP threads
         threadAction = "send|" + "|".join(map(str, changedLights))
 
 def saveCustomPreset(presetType, numOfPreset, selectedLights = []):
@@ -3731,7 +3840,7 @@ def listBuilder(selectedLight):
 
     if listToWorkWith != []: # if we have elements in this list, then sort them out
         if selectedLight == -1:
-            # Global preset — assume light is ON (user just set this value)
+            # Global preset, assume light is ON (user just set this value)
             paramsListBuilder.append(listToWorkWith[1] - 130)
         elif availableLights[selectedLight][6] == False:
             paramsListBuilder.append(listToWorkWith[1] - 127) # the first value is the mode, but -127 to simplify it (and mark it as being OFF)
@@ -3851,8 +3960,7 @@ def returnMACname():
         return "MAC Address:"
 
 def _get_rssi(device, adv_data=None):
-    """Safely extract RSSI from a BLEDevice or AdvertisementData.
-    Newer Bleak (0.21+) removed BLEDevice.rssi; it's on AdvertisementData instead."""
+    """RSSI from AdvertisementData, falling back to BLEDevice. Bleak 0.21+ removed BLEDevice.rssi."""
     if adv_data is not None:
         try:
             return adv_data.rssi
@@ -3864,8 +3972,7 @@ def _get_rssi(device, adv_data=None):
         return "?"
 
 def _get_light_rssi(light_entry):
-    """Get the RSSI display string for an availableLights entry.
-    Uses stored RSSI at index [9] if available, falls back to device object."""
+    """RSSI display string for an availableLights entry, from index [9] or the device object."""
     if len(light_entry) > 9 and light_entry[9] is not None:
         return str(light_entry[9])
     try:
@@ -4047,7 +4154,7 @@ async def findDevices():
     try:
         scan_results = await BleakScanner.discover(return_adv=True)  # returns dict[str, tuple[BLEDevice, AdvertisementData]]
     except TypeError:
-        # Very old Bleak that doesn't support return_adv — fall back
+        # Very old Bleak that doesn't support return_adv, fall back
         scan_results_list = await BleakScanner.discover()
         scan_results = {d.address: (d, None) for d in scan_results_list}
 
@@ -4088,7 +4195,7 @@ async def findDevices():
 
             if customPrefs[3] is not None and isinstance(customPrefs[3], list): # we have previously stored parameters
                 availableLights.append([device, "", customPrefs[0], customPrefs[3], customPrefs[1], customPrefs[2], True, ["---", "---"], prefID, rssi])
-            else: # no stored parameters — use defaults
+            else: # no stored parameters, use defaults
                 availableLights.append([device, "", customPrefs[0], [120, 135, 2, 20, 56, 157], customPrefs[1], customPrefs[2], True, ["---", "---"], prefID, rssi])
 
     if threadAction != "quit":
@@ -4139,11 +4246,11 @@ def getCustomLightPrefs(MACAddress, lightName = ""):
                 for a in range(len(customPrefs[3])): # convert the string values to ints
                     customPrefs[3][a] = int(customPrefs[3][a])
             except ValueError:
-                customPrefs[3] = None  # malformed last settings — treat as missing
+                customPrefs[3] = None  # malformed last settings, treat as missing
         elif len(customPrefs) >= 4:
             customPrefs[3] = None  # empty lastSettings field
 
-        # Preferred ID is the 5th field (index 4) — parse it and ensure the list has it
+        # Preferred ID is the 5th field (index 4), parse it and ensure the list has it
         preferredID = 0
         if len(customPrefs) >= 5:
             try:
@@ -4162,7 +4269,7 @@ def getCustomLightPrefs(MACAddress, lightName = ""):
         return customPrefs
     else: # if there is no custom preferences file, still check the name against a list of per-light parameters
         specs = getLightSpecs(lightName) # get the factory default settings for this light
-        # getLightSpecs returns [name, tempRange, cctOnly] — extend with None lastSettings and 0 preferredID
+        # getLightSpecs returns [name, tempRange, cctOnly], extend with None lastSettings and 0 preferredID
         while len(specs) < 4:
             specs.append(None)
         if len(specs) < 5:
@@ -4258,7 +4365,7 @@ async def connectToLight(selectedLight, updateGUI=True):
                     if currentAttempt < maxNumOfAttempts:
                         lightIdx = returnLightIndexesFromMacAddress(lightMAC)[0]
                         if currentAttempt == 1:
-                            # First attempt failures are common (BLE adapter settling) — show gentle status
+                            # First attempt failures are common (BLE adapter settling), show gentle status
                             if mainWindow is not None: mainWindow._tableUpdateSignal.emit(["", "", "", "Connecting..."], lightIdx)
                         else:
                             # Subsequent failures are worth reporting
@@ -4438,7 +4545,7 @@ async def writeToLight(selectedLights=0, updateGUI=True, useGlobalValue=True):
                                         if mainWindow is not None: mainWindow._tableUpdateSignal.emit(["", "", "", "CCT temp out of range (ignored)"], int(selectedLights[a]))
                                     continue  # skip this light
                                 elif clampedTemp != currentSendValue[4]:
-                                    currentSendValue = list(currentSendValue)  # copy before modifying
+                                    currentSendValue = list(currentSendValue)
                                     currentSendValue[4] = clampedTemp
                                     currentSendValue[5] = calculateChecksum(currentSendValue)
 
@@ -4688,18 +4795,14 @@ def workerThread(_loop):
                     #for a in range(len(availableLights)):
                     if threadAction != "quit": # if we're not supposed to quit, then try to connect to the light(s)
                         if _isFrozenExe and len(availableLights) > 0:
-                            # In PyInstaller builds, the first BleakClient.connect() call almost
-                            # always fails (WinRT backend one-time initialization). Do a silent
-                            # warm-up attempt with no GUI updates so the user never sees the error.
-                            printDebugString("Frozen EXE detected — performing silent BLE warm-up connect...")
-                            _loop.run_until_complete(parallelAction("connect", [-1], False))  # updateGUI=False
-                            # Clear stale Bleak objects from failed warm-up so real connect creates fresh ones
+                            # First connect always fails in frozen builds (WinRT init), so absorb it silently
+                            printDebugString("Frozen EXE detected, performing silent BLE warm-up connect...")
+                            _loop.run_until_complete(parallelAction("connect", [-1], False))
                             for _wIdx in range(len(availableLights)):
                                 if availableLights[_wIdx][1] != "" and not availableLights[_wIdx][1].is_connected:
                                     availableLights[_wIdx][1] = ""
-                            await_time = 1  # brief pause before real attempt
-                            time.sleep(await_time)
-                        _loop.run_until_complete(parallelAction("connect", [-1])) # real connect with GUI updates
+                            time.sleep(1)
+                        _loop.run_until_complete(parallelAction("connect", [-1]))
 
                 threadAction = ""
         elif threadAction == "connect":
@@ -4718,7 +4821,7 @@ def workerThread(_loop):
         elif threadAction == "send":
             threadAction = _loop.run_until_complete(writeToLight()) # write a value to the light(s) - the selectedLights() section is in the write loop itself for responsiveness
         elif threadAction.startswith("psend|"):
-            # Parallel animation write — send to all specified lights simultaneously
+            # Parallel animation write, send to all specified lights simultaneously
             lightIndices = [int(x) for x in threadAction.split("|")[1:]]
             printDebugString("Going into send mode")
             _loop.run_until_complete(parallelWriteToLights(lightIndices))
@@ -4978,7 +5081,7 @@ def processHTMLCommands(paramsList, loop):
     """
     global threadAction, numOfPresets, defaultLightPresets, customLightPresets
 
-    # Wait briefly if worker is busy — BLE writes can take a few seconds
+    # Wait briefly if worker is busy, BLE writes can take a few seconds
     for _retry in range(20):  # up to 5 seconds
         if threadAction in ("", "HTTP"):
             break
@@ -4995,14 +5098,15 @@ def processHTMLCommands(paramsList, loop):
     if paramsList[3] not in ("animate", "stop_animate", "list_animations") and animationRunning:
         stopAnimation()
         try:
-            if mainWindow is not None: mainWindow.animPlayButton.setEnabled(True)
-            if mainWindow is not None: mainWindow.animStopButton.setEnabled(False)
-            if mainWindow is not None: mainWindow.animStatusLabel.setText("Stopped")
+            if mainWindow is not None:
+                mainWindow.animPlayButton.setEnabled(True)
+                mainWindow.animStopButton.setEnabled(False)
+                mainWindow.animStatusLabel.setText("Stopped")
         except Exception:
             pass
 
     if paramsList[3] == "discover":
-        # Queue discovery — worker thread handles "discover" natively (including auto-connect)
+        # Queue discovery, worker thread handles "discover" natively (including auto-connect)
         threadAction = "discover"
 
     elif paramsList[3] == "link":
@@ -5117,7 +5221,7 @@ def processHTMLCommands(paramsList, loop):
                 loadLightAliases()
 
     else:
-        # CCT / HSI / ANM / ON / OFF — compute bytestring, store on lights, queue send
+        # CCT / HSI / ANM / ON / OFF, compute bytestring, store on lights, queue send
         if paramsList[3] == "CCT":
             computedValue = calculateByteString(True, colorMode=paramsList[3], temp=paramsList[4], brightness=paramsList[5])
         elif paramsList[3] == "HSI":
@@ -5223,13 +5327,13 @@ def returnLightIndexesFromMacAddress(addresses):
                 if numericID in aliasIDToMAC:
                     resolvedMAC = aliasIDToMAC[numericID]
                 else:
-                    # No alias for this ID — fall back to discovery order (1-based)
+                    # No alias for this ID, fall back to discovery order (1-based)
                     idx = numericID - 1
                     if 0 <= idx < len(availableLights):
                         foundIndexes.append(idx)
                     continue
             except ValueError:
-                # Not a number — try as MAC address
+                # Not a number, try as MAC address
                 resolvedMAC = addr.upper()
 
         # Resolve MAC to availableLights index
@@ -5428,7 +5532,7 @@ def getEffectiveCCTRange(lightIdx=None):
         lightRange = availableLights[lightIdx][4]
         defaultRange = getLightSpecs(availableLights[lightIdx][0].name, "temp")
         if lightRange != defaultRange:
-            # Per-light custom range set — use it
+            # Per-light custom range set, use it
             return (lightRange[0], lightRange[1])
     return (globalCCTMin, globalCCTMax)
 
@@ -5475,7 +5579,7 @@ def applyCCTFallback(lightIdx, byteVal, mode=None, hue=0, bri=100):
                 b = byteVal[6] if len(byteVal) > 6 else 100
                 return hsiToCCTByteVal(h, 100, b)
             else:
-                # ANM or unknown — use neutral temp at the specified brightness
+                # ANM or unknown, use neutral temp at the specified brightness
                 b = byteVal[3] if byteVal and len(byteVal) > 3 else 50
                 return calculateByteString(True, colorMode="CCT", brightness=max(0, min(100, b)), temp=45)
         except Exception:
@@ -5555,7 +5659,7 @@ def animationSendFrame(frameCommands, loop):
                 actualByteVal = applyCCTFallback(lightIdx, byteVal, mode=mode,
                                                  hue=cmd.get("hue", 240), bri=cmd.get("bri", 100))
                 if actualByteVal is None:
-                    continue  # ignore mode — skip this light
+                    continue  # ignore mode, skip this light
                 availableLights[lightIdx][3] = actualByteVal
                 if lightIdx not in changedLights:
                     changedLights.append(lightIdx)
@@ -5570,9 +5674,9 @@ def animationSendFrame(frameCommands, loop):
         time.sleep(0.01)
     else:
         printDebugString("Animation frame dropped: worker busy")
-        return  # worker is still busy — drop this frame (logged, not silent)
+        return  # worker is still busy, drop this frame (logged, not silent)
 
-    # Signal the worker thread and return immediately — do NOT wait for completion.
+    # Signal the worker thread and return immediately, do NOT wait for completion.
     # The next call's "wait for free" check handles sequencing.
     if animParallelWrites:
         threadAction = "psend|" + "|".join(map(str, changedLights))
@@ -5588,7 +5692,7 @@ def animationEngineThread(animation, loop, speedMultiplier=1.0, loopOverride=Non
 
     animationRunning = True
     animationStopFlag = False
-    _animChainStop = False  # new thread is running — safe to clear the chain flag now
+    _animChainStop = False  # safe to clear now that the new thread is running
     shouldLoop = loopOverride if loopOverride is not None else animation.get("loop", False)
     keyframes = animation.get("keyframes", [])
     animName = animation.get("name", "Untitled")
@@ -5636,7 +5740,7 @@ def animationEngineThread(animation, loop, speedMultiplier=1.0, loopOverride=Non
                 lastGUIUpdate = now
                 try:
                     if mainWindow is not None:
-                        if mainWindow is not None: mainWindow.animStatusLabel.setText("Playing: " + animName + "\nFrame " + str(frameIndex + 1) + "/" + str(totalFrames))
+                        mainWindow.animStatusLabel.setText("Playing: " + animName + "\nFrame " + str(frameIndex + 1) + "/" + str(totalFrames))
                 except Exception:
                     pass
 
@@ -5718,14 +5822,13 @@ def animationEngineThread(animation, loop, speedMultiplier=1.0, loopOverride=Non
     except Exception as e:
         printDebugString("Animation engine error: " + str(e))
 
-    userStopped = animationStopFlag  # was this a user-initiated stop?
-    isChaining = _animChainStop     # are we stopping because another animation is about to start?
+    userStopped = animationStopFlag
+    isChaining = _animChainStop  # must be read before animationRunning=False releases stopAnimation()
     animationRunning = False
     currentAnimationName = ""
     printDebugString("Animation '" + animName + "' stopped" + (" (completed " + str(completedLoops) + " loop(s))" if completedLoops > 0 else ""))
 
-    # Revert lights to pre-animation state if enabled (both natural finish and user stop)
-    # BUT NOT if we're chaining into another animation — the new animation will inherit our preAnimationStates
+    # Skipped when chaining: the incoming animation inherits preAnimationStates
     if animRevertOnFinish and preAnimationStates and not isChaining:
         printDebugString("Reverting lights to pre-animation state")
         changedLights = []
@@ -5739,9 +5842,9 @@ def animationEngineThread(animation, loop, speedMultiplier=1.0, loopOverride=Non
 
     try:
         if mainWindow is not None:
-            if mainWindow is not None: mainWindow.animStatusLabel.setText("Stopped")
-            if mainWindow is not None: mainWindow.animPlayButton.setEnabled(True)
-            if mainWindow is not None: mainWindow.animStopButton.setEnabled(False)
+            mainWindow.animStatusLabel.setText("Stopped")
+            mainWindow.animPlayButton.setEnabled(True)
+            mainWindow.animStopButton.setEnabled(False)
     except Exception:
         pass
 
@@ -5751,7 +5854,7 @@ def startAnimation(animName, loop, speedMultiplier=1.0, loopOverride=None, fps=5
     maxLoops: 0 = use animation's loop setting, N>0 = play N times then stop."""
     global animationStopFlag, savedAnimations, preAnimationStates, _animChainStop
 
-    # Case-insensitive name lookup — HTTP args get lowercased by the argument parser
+    # Case-insensitive name lookup, HTTP args get lowercased by the argument parser
     resolvedName = None
     for key in savedAnimations:
         if key.lower() == animName.lower():
@@ -5762,23 +5865,18 @@ def startAnimation(animName, loop, speedMultiplier=1.0, loopOverride=None, fps=5
         return False
     animName = resolvedName
 
-    # Stop any running animation — but remember if one was running so we preserve
-    # the original pre-animation states (captured before the FIRST animation in a chain)
+    # Chaining: keep the states captured before the first animation in the chain.
+    # Cleared by the new animation thread, not here, to avoid racing the old thread's revert check.
     wasRunning = animationRunning
     if wasRunning:
-        _animChainStop = True  # tell the dying thread: don't revert or clear preAnimationStates
+        _animChainStop = True
     stopAnimation()
-    # NOTE: _animChainStop is cleared at the start of the NEW animation thread,
-    # not here — clearing here would race with the dying thread's revert check.
 
-    # Only capture pre-animation states if we're starting fresh. If we're interrupting
-    # an existing animation, light[3] would contain that animation's last keyframe values,
-    # not the user's pre-animation state. Keep the original states instead.
     if not wasRunning:
         preAnimationStates = {}
         for i, light in enumerate(availableLights):
             if light[3] is not None and isinstance(light[3], list) and len(light[3]) > 0:
-                preAnimationStates[i] = list(light[3])  # deep copy
+                preAnimationStates[i] = list(light[3])
 
     animation = savedAnimations[animName].copy()
     t = threading.Thread(target=animationEngineThread,
@@ -6699,7 +6797,7 @@ def createLightPrefsFolder():
 def loadPrefsFile(globalPrefsFile = ""):
     global findLightsOnStartup, autoConnectToLights, printDebug, maxNumOfAttempts, \
            rememberLightsOnExit, acceptable_HTTP_IPs, customKeys, enableTabsOnLaunch, \
-           whiteListedMACs, rememberPresetsOnExit, autoReconnectOnDisconnect, livePreview, hideConsoleOnLaunch, minimizeToTrayOnClose, httpAutoStart, cctFallbackMode, enableLogTab, logToFile, globalCCTMin, globalCCTMax
+           whiteListedMACs, rememberPresetsOnExit, autoReconnectOnDisconnect, livePreview, hideConsoleOnLaunch, minimizeToTrayOnClose, httpAutoStart, httpPort, cctFallbackMode, enableLogTab, logToFile, globalCCTMin, globalCCTMax
 
     if globalPrefsFile != "":
         printDebugString("Loading global preferences from file...")
@@ -6712,7 +6810,7 @@ def loadPrefsFile(globalPrefsFile = ""):
             "SC_Dec_Bri_Small", "SC_Inc_Bri_Small", "SC_Dec_Bri_Large", "SC_Inc_Bri_Large", \
             "SC_Dec_1_Small", "SC_Inc_1_Small", "SC_Dec_2_Small", "SC_Inc_2_Small", "SC_Dec_3_Small", "SC_Inc_3_Small", \
             "SC_Dec_1_Large", "SC_Inc_1_Large", "SC_Dec_2_Large", "SC_Inc_2_Large", "SC_Dec_3_Large", "SC_Inc_3_Large", \
-            "enableTabsOnLaunch", "whiteListedMACs", "rememberPresetsOnExit", "autoReconnectOnDisconnect", "hideConsoleOnLaunch", "minimizeToTrayOnClose", "livePreview", "httpAutoStart", "cctFallbackMode", "enableLogTab", "logToFile", "globalCCTMin", "globalCCTMax"]
+            "enableTabsOnLaunch", "whiteListedMACs", "rememberPresetsOnExit", "autoReconnectOnDisconnect", "hideConsoleOnLaunch", "minimizeToTrayOnClose", "livePreview", "httpAutoStart", "httpPort", "cctFallbackMode", "enableLogTab", "logToFile", "globalCCTMin", "globalCCTMax"]
 
         # KICK OUT ANY PARAMETERS THAT AREN'T IN THE "ACCEPTABLE ARGUMENTS" LIST ABOVE
         # THIS SECTION OF CODE IS *SLIGHTLY* DIFFERENT THAN THE CLI KICK OUT CODE
@@ -6743,6 +6841,7 @@ def loadPrefsFile(globalPrefsFile = ""):
     prefsParser.add_argument("--hideConsoleOnLaunch", default=0)
     prefsParser.add_argument("--minimizeToTrayOnClose", default=1)
     prefsParser.add_argument("--httpAutoStart", default=0)
+    prefsParser.add_argument("--httpPort", default=8080)
     prefsParser.add_argument("--cctFallbackMode", default="convert")
     prefsParser.add_argument("--enableLogTab", default=1)
     prefsParser.add_argument("--logToFile", default=0)
@@ -6794,6 +6893,12 @@ def loadPrefsFile(globalPrefsFile = ""):
     hideConsoleOnLaunch = bool(int(mainPrefs.hideConsoleOnLaunch)) # whether to auto-hide the console window on GUI startup
     minimizeToTrayOnClose = bool(int(mainPrefs.minimizeToTrayOnClose))
     httpAutoStart = bool(int(mainPrefs.httpAutoStart))
+    try:
+        httpPort = int(mainPrefs.httpPort)
+        if not 1024 <= httpPort <= 65535:
+            httpPort = 8080
+    except (ValueError, TypeError):
+        httpPort = 8080
     cctFallbackMode = mainPrefs.cctFallbackMode if mainPrefs.cctFallbackMode in ("convert", "ignore") else "convert"
     enableLogTab = bool(int(mainPrefs.enableLogTab))
     logToFile = bool(int(mainPrefs.logToFile))
@@ -6872,10 +6977,10 @@ if __name__ == '__main__':
             httpWorker = threading.Thread(target=workerThread, args=(asyncioEventLoop,), name="workerThread", daemon=True)
             httpWorker.start()
 
-            webServer = ThreadingHTTPServer(("", 8080), NLPythonServer)
+            webServer = ThreadingHTTPServer(("", httpPort), NLPythonServer)
 
             try:
-                printDebugString("Starting the HTTP Server on Port 8080...")
+                printDebugString("Starting the HTTP Server on Port " + str(httpPort) + "...")
                 printDebugString("-------------------------------------------------------------------------------------")
 
                 # start the HTTP server and wait for requests
