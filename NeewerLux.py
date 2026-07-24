@@ -1501,7 +1501,8 @@ try: # try to load the GUI
 
             layout.addWidget(QL("<b>Keyframes (JSON)</b> — edit directly:"))
             jsonEdit = QTE()
-            jsonEdit.setFont(QFont("Courier", 9))
+            from neewerlux_ui import _monoFont
+            jsonEdit.setFont(_monoFont(9))
             jsonEdit.setPlainText(json.dumps(anim.get("keyframes", []), indent=2))
             layout.addWidget(jsonEdit)
 

@@ -27,6 +27,10 @@ WEB_DASHBOARD_HTML = r"""<!DOCTYPE html>
     --green: #4caf50;
     --green-dim: #388e3c;
     --red: #e05555;
+    --radius-sm: 3px;
+    --radius: 4px;
+    --radius-lg: 8px;
+    --radius-pill: 999px;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
@@ -59,7 +63,7 @@ a:hover { text-decoration: underline; }
 .header .status-pill {
     font-size: 11px;
     padding: 3px 10px;
-    border-radius: 12px;
+    border-radius: var(--radius-pill);
     background: var(--bg3);
     border: 1px solid var(--border);
 }
@@ -70,7 +74,7 @@ a:hover { text-decoration: underline; }
     border: 1px solid var(--border);
     color: var(--text);
     padding: 5px 14px;
-    border-radius: 4px;
+    border-radius: var(--radius);
     cursor: pointer;
     font-size: 12px;
 }
@@ -91,7 +95,7 @@ a:hover { text-decoration: underline; }
 .card {
     background: var(--bg2);
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: var(--radius-lg);
     overflow: hidden;
 }
 .card-header {
@@ -172,7 +176,7 @@ select, input[type="number"] {
     background: var(--bg);
     color: var(--text);
     border: 1px solid var(--border);
-    border-radius: 4px;
+    border-radius: var(--radius);
     padding: 5px 8px;
     font-size: 12px;
     width: 100%;
@@ -185,7 +189,7 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
     border: 1px solid var(--border);
     color: var(--text);
     padding: 7px 16px;
-    border-radius: 4px;
+    border-radius: var(--radius);
     cursor: pointer;
     font-size: 12px;
     font-weight: 500;
@@ -213,7 +217,7 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
     border: 1px solid var(--border);
     color: var(--text);
     padding: 10px 6px;
-    border-radius: 4px;
+    border-radius: var(--radius);
     cursor: pointer;
     font-size: 11px;
     text-align: center;
@@ -227,7 +231,7 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
 .preset-btn {
     background: var(--card-bg);
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: var(--radius);
     color: var(--text);
     padding: 8px 4px;
     cursor: pointer;
@@ -247,7 +251,7 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
     max-height: 200px;
     overflow-y: auto;
     border: 1px solid var(--border);
-    border-radius: 4px;
+    border-radius: var(--radius);
     margin-bottom: 10px;
 }
 .anim-item {
@@ -289,7 +293,7 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
 .log {
     background: var(--bg);
     border: 1px solid var(--border);
-    border-radius: 4px;
+    border-radius: var(--radius);
     padding: 10px;
     font-family: 'Consolas', 'Courier New', monospace;
     font-size: 11px;
@@ -306,7 +310,7 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
 .api-code {
     background: var(--bg);
     border: 1px solid var(--border);
-    border-radius: 4px;
+    border-radius: var(--radius);
     padding: 6px 10px;
     font-family: monospace;
     font-size: 11px;
@@ -319,7 +323,7 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
 /* Scrollbar */
 ::-webkit-scrollbar { width: 8px; }
 ::-webkit-scrollbar-track { background: var(--bg2); }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: var(--radius); }
 ::-webkit-scrollbar-thumb:hover { background: var(--accent); }
 </style>
 </head>
@@ -329,15 +333,15 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
     <h1><span>Neewer</span>Lux <small style="color:#888;font-size:12px">{NLVERSION}</small></h1>
     <div class="spacer"></div>
     <span class="status-pill" id="connStatus">Loading...</span>
-    <button class="refresh-btn" onclick="scanForLights()" title="Scan for new Bluetooth lights">&#x1F50D; Scan</button>
-    <button class="refresh-btn" onclick="linkAllLights()" title="Link to all discovered lights">&#x1F517; Link All</button>
+    <button class="refresh-btn" onclick="scanForLights()" title="Scan for new Bluetooth lights">Scan</button>
+    <button class="refresh-btn" onclick="linkAllLights()" title="Link to all discovered lights">Link All</button>
     <button class="refresh-btn" onclick="refreshAll()">&#x21BB; Refresh</button>
 </div>
 
 <div class="container">
     <!-- LIGHTS -->
     <div class="card full-width">
-        <div class="card-header">&#x1F4A1; Lights</div>
+        <div class="card-header">Lights</div>
         <div class="card-body" style="padding:0">
             <table class="light-table">
                 <thead><tr><th>#</th><th>Light Name</th><th>MAC Address</th><th>Status</th><th>Current</th><th>Actions</th></tr></thead>
@@ -348,7 +352,7 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
 
     <!-- PRESETS -->
     <div class="card full-width">
-        <div class="card-header">&#x1F3B9; Custom Presets</div>
+        <div class="card-header">Custom Presets</div>
         <div class="card-body">
             <div id="presetGrid" style="display:grid;grid-template-columns:repeat(8,1fr);gap:6px;max-height:140px;overflow-y:auto;">
                 <div style="color:#888;grid-column:1/-1;text-align:center;padding:10px;">Loading presets...</div>
@@ -358,7 +362,7 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
 
     <!-- CONTROL PANEL -->
     <div class="card">
-        <div class="card-header">&#x1F3AE; Light Control</div>
+        <div class="card-header">Light Control</div>
         <div class="card-body">
             <div class="control-group">
                 <label>Target Light</label>
@@ -415,7 +419,7 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
                         <span class="val" id="hsiBriVal">100%</span>
                     </div>
                 </div>
-                <div id="huePreview" style="height:8px;border-radius:4px;margin-bottom:10px;background:hsl(240,100%,50%)"></div>
+                <div id="huePreview" style="height:8px;border-radius: var(--radius);margin-bottom:10px;background:hsl(240,100%,50%)"></div>
                 <button class="btn primary" style="width:100%" onclick="sendHSI()">Apply HSI</button>
             </div>
 
@@ -442,15 +446,15 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
             </div>
 
             <div class="btn-row" style="margin-top:12px">
-                <button class="btn success" onclick="sendPower('on')">&#x1F7E2; On</button>
-                <button class="btn danger" onclick="sendPower('off')">&#x1F534; Off</button>
+                <button class="btn success" onclick="sendPower('on')">On</button>
+                <button class="btn danger" onclick="sendPower('off')">Off</button>
             </div>
         </div>
     </div>
 
     <!-- ANIMATIONS -->
     <div class="card">
-        <div class="card-header">&#x1F3AC; Animations</div>
+        <div class="card-header">Animations</div>
         <div class="card-body">
             <div class="anim-list" id="animList">
                 <div class="anim-item" style="color:#888">Loading...</div>
@@ -487,7 +491,7 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
     <!-- COMMAND LOG (collapsible) -->
     <div class="card full-width">
         <div class="card-header" style="cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
-            &#x1F4CB; Command Log <span style="color:#888;font-size:11px">(click to toggle)</span>
+            Command Log
         </div>
         <div class="card-body" style="padding:8px">
             <div class="log" id="commandLog" style="max-height:150px;overflow-y:auto;font-family:monospace;font-size:12px;line-height:1.6"></div>
@@ -497,37 +501,15 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
     <!-- INFO (collapsible) -->
     <div class="card full-width">
         <div class="card-header" style="cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
-            &#x2139;&#xFE0F; About NeewerLux <span style="color:#888;font-size:11px">(click to expand)</span>
+            About NeewerLux
         </div>
         <div class="card-body" style="display:none">
             <h3 style="color:var(--accent);margin-top:0">NeewerLux {NLVERSION}</h3>
-            <p>Cross-platform Neewer LED light control for streamers and content creators.</p>
-            <hr style="border-color:var(--border)">
-            <h4>Features</h4>
-            <ul style="padding-left:20px;line-height:1.8">
-                <li><b>Bluetooth Light Control</b> &mdash; Scan, connect, and control Neewer LED lights via CCT, HSI, and Scene modes</li>
-                <li><b>Animation Engine</b> &mdash; Keyframe-based animations with smooth interpolation, parallel BLE writes, and 101 built-in presets</li>
-                <li><b>Visual Animation Editor</b> &mdash; Color-coded keyframe table, GradientSlider controls, per-light targeting, copy/paste, and live preview</li>
-                <li><b>Preset System</b> &mdash; Unlimited presets with right-click save, left-click recall, middle-click rename, and a visual Preset Editor</li>
-                <li><b>Light Aliases &amp; Preferred IDs</b> &mdash; Assign names and IDs for consistent ordering and targeting</li>
-                <li><b>Global CCT Range</b> &mdash; Configurable min/max color temperature (2700K&ndash;8500K) with per-light overrides</li>
-                <li><b>CCT Clamping</b> &mdash; Software-side enforcement with convert/clamp or ignore/skip modes</li>
-                <li><b>WebUI Dashboard</b> &mdash; This page! Live light table, sliders, preset grid, animation browser, and API reference</li>
-                <li><b>HTTP API</b> &mdash; RESTful control via GET/POST for automation and integration</li>
-            </ul>
-            <h4>Helpful Notes</h4>
-            <ul style="padding-left:20px;line-height:1.8">
-                <li>Preset and animation files are in <code>light_prefs/</code> alongside the application and can be manually edited</li>
-                <li>Animations support targeting by alias name, preferred ID, MAC address, or <code>"*"</code> for all lights</li>
-                <li>CCT-only lights automatically participate in HSI animations via color temperature mapping</li>
-            </ul>
-            <h4>Keyboard Shortcuts (Desktop GUI)</h4>
-            <table style="width:100%;font-size:12px;border-collapse:collapse">
-                <tr><td style="padding:3px 8px"><b>Left-click</b> preset</td><td>Recall preset</td></tr>
-                <tr><td style="padding:3px 8px"><b>Right-click</b> preset</td><td>Context menu (save, rename, move, delete)</td></tr>
-                <tr><td style="padding:3px 8px"><b>Middle-click</b> preset</td><td>Quick rename</td></tr>
-                <tr><td style="padding:3px 8px"><b>Alt+1/2/3/4</b></td><td>Switch to CCT / HSI / Scene / Light Prefs tab</td></tr>
-            </table>
+            <p>This dashboard controls the same lights as the desktop app, over HTTP.
+            Anything here can also be driven by a plain URL, which is how hardware like a
+            Stream Deck talks to it. See the API Reference below for the full list.</p>
+            <p style="color:var(--muted)">Presets and animations are managed in the desktop
+            app. Its Info tab documents them in full.</p>
             <hr style="border-color:var(--border)">
             <div id="updateCheckArea">
                 <button class="btn" onclick="checkForUpdates()">Check for Updates</button>
@@ -537,7 +519,7 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
             <p style="color:var(--muted);font-size:0.9em;">
                 <b>Repository:</b> <a href="https://github.com/poizenjam/NeewerLux/" style="color:var(--accent)">github.com/poizenjam/NeewerLux</a><br>
                 <b>Releases:</b> <a href="https://github.com/poizenjam/NeewerLux/releases" style="color:var(--accent)">github.com/poizenjam/NeewerLux/releases</a><br><br>
-                Based on <a href="https://github.com/taburineagle/NeewerLite-Python/" style="color:var(--accent)">NeewerLite-Python</a> (v0.12d) by Zach Glenwright &mdash;
+                Based on <a href="https://github.com/taburineagle/NeewerLite-Python/" style="color:var(--accent)">NeewerLite-Python</a> (v0.12d) by Zach Glenwright.
                 Originally from <a href="https://github.com/keefo/NeewerLite" style="color:var(--accent)">NeewerLite</a> by Xu Lian
             </p>
         </div>
@@ -546,7 +528,7 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
     <!-- API REFERENCE (collapsible) -->
     <div class="card full-width">
         <div class="card-header" style="cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
-            &#x1F4D6; API Reference <span style="color:#888;font-size:11px">(click to expand)</span>
+            API Reference
         </div>
         <div class="card-body" style="display:none">
             <div class="api-section">
@@ -566,7 +548,7 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
             </div>
             <div class="api-section">
                 <h3>Animations</h3>
-                <div class="api-desc">Play by name (GET) &mdash; <code>Name|speed|rate|bri|loop|maxLoops|revert</code></div>
+                <div class="api-desc">Play by name (GET). Format: <code>Name|speed|rate|bri|loop|maxLoops|revert</code></div>
                 <div class="api-code">GET /NeewerLux/doAction?animate=Concert%20Sweep|1.0|10|80</div>
                 <div class="api-desc">With loop control: play twice then revert</div>
                 <div class="api-code">GET /NeewerLux/doAction?animate=Halloween|1.0|10|50|true|2|true</div>
@@ -930,9 +912,9 @@ window.addEventListener('load', () => {
 });
 </script>
 <div style="text-align:center;padding:16px 0 8px;font-size:11px;color:var(--muted);">
-    NeewerLux {NLVERSION} &mdash;
+    NeewerLux {NLVERSION}<br>
     <a href="https://github.com/poizenjam/NeewerLux/" style="color:var(--accent)">github.com/poizenjam/NeewerLux</a><br>
-    Based on <a href="https://github.com/taburineagle/NeewerLite-Python/" style="color:var(--accent)">NeewerLite-Python</a> (v0.12d) by Zach Glenwright &mdash;
+    Based on <a href="https://github.com/taburineagle/NeewerLite-Python/" style="color:var(--accent)">NeewerLite-Python</a> (v0.12d) by Zach Glenwright.
     Originally from <a href="https://github.com/keefo/NeewerLite" style="color:var(--accent)">NeewerLite</a> by Xu Lian
 </div>
 </body>

@@ -2,14 +2,14 @@
 
 All changes relative to upstream [NeewerLite-Python v0.12d](https://github.com/taburineagle/NeewerLite-Python).
 
-## v1.2.0 — 2026-07-16
+## v1.2.0 — 2026-07-24
 
-Restores three features that were lost to a packaging error, plus a codebase cleanup pass.
+Restores three features lost to a packaging error, then a cleanup pass over the codebase and the interface.
 
 ### Restored
-- **Mode-aware hotkeys** — brightness and slider shortcuts now act on each selected light according to that light's own mode, rather than only driving the sliders on the currently visible tab. A brightness nudge reaches CCT, HSI and Scene lights in one press. Adjustments that don't apply to a light's mode are skipped, so a hue change leaves CCT lights alone and a saturation change leaves Scene lights alone. Respects the Live Preview setting.
-- **Configurable HTTP port** — the server port is now set in Global Preferences (1024-65535, default 8080) and persists in the prefs file. Useful when 8080 is already taken. Restart the HTTP server to apply.
-- **Hotkey field rendering** — the shortcut fields in Global Preferences no longer draw Qt's internal clear button as an empty square. The external X button was always the one that worked.
+- **Mode-aware hotkeys**. Brightness and slider shortcuts now act on each selected light according to that light's own mode, rather than only driving the sliders on the currently visible tab. A brightness nudge reaches CCT, HSI and Scene lights in one press. Adjustments that don't apply to a light's mode are skipped, so a hue change leaves CCT lights alone and a saturation change leaves Scene lights alone. Respects the Live Preview setting.
+- **Configurable HTTP port**. The server port is now set in Global Preferences (1024-65535, default 8080) and persists in the prefs file. Useful when 8080 is already taken. Restart the HTTP server to apply.
+- **Hotkey field rendering**. The shortcut fields in Global Preferences no longer draw Qt's internal clear button as an empty square. The external X button was always the one that worked.
 
 ### Fixed
 - Replaced four blocks of repeated `if mainWindow is not None:` guards, two of which nested the identical check inside itself.
@@ -17,10 +17,28 @@ Restores three features that were lost to a packaging error, plus a codebase cle
 - Merged the file banner back into one block; the version constants had been splitting it in two.
 - Dropped the now-unused `changeSliderValue`, superseded by the mode-aware hotkey path.
 
-### Changed
+### Code comments
 - Module docstrings now describe what each module is rather than narrating past refactors.
 - Trimmed commentary that restated the line beneath it or recounted bug-hunt history.
-- Removed em-dashes from code comments. User-facing strings keep theirs.
+- Removed em-dashes from code comments and from interface text.
+
+### Theming
+- **Both themes now generate from one template.** Dark and light were parallel stylesheets with 31 duplicated selectors, so every styling change had to be made twice and kept in sync by hand. There is now a single template plus two colour token tables.
+- **Palette cut from 71 colours to 45.** The old set had 19 clusters of perceptually identical values, accumulated one widget at a time. The remaining 7 clusters are adjacent elevation steps, which is how depth works in a dark interface.
+- **Accent tokens are real.** `ACCENT`, `ACCENT_HOVER` and `ACCENT_DIM` were defined and then never referenced; the values were hardcoded 27 times. The template now has no hardcoded colours at all, and re-tinting the interface is a two-line change.
+- Border radius follows a scale rather than five ad hoc values. The web dashboard gained matching CSS variables.
+- Fixed two inconsistencies found while consolidating: `QPlainTextEdit` had no focus style, and the horizontal scrollbar had no hover state while the vertical one did.
+
+### Typography
+- The log and the JSON editor used different monospace fonts at the same size. Both now use one stack with proper fallbacks for macOS and Linux.
+
+### Interface copy
+- **Feature lists rewritten as prose.** Both the Info tab and the dashboard listed capabilities as bold-term-then-comma-separated-dump, 21 bullets in total. They now read as sentences that explain what something is for.
+- **Removed the duplicate.** Nine of twelve feature bullets were byte-identical across the Info tab and the dashboard, so editing one silently drifted from the other. The dashboard now carries a short orientation note and points to the Info tab.
+- **Removed decorative emoji** from eleven dashboard headers and buttons that already had text labels. The play, stop and refresh glyphs stay, since those carry meaning on their own.
+- Dropped copy that said nothing: an update checker described as checking for updates, a dashboard listing itself as a feature, a log described as thread-safe, and a positioning line aimed at people who had already installed the app.
+- Removed an internal widget class name from user-facing text, and a stray brand-purple heading that appeared exactly once in the interface.
+- Stopped telling people that collapsible sections can be clicked.
 
 ## v1.1.0 — 2026-07-15
 

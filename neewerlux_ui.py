@@ -154,6 +154,14 @@ class customPresetButton(QPushButton):
         self.style().polish(self)
 
 
+def _monoFont(pointSize=9):
+    """Monospace font with fallbacks, matching the theme's mono stack."""
+    f = QFont("Consolas", pointSize)
+    f.setStyleHint(QFont.Monospace)
+    f.setFamilies(["Consolas", "Menlo", "DejaVu Sans Mono", "Courier New"])
+    return f
+
+
 class singleKeySequenceEditCancel(QWidget):
     def __init__(self, defaultValue=""):
         super().__init__()
@@ -915,65 +923,71 @@ class Ui_MainWindow(object):
         self.infoText.setReadOnly(True)
         self.infoText.setOpenExternalLinks(True)
         self.infoText.setHtml("""
-<h2 style="color:#9100ff;">NeewerLux {VERSION}</h2>
-<p>Cross-platform Neewer LED light control for streamers and content creators.</p>
+<h2>NeewerLux {VERSION}</h2>
+
+<h3>Lights</h3>
+<p>Scan for Neewer lights over Bluetooth and control them in CCT, HSI, or Scene mode.
+Give a light a name and a fixed number in Light Preferences and it keeps its place in
+the table, and can be addressed by that name in animations and HTTP commands.</p>
+
+<h3>Colour temperature limits</h3>
+<p>Set the CCT range your lights should stay within, globally or per light. A command
+outside a light's range is either converted to the nearest value it can reach or skipped
+entirely, depending on which you pick in Global Preferences. Useful when mixing models
+with different ranges.</p>
+
+<h3>Presets</h3>
+<p>Right-click a preset button to save the current setup, left-click to recall it,
+middle-click to rename. A preset can target one light or all of them. The Preset Editor
+offers the same thing as a table if you would rather work that way.</p>
+
+<h3>Animations</h3>
+<p>101 animations ship with the app, covering emergency, stage, holiday, studio, and
+ambient looks. The editor works on keyframes with a table and live preview, or you can
+edit the underlying JSON directly. CCT-only lights follow colour animations by mapping
+hue to the nearest temperature, so mixed setups stay in step.</p>
+<p>Animations target lights by name, by number, by MAC address, or with <code>*</code>
+for all of them.</p>
+
+<h3>Remote control</h3>
+<p>Turn on the HTTP server to drive everything from a browser or from hardware such as a
+Stream Deck. The dashboard lives at <code>http://localhost:8080/</code>, and every action
+is also available as a plain URL. The port is configurable in Global Preferences.</p>
+
+<h3>Files</h3>
+<p>Presets, animations, and per-light settings are plain files in the
+<code>light_prefs</code> folder next to the application. They can be edited by hand and
+copied between installations.</p>
+
 <hr>
-<h3>Features</h3>
-<ul>
-<li><b>Bluetooth Light Control</b> &mdash; Scan, connect, and control Neewer LED lights via CCT, HSI, and Scene modes</li>
-<li><b>Animation Engine</b> &mdash; Keyframe-based animations with smooth interpolation, parallel BLE writes, and 101 built-in presets across emergency, performance, holiday, studio, and ambient categories</li>
-<li><b>Visual Animation Editor</b> &mdash; Color-coded keyframe table, GradientSlider controls, per-light targeting, copy/paste, live preview, and synced JSON editor</li>
-<li><b>Preset System</b> &mdash; Unlimited presets with right-click save, left-click recall, middle-click rename, and a visual Preset Editor with per-light targeting</li>
-<li><b>Light Aliases &amp; Preferred IDs</b> &mdash; Assign names and numeric IDs to lights for consistent ordering and easy targeting in animations, presets, and HTTP commands</li>
-<li><b>Global CCT Range</b> &mdash; Configurable min/max color temperature bounds (2700K&ndash;8500K) with per-light overrides</li>
-<li><b>CCT Clamping</b> &mdash; Software-side enforcement of CCT bounds with convert/clamp or ignore/skip modes for mixed light setups</li>
-<li><b>WebUI Dashboard</b> &mdash; Browser-based control at <code>http://localhost:8080/</code> with live light table, sliders, preset grid, animation browser, and API reference. Port is configurable in Global Preferences.</li>
-<li><b>HTTP API</b> &mdash; RESTful control via GET/POST &mdash; discover, link, set mode, presets, animations, and batch multi-light commands</li>
-<li><b>System Tray</b> &mdash; Minimize to tray on close, with show/hide and HTTP server toggle from the tray menu</li>
-<li><b>Update Checker</b> &mdash; Check for new releases from within the GUI or WebUI</li>
-<li><b>Logging</b> &mdash; Thread-safe buffered log with auto-scroll, clear, save, and optional file output</li>
-</ul>
-<hr>
-<h3>Quick Start</h3>
-<ol>
-<li><b>Scan</b> for Neewer lights via Bluetooth</li>
-<li><b>Connect</b> to discovered lights (auto-connect available in Global Preferences)</li>
-<li>Use the <b>CCT</b>, <b>HSI</b>, or <b>Scene</b> tabs to control lights</li>
-<li>Right-click a <b>Preset</b> button to save current settings; left-click to recall</li>
-<li>Open the <b>Animations</b> tab to browse and play animations</li>
-<li>Enable the <b>HTTP server</b> for remote control via the web dashboard or API</li>
-</ol>
-<hr>
-<h3>HTTP API Reference</h3>
-<p><b>Base URL:</b> <code>http://localhost:8080/NeewerLux/doAction?</code> (8080 is the default port; change it in Global Preferences)</p>
+
+<h3>HTTP reference</h3>
+<p><b>Base URL:</b> <code>http://localhost:8080/NeewerLux/doAction?</code></p>
 <table cellpadding="4">
 <tr><td><b>discover</b></td><td>Scan for new lights</td></tr>
-<tr><td><b>link=N</b></td><td>Connect to light N (or <code>all</code>)</td></tr>
-<tr><td><b>light=N&amp;mode=CCT&amp;temp=5600&amp;bri=100</b></td><td>Set light to CCT mode</td></tr>
-<tr><td><b>light=N&amp;mode=HSI&amp;hue=240&amp;sat=100&amp;bri=80</b></td><td>Set light to HSI mode</td></tr>
-<tr><td><b>light=N&amp;mode=ANM&amp;scene=1&amp;bri=50</b></td><td>Set light to built-in scene</td></tr>
-<tr><td><b>turnoff / turnon</b></td><td>Power lights on or off</td></tr>
+<tr><td><b>link=N</b></td><td>Connect to light N, or <code>all</code></td></tr>
+<tr><td><b>light=N&amp;mode=CCT&amp;temp=5600&amp;bri=100</b></td><td>Set a light to CCT mode</td></tr>
+<tr><td><b>light=N&amp;mode=HSI&amp;hue=240&amp;sat=100&amp;bri=80</b></td><td>Set a light to HSI mode</td></tr>
+<tr><td><b>light=N&amp;mode=ANM&amp;scene=1&amp;bri=50</b></td><td>Set a light to a built-in scene</td></tr>
+<tr><td><b>turnoff / turnon</b></td><td>Power lights off or on</td></tr>
 <tr><td><b>use_preset=N</b></td><td>Recall preset N</td></tr>
-<tr><td><b>animate=Name|speed|rate|bri|loop|maxLoops|revert</b></td><td>Play animation (GET). Only name is required; remaining fields are positional and optional: speed (1.0), rate (5), brightness% (80), loop (true/false), maxLoops (0=infinite), revert (true/false)</td></tr>
+<tr><td><b>animate=Name|speed|rate|bri|loop|maxLoops|revert</b></td>
+    <td>Play an animation. Only the name is required. The rest are positional and optional:
+    speed (1.0), rate (5), brightness percent (80), loop (true/false), maxLoops (0 for
+    endless), revert (true/false).</td></tr>
+<tr><td><b>stop_animate</b></td><td>Stop the running animation</td></tr>
 <tr><td><b>list / list_json</b></td><td>List lights, presets, and animations</td></tr>
 </table>
-<p>POST to <code>/NeewerLux/batch</code> for multi-light JSON commands.
-POST to <code>/NeewerLux/animate</code> for JSON animation control.</p>
+<p>POST to <code>/NeewerLux/batch</code> for multi-light JSON commands, or to
+<code>/NeewerLux/animate</code> for JSON animation control.</p>
+
 <hr>
-<h3>Helpful Notes</h3>
-<ul>
-<li>Preset and animation files are stored in the <code>light_prefs/</code> folder alongside the application and can be manually edited with any text editor</li>
-<li>Per-light preferences (custom name, CCT range, preferred ID) are saved as individual files in <code>light_prefs/</code> keyed by MAC address</li>
-<li>Animations support targeting by light alias name, preferred ID number, MAC address, or <code>"*"</code> wildcard for all lights</li>
-<li>CCT-only lights automatically participate in HSI animations via color temperature mapping</li>
-<li>The HTTP server can be started automatically on launch via Global Preferences</li>
-</ul>
-<hr>
+
 <p style="color:#888; font-size:0.9em;">
 <b>Repository:</b> <a href="https://github.com/poizenjam/NeewerLux/">github.com/poizenjam/NeewerLux</a><br>
 <b>Releases:</b> <a href="https://github.com/poizenjam/NeewerLux/releases">github.com/poizenjam/NeewerLux/releases</a><br><br>
-Based on <a href="https://github.com/taburineagle/NeewerLite-Python/">NeewerLite-Python</a> (v0.12d) by Zach Glenwright &mdash;
-Originally from <a href="https://github.com/keefo/NeewerLite">NeewerLite</a> by Xu Lian
+Based on <a href="https://github.com/taburineagle/NeewerLite-Python/">NeewerLite-Python</a> (v0.12d) by Zach Glenwright.
+Originally from <a href="https://github.com/keefo/NeewerLite">NeewerLite</a> by Xu Lian.
 </p>
 """)
         infoLay.addWidget(self.infoText)
@@ -995,7 +1009,7 @@ Originally from <a href="https://github.com/keefo/NeewerLite">NeewerLite</a> by 
         logLay.addLayout(logToolbar)
         self.logTextEdit = QPlainTextEdit()
         self.logTextEdit.setReadOnly(True)
-        self.logTextEdit.setFont(QFont("Consolas", 9))
+        self.logTextEdit.setFont(_monoFont(9))
         self.logTextEdit.setLineWrapMode(QPlainTextEdit.NoWrap)
         self.logTextEdit.setMaximumBlockCount(2000)  # cap log at 2000 lines to prevent unbounded growth (CPU creep)
         logLay.addWidget(self.logTextEdit)
