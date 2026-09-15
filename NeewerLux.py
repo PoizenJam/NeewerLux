@@ -4163,9 +4163,12 @@ async def findDevices():
         if d.address in whiteListedMACs: # if the MAC address is in the list of whitelisted addresses, add this device
             printDebugString("Matching whitelisted address found - " + returnMACname() + " " + d.address + ", adding to the list")
             currentScan.append((d, adv))
-        else: # if this device is not whitelisted, check to see if it's valid (contains "NEEWER" in the name)
-            if d.name != None and "NEEWER" in d.name: # if Bleak returned a proper string, and the string has "NEEWER" in the name
-                currentScan.append((d, adv)) # add this light to this session's available lights            
+        else: # if this device is not whitelisted, check to see if it's valid (matches a known Neewer name prefix)
+            if d.name != None:
+                acceptedPrefixes = ["NEEWER", "NW-", "SL", "NWR"]
+                if any(prefix in d.name for prefix in acceptedPrefixes):
+                    d.name = getCorrectedName(d.name)
+                    currentScan.append((d, adv)) # add this light to this session's available lights
 
     for a in range(len(currentScan)): # scan the newly found NEEWER devices
         device, adv_data = currentScan[a]
@@ -4296,7 +4299,8 @@ def getLightSpecs(lightName, returnParam = "all"):
         ["RGB480", 3200, 5600, False], ["RGB530PRO", 3200, 5600, False], ["RGB530", 3200, 5600, False],
         ["RGB650", 3200, 5600, False], ["RGB660PRO", 3200, 5600, False], ["RGB660", 3200, 5600, False],
         ["RGB960", 3200, 5600, False], ["RGB-P200", 3200, 5600, False], ["RGB-P280", 3200, 5600, False],
-        ["SL70", 3200, 8500, False], ["SL80", 3200, 8500, False], ["ZK-RY", 5600, 5600, False]
+        ["SL70", 3200, 8500, False], ["SL80", 3200, 8500, False], ["TL60", 2500, 10000, False],
+        ["ZK-RY", 5600, 5600, False]
     ]
     
     for a in range(len(masterNeewerLuxList)): # scan the list of preset specs above to find the current light in them
@@ -4317,6 +4321,17 @@ def getLightSpecs(lightName, returnParam = "all"):
         return customPrefs[1]
     elif returnParam == "CCT": # we only want to return CCT-only status for this light
         return customPrefs[2]
+
+def getCorrectedName(lightName):
+    newLightNames = [
+        ["20210036", "TL60 RGB"], ["20230064", "TL60 RGB"]
+    ]
+
+    for identifier, correctedName in newLightNames:
+        if identifier in lightName:
+            return correctedName
+
+    return lightName
 
 # CONNECT (LINK) TO A LIGHT
 async def connectToLight(selectedLight, updateGUI=True):
