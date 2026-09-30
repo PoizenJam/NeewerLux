@@ -4165,8 +4165,8 @@ async def findDevices():
             currentScan.append((d, adv))
         else: # if this device is not whitelisted, check to see if it's valid (matches a known Neewer name prefix)
             if d.name != None:
-                acceptedPrefixes = ["NEEWER", "NW-", "SL", "NWR"]
-                if any(prefix in d.name for prefix in acceptedPrefixes):
+                acceptedPrefixes = ("NEEWER", "NW-", "SL", "NWR")
+                if d.name.upper().startswith(acceptedPrefixes):
                     d.name = getCorrectedName(d.name)
                     currentScan.append((d, adv)) # add this light to this session's available lights
 
