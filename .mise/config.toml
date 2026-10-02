@@ -1,0 +1,7 @@
+[tools]
+# Pinned to match the version the release workflow builds with. Floating this to
+# "latest" meant local runs, CI and the README could each disagree about the
+# supported Python. See pyproject.toml for the supported range (>=3.11).
+python = "3.13"
+uv = "latest"
+"aqua:cli/cli" = "latest"

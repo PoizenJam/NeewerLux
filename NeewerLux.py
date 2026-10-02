@@ -31,6 +31,7 @@ if sys.stderr is None:
 
 import math # used for calculating the RGB values of color temperatures
 import json # used for animation files and HTTP batch/animation APIs
+import shutil # used to seed the default preset file on first run
 import tempfile
 import faulthandler
 import warnings
@@ -296,6 +297,12 @@ lockFile = tempfile.gettempdir() + os.sep + "NeewerLux.lock"
 anotherInstance = False # whether or not we're using a new instance (for the Singleton check)
 globalPrefsFile = os.path.dirname(os.path.abspath(sys.argv[0])) + os.sep + "light_prefs" + os.sep + "NeewerLux.prefs" # the global preferences file for saving/loading
 customLightPresetsFile = os.path.dirname(os.path.abspath(sys.argv[0])) + os.sep + "light_prefs" + os.sep + "customLights.prefs"
+# Shipped template used to seed customLightPresetsFile on first run. The live file is
+# user state and is not tracked in the repository, so the defaults live here instead.
+defaultLightPresetsFile = customLightPresetsFile + ".default"
+# Records that seeding already happened, so a later deliberate reset or delete is not
+# undone by copying the shipped presets back in.
+presetsSeededMarkerFile = os.path.dirname(os.path.abspath(sys.argv[0])) + os.sep + "light_prefs" + os.sep + ".presets_seeded"
 geometryPrefsFile = os.path.dirname(os.path.abspath(sys.argv[0])) + os.sep + "light_prefs" + os.sep + "NeewerLux.geometry"
 logFilePath = os.path.dirname(os.path.abspath(sys.argv[0])) + os.sep + "light_prefs" + os.sep + "NeewerLux.log"
 
@@ -3895,11 +3902,11 @@ def stringToCustomPreset(presetString, numOfPreset):
     else: # if it isn't, then just return the default parameters for this preset
         return getDefaultPreset(numOfPreset)
 
-def loadCustomPresets():
+def loadCustomPresets(presetsFilePath):
     global customLightPresets, numOfPresets, defaultLightPresets, presetNames
 
     # READ THE PREFERENCES FILE INTO A LIST
-    with open(customLightPresetsFile, mode="r", encoding="utf-8") as fileToOpen:
+    with open(presetsFilePath, mode="r", encoding="utf-8") as fileToOpen:
         customPresets = fileToOpen.read().split("\n")
 
     # First pass: check for numOfPresets line and preset names
@@ -6810,6 +6817,63 @@ def createLightPrefsFolder():
     except FileExistsError:
         pass # the folder already exists, so we don't need to create it
 
+def markPresetsAsSeeded():
+    """Record that this install already has its presets, so they are never re-seeded.
+
+    Best effort. A read-only install directory cannot be marked, but it cannot save
+    presets either, so there is no reset for the marker to protect.
+    """
+    if os.path.exists(presetsSeededMarkerFile):
+        return
+
+    try:
+        createLightPrefsFolder()
+
+        with open(presetsSeededMarkerFile, mode="w", encoding="utf-8") as markerFile:
+            markerFile.write("customLights.prefs has been set up for this install.\n"
+                             "Delete this file to have the shipped presets restored on the next launch.\n")
+    except OSError as e:
+        printDebugString("Could not write the preset seeding marker: " + str(e))
+
+def resolveCustomPresetsFile():
+    """Decide which preset file to load, seeding the user copy on a genuine first run.
+
+    customLights.prefs is user state and is not tracked in the repository, so the
+    shipped preset names and values live in customLights.prefs.default instead.
+
+    Returns the path to load presets from, or None to use the built-in factory
+    presets. Absence of the user file is deliberately not enough on its own to mean
+    "first run": both the quick-save and the exit handler delete that file when every
+    preset is back at its factory value, so treating absence as a first run would
+    undo a reset by copying the shipped presets back in. The marker file records
+    that seeding has happened once, and after that an absent file is left absent.
+    """
+    if os.path.exists(customLightPresetsFile):
+        # An upgrade over an existing install. Record that this user already has their
+        # presets, so that a later reset (which deletes the file) is not mistaken for a
+        # first run and answered by copying the shipped presets back in.
+        markPresetsAsSeeded()
+        return customLightPresetsFile
+
+    if os.path.exists(presetsSeededMarkerFile):
+        return None # seeded before and since removed on purpose, so use the factory presets
+
+    if not os.path.exists(defaultLightPresetsFile):
+        return None # nothing shipped to seed from
+
+    try:
+        createLightPrefsFolder()
+        shutil.copyfile(defaultLightPresetsFile, customLightPresetsFile)
+        markPresetsAsSeeded()
+        printDebugString("Seeded customLights.prefs from the shipped defaults.")
+        return customLightPresetsFile
+    except OSError as e:
+        # Most likely a read-only install directory. The template is still readable,
+        # so load the shipped presets straight out of it rather than dropping to the
+        # unnamed built-ins, which have different values.
+        printDebugString("Could not seed customLights.prefs (" + str(e) + "), loading the shipped defaults read-only.")
+        return defaultLightPresetsFile
+
 def loadPrefsFile(globalPrefsFile = ""):
     global findLightsOnStartup, autoConnectToLights, printDebug, maxNumOfAttempts, \
            rememberLightsOnExit, acceptable_HTTP_IPs, customKeys, enableTabsOnLaunch, \
@@ -6967,8 +7031,10 @@ if __name__ == '__main__':
     else:
         loadPrefsFile() # if it doesn't, then just load the defaults
 
-    if os.path.exists(customLightPresetsFile):
-        loadCustomPresets() # if there's a custom mapping for presets, then load that into memory
+    customPresetsSource = resolveCustomPresetsFile() # seeds the user copy on a genuine first run
+
+    if customPresetsSource is not None:
+        loadCustomPresets(customPresetsSource) # if there's a custom mapping for presets, then load that into memory
 
     setUpAsyncio() # set up the asyncio loop
     cmdReturn = [True] # initially set to show the GUI interface over the CLI interface

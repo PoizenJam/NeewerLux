@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Build output
+build/
+dist/
+*.spec.bak
+
+# Tooling caches
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+
+# mise local overrides. This file holds machine-local env, including tokens,
+# and must never be committed.
+.mise/config.local.toml
+
+# Visual Studio / VS Code local state
+.vs/
+.vscode/
+
+# Runtime state written by the app into light_prefs/. This is an allowlist rather
+# than a list of known filenames because per-light preference sidecars are named
+# after the light's MAC address with no extension, so they cannot be globbed.
+# Shipped content (the animation library and the preset defaults template) is
+# re-included below; everything else in the folder is per-user state.
+light_prefs/*
+!light_prefs/animations/
+!light_prefs/customLights.prefs.default
+
+# OS noise
+.DS_Store
+Thumbs.db
+*~

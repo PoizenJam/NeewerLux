@@ -20,11 +20,32 @@ Fork of [NeewerLite-Python](https://github.com/taburineagle/NeewerLite-Python) (
 Preset and animation files are in the `light_prefs/` folder alongside the executable and can be edited manually with any text editor.
 
 ### Running from Source
-Requires Python 3.8+:
+
+Requires Python 3.11 or newer. Dependency versions are pinned in `uv.lock`, so an
+install from the lockfile reproduces exactly what the release builds against.
+
+Using [uv](https://docs.astral.sh/uv/) (recommended):
 ```
-pip install -r requirements.txt
+uv sync --locked
+uv run NeewerLux.py
+```
+
+Using pip. The version bounds match `pyproject.toml`, so this will not silently pull
+in a future PySide 7 or Bleak 4 that the app has not been tested against:
+```
+pip install "PySide6>=6.7,<7" "bleak>=0.22,<4"
 python NeewerLux.py
 ```
+
+**Headless installs** (`--cli`, `--list`, `--http`) do not need Qt at all. To skip the
+GUI toolkit entirely:
+```
+uv sync --locked --no-default-groups
+uv run --no-default-groups NeewerLux.py --http
+```
+`uv run` re-syncs the environment before running, so `--no-default-groups` is needed on
+both commands. Without it on the second one, uv reinstates the GUI group and pulls
+PySide6 back in.
 
 ---
 

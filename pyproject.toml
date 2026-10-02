@@ -1,0 +1,45 @@
+[project]
+name = "neewerlux"
+version = "1.2.0"
+description = "Cross-platform Neewer LED light control with a keyframe animation engine, preset system, and HTTP/web dashboard"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "GPL-3.0-or-later" }
+authors = [{ name = "poizenjam" }]
+keywords = ["neewer", "bluetooth", "ble", "lighting", "streaming"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Multimedia :: Video",
+]
+
+# Only bleak is unconditional. The GUI toolkit is in the "gui" group below, because
+# --cli, --list and --http all run without Qt: the PySide6 import is wrapped in a
+# try/except and those paths never touch it. Keeping it out of the base dependency
+# set means headless installs (Raspberry Pi, containers, CI) do not have to pull in
+# or find a wheel for the whole Qt stack.
+dependencies = [
+    "bleak>=0.22,<4",
+]
+
+[project.urls]
+Homepage = "https://github.com/poizenjam/NeewerLux"
+Changelog = "https://github.com/poizenjam/NeewerLux/blob/main/CHANGELOG.md"
+
+[dependency-groups]
+# The desktop application. Installed by default, see tool.uv.default-groups.
+gui = ["PySide6>=6.7,<7"]
+# Used by the release workflow to build the Windows executable.
+build = ["pyinstaller>=6.10"]
+
+[tool.uv]
+# NeewerLux is a flat-layout script application, not an installable package.
+# This keeps uv from trying to build a wheel for the project itself while
+# still resolving and locking its dependencies.
+package = false
+# "uv sync" gives you the full desktop app. Headless installs opt out with
+# "uv sync --no-default-groups".
+default-groups = ["gui"]
