@@ -4,7 +4,7 @@ version = "1.2.0"
 description = "Cross-platform Neewer LED light control with a keyframe animation engine, preset system, and HTTP/web dashboard"
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "GPL-3.0-or-later" }
+license = { text = "MIT" }
 authors = [{ name = "poizenjam" }]
 keywords = ["neewer", "bluetooth", "ble", "lighting", "streaming"]
 classifiers = [
