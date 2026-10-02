@@ -13,7 +13,7 @@ WEB_DASHBOARD_HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>NeewerLux — Control Panel</title>
+<title>NeewerLux Control Panel</title>
 <style>
 :root {
     --bg: #1e1e2e;
@@ -626,14 +626,14 @@ function sendCCT() {
     const light = document.getElementById('targetLight').value;
     const temp = document.getElementById('cctTemp').value;
     const bri = document.getElementById('cctBri').value;
-    apiCall(`${BASE}light=${light}&mode=CCT&temp=${temp * 100}&bri=${bri}&nopage`, `CCT → light=${light} temp=${temp*100}K bri=${bri}%`);
+    apiCall(`${BASE}light=${light}&mode=CCT&temp=${temp * 100}&bri=${bri}&nopage`, `CCT: light=${light} temp=${temp*100}K bri=${bri}%`);
 }
 function sendHSI() {
     const light = document.getElementById('targetLight').value;
     const hue = document.getElementById('hsiHue').value;
     const sat = document.getElementById('hsiSat').value;
     const bri = document.getElementById('hsiBri').value;
-    apiCall(`${BASE}light=${light}&mode=HSI&hue=${hue}&sat=${sat}&bri=${bri}&nopage`, `HSI → light=${light} H:${hue} S:${sat} I:${bri}`);
+    apiCall(`${BASE}light=${light}&mode=HSI&hue=${hue}&sat=${sat}&bri=${bri}&nopage`, `HSI: light=${light} H:${hue} S:${sat} I:${bri}`);
 }
 function sendScene(num, btn) {
     const light = document.getElementById('targetLight').value;
@@ -641,14 +641,14 @@ function sendScene(num, btn) {
     if (activeSceneBtn) activeSceneBtn.classList.remove('active');
     btn.classList.add('active');
     activeSceneBtn = btn;
-    apiCall(`${BASE}light=${light}&mode=SCENE&scene=${num}&bri=${bri}&nopage`, `Scene ${num} → light=${light} bri=${bri}%`);
+    apiCall(`${BASE}light=${light}&mode=SCENE&scene=${num}&bri=${bri}&nopage`, `Scene ${num}: light=${light} bri=${bri}%`);
 }
 function sendPower(state) {
     const light = document.getElementById('targetLight').value;
     if (state === 'on') {
-        apiCall(`${BASE}batch=${light}:ON&nopage`, `Power ON → light=${light}`);
+        apiCall(`${BASE}batch=${light}:ON&nopage`, `Power ON: light=${light}`);
     } else {
-        apiCall(`${BASE}batch=${light}:OFF&nopage`, `Power OFF → light=${light}`);
+        apiCall(`${BASE}batch=${light}:OFF&nopage`, `Power OFF: light=${light}`);
     }
 }
 
@@ -751,8 +751,8 @@ function renderLightsJSON(data) {
             <td class="${l.linked ? 'linked' : 'not-linked'}">${l.linked ? '● LINKED' : '○ Not linked'}</td>
             <td style="font-size:11px">${l.status}</td>
             <td>${l.linked
-                ? '<button class="btn" style="padding:3px 8px;font-size:11px" onclick="apiCall(\''+BASE+'light='+l.id+'&mode=CCT&temp=5600&bri=100&nopage\',\'Send → light '+l.id+'\')">Send</button>'
-                : '<button class="btn success" style="padding:3px 8px;font-size:11px" onclick="apiCall(\''+BASE+'link='+l.id+'&nopage\',\'Link → light '+l.id+'\');setTimeout(refreshAll,3000)">Link</button>'
+                ? '<button class="btn" style="padding:3px 8px;font-size:11px" onclick="apiCall(\''+BASE+'light='+l.id+'&mode=CCT&temp=5600&bri=100&nopage\',\'Send: light '+l.id+'\')">Send</button>'
+                : '<button class="btn success" style="padding:3px 8px;font-size:11px" onclick="apiCall(\''+BASE+'link='+l.id+'&nopage\',\'Link: light '+l.id+'\');setTimeout(refreshAll,3000)">Link</button>'
             }</td>
         </tr>`;
     });
@@ -826,7 +826,7 @@ async function checkForUpdates() {
             const lv = local.split('.').map(Number);
             const newer = rv[0] > lv[0] || (rv[0] === lv[0] && rv[1] > lv[1]) || (rv[0] === lv[0] && rv[1] === lv[1] && rv[2] > lv[2]);
             if (newer) {
-                el.innerHTML = '<span style="color:var(--green)"><b>Update available: v' + tag + '</b></span> &mdash; <a href="' + url + '" target="_blank" style="color:var(--accent)">Download</a>';
+                el.innerHTML = '<span style="color:var(--green)"><b>Update available: v' + tag + '</b></span>. <a href="' + url + '" target="_blank" style="color:var(--accent)">Download</a>';
             } else {
                 el.innerHTML = '<span style="color:var(--accent)">You are on v' + local + ' (latest: v' + tag + ')</span>';
             }

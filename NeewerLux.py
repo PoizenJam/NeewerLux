@@ -15,7 +15,7 @@
 ##          Windows, Linux/Ubuntu, MacOS and RPi
 ############################################################
 
-NEEWERLUX_VERSION = "1.2.0"
+NEEWERLUX_VERSION = "1.3.0"
 NEEWERLUX_REPO_URL = "https://github.com/poizenjam/NeewerLux/"
 NEEWERLUX_RELEASES_API = "https://api.github.com/repos/poizenjam/NeewerLux/releases/latest"
 
@@ -285,6 +285,7 @@ httpPort = 8080 # port the HTTP server listens on
 cctFallbackMode = "convert" # how to handle HSI/ANM commands sent to CCT-only lights: "ignore" or "convert"
 enableLogTab = True # whether to show and populate the Log tab
 logToFile = False # whether to also write log entries to a file
+logHeartbeat = False # whether the worker thread logs "Background Thread Running" every ~30s
 globalCCTMin = 3200 # global default minimum color temperature (K)
 globalCCTMax = 5600 # global default maximum color temperature (K)
 autoReconnectOnDisconnect = True # whether or not to automatically try reconnecting to lights that disconnect (e.g. after sleep/wake)
@@ -622,7 +623,7 @@ try: # try to load the GUI
             numOfPresets += 1
             self.createPresetButtons()
             self._savePresetsQuick()
-            printDebugString("Duplicated preset " + str(idx + 1) + " → " + str(newIdx + 1))
+            printDebugString("Duplicated preset " + str(idx + 1) + " as preset " + str(newIdx + 1))
 
         def _openPresetEditor(self, idx):
             """Open a dialog to edit preset settings. Mirrors the animation editor layout."""
@@ -1255,7 +1256,6 @@ try: # try to load the GUI
                     groups[cat] = []
                 groups[cat].append(name)
 
-            # Display order: HSI Only first, then Mixed, then CCT Only
             groupOrder = ["HSI Only", "Mixed", "CCT Only", "Scene Only"]
             for g in sorted(groups.keys()):
                 if g not in groupOrder:
@@ -1277,7 +1277,7 @@ try: # try to load the GUI
                     kfCount = len(savedAnimations[name].get("keyframes", []))
                     label = "  " + name
                     if desc:
-                        label += "  —  " + desc
+                        label += ":  " + desc
                     label += "  [" + str(kfCount) + " frames]"
                     item = QListWidgetItem(label)
                     item.setData(Qt.UserRole, name)
@@ -1327,7 +1327,6 @@ try: # try to load the GUI
 
         def animNew(self):
             """Create a new animation from a template."""
-            # Use global PYSIDE_VERSION
             if PYSIDE_VERSION == 6:
                 from PySide6.QtWidgets import QDialog, QDialogButtonBox, QVBoxLayout, QFormLayout as QFL, QLabel as QL, QLineEdit as QLE, QComboBox as QCB, QSpinBox as QSB, QCheckBox as QCK
             else:
@@ -1432,7 +1431,7 @@ try: # try to load the GUI
             try:
                 from neewerlux_anim_editor import AnimationEditorDialog
             except ImportError:
-                printDebugString("Could not import neewerlux_anim_editor — falling back to JSON editor")
+                printDebugString("Could not import neewerlux_anim_editor, falling back to JSON editor")
                 self._animEditJSON(name)
                 return
 
@@ -1481,7 +1480,6 @@ try: # try to load the GUI
 
         def _animEditJSON(self, name):
             """Fallback JSON-only animation editor."""
-            # Use global PYSIDE_VERSION
             if PYSIDE_VERSION == 6:
                 from PySide6.QtWidgets import QDialog, QDialogButtonBox, QVBoxLayout, QHBoxLayout as QHL, QFormLayout as QFL, \
                     QLabel as QL, QLineEdit as QLE, QSpinBox as QSB, QCheckBox as QCK, QTextEdit as QTE, QPushButton as QPB
@@ -1506,7 +1504,7 @@ try: # try to load the GUI
             form.addRow(loopCheck)
             layout.addLayout(form)
 
-            layout.addWidget(QL("<b>Keyframes (JSON)</b> — edit directly:"))
+            layout.addWidget(QL("<b>Keyframes (JSON)</b>, edit directly:"))
             jsonEdit = QTE()
             from neewerlux_ui import _monoFont
             jsonEdit.setFont(_monoFont(9))
@@ -1612,7 +1610,6 @@ try: # try to load the GUI
             horizHeaders.setSectionsClickable(True)
             horizHeaders.sectionClicked.connect(self.sortByHeader)
 
-            # PRESET PAGINATION NAVIGATION
             # ANIMATION TAB CONNECTIONS
             self.animPlayButton.clicked.connect(self.animPlay)
             self.animStopButton.clicked.connect(self.animStop)
@@ -2197,6 +2194,7 @@ try: # try to load the GUI
                 self.cctFallbackCombo.setCurrentIndex(0 if cctFallbackMode == "convert" else 1)
                 self.enableLogTab_check.setChecked(enableLogTab)
                 self.logToFile_check.setChecked(logToFile)
+                self.logHeartbeat_check.setChecked(logHeartbeat)
                 self.globalCCTMinSpin.setValue(globalCCTMin)
                 self.globalCCTMaxSpin.setValue(globalCCTMax)
                 self.maxNumOfAttempts_field.setText(str(maxNumOfAttempts))
@@ -2241,6 +2239,7 @@ try: # try to load the GUI
                 self.cctFallbackCombo.setCurrentIndex(0)  # Convert
                 self.enableLogTab_check.setChecked(True)
                 self.logToFile_check.setChecked(False)
+                self.logHeartbeat_check.setChecked(False)
                 self.globalCCTMinSpin.setValue(3200)
                 self.globalCCTMaxSpin.setValue(5600)
                 self.maxNumOfAttempts_field.setText("6")
@@ -2273,7 +2272,7 @@ try: # try to load the GUI
 
         def saveGlobalPrefs(self):
             # change these global values to the new values in Prefs
-            global customKeys, autoConnectToLights, printDebug, rememberLightsOnExit, rememberPresetsOnExit, autoReconnectOnDisconnect, maxNumOfAttempts, acceptable_HTTP_IPs, whiteListedMACs, hideConsoleOnLaunch, minimizeToTrayOnClose, httpAutoStart, httpPort, cctFallbackMode, enableLogTab, logToFile, globalCCTMin, globalCCTMax, globalCCTMin, globalCCTMax, enableLogTab, logToFile, globalCCTMin, globalCCTMax, cctFallbackMode
+            global customKeys, autoConnectToLights, printDebug, rememberLightsOnExit, rememberPresetsOnExit, autoReconnectOnDisconnect, maxNumOfAttempts, acceptable_HTTP_IPs, whiteListedMACs, hideConsoleOnLaunch, minimizeToTrayOnClose, httpAutoStart, httpPort, cctFallbackMode, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, globalCCTMin, globalCCTMax, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, cctFallbackMode
 
             finalPrefs = [] # list of final prefs to merge together at the end
 
@@ -2373,6 +2372,10 @@ try: # try to load the GUI
                 finalPrefs.append("logToFile=1")
             else:
                 logToFile = False
+
+            logHeartbeat = self.logHeartbeat_check.isChecked()
+            if logHeartbeat:
+                finalPrefs.append("logHeartbeat=1")
 
             globalCCTMin = self.globalCCTMinSpin.value()
             globalCCTMax = self.globalCCTMaxSpin.value()
@@ -2757,7 +2760,7 @@ try: # try to load the GUI
                     remote = tuple(int(x) for x in tag.split("."))
                     local = tuple(int(x) for x in NEEWERLUX_VERSION.split("."))
                     if remote > local:
-                        notePreview = (" — " + body.split("\n")[0]) if body else ""
+                        notePreview = (": " + body.split("\n")[0]) if body else ""
                         self.updateBanner.setText(
                             "<b>Update available: v" + tag + "</b>" + notePreview +
                             "<br><a href='" + url + "' style='color:#81c784'>Download from GitHub</a>")
@@ -3174,7 +3177,7 @@ try: # try to load the GUI
                     self.resize(w, h)
                     if "splitter" in geo:
                         savedSizes = geo["splitter"]
-                        # Only apply if section count matches (handles upgrades from 2→3 sections)
+                        # Only apply if section count matches (saved layouts from older versions may have fewer sections)
                         if len(savedSizes) == self.mainSplitter.count():
                             self.mainSplitter.setSizes(savedSizes)
                     # Restore animation tab settings
@@ -3300,7 +3303,7 @@ try: # try to load the GUI
             _quit_deadline = time.time() + 10  # give the thread 10 seconds max
             while threadAction != "finished": # wait until the background thread has a chance to terminate
                 if time.time() > _quit_deadline:
-                    printDebugString("Background thread did not finish in time — forcing exit")
+                    printDebugString("Background thread did not finish in time, forcing exit")
                     break
                 printDebugString("Waiting for the background thread to terminate...")
                 threadAction = "quit" # make sure to tell the thread to quit again (if it missed it the first time)
@@ -3440,7 +3443,7 @@ try: # try to load the GUI
                 
                 if lightsToHighlight != []:
                     lastSelection = self.selectedLights()
-                    # Block signals to prevent clearSelection from triggering selectionChanged → tab switch
+                    # Block signals to prevent clearSelection from triggering selectionChanged and switching tabs
                     self.lightTable.blockSignals(True)
                     self.lightTable.clearSelection()
                     self.lightTable.blockSignals(False)
@@ -4123,7 +4126,7 @@ def updateStatus(splitString = False, customValue=False):
         if splitString == False: # False is for the status bar (shows the bytestring computed as one long line)
             for a in range(len(customValue)):
                 currentHexString = currentHexString + " " + str(hex(customValue[a]))
-        else: # True is for the table view, this view no longer shows bytestring, but readable status of current mode (temp/bri/hue, etc.)
+        else: # True is for the table view: a readable status of the current mode (temp/bri/hue, etc.)
             currentHexString = ""
 
             if customValue[1] == 134:
@@ -4732,7 +4735,8 @@ def workerThread(_loop):
             if not animationRunning:
                 _bgThreadLogCounter += 1
                 if _bgThreadLogCounter >= 10:  # log every ~30s instead of every ~3s
-                    printDebugString("Background Thread Running")
+                    if logHeartbeat:
+                        printDebugString("Background Thread Running")
                     _bgThreadLogCounter = 0
 
                 lightsNeedingReconnect = [] # collect lights that need reconnection this cycle
@@ -5096,11 +5100,10 @@ def processCommands(listToProcess=[]):
 
 def processHTMLCommands(paramsList, loop):
     """Process HTTP commands by queuing work for the worker thread.
-    
-    CRITICAL: This function runs on the HTTP server thread.  It must NEVER call
-    asyncioEventLoop.run_until_complete() directly — that crashes when the worker
-    thread is already using the event loop.  Instead, all BLE operations are
-    queued via the global threadAction variable, which the worker thread polls.
+
+    Runs on the HTTP server thread, so it must not call
+    asyncioEventLoop.run_until_complete(): the worker thread owns the event loop.
+    BLE work is queued through threadAction, which the worker polls.
     """
     global threadAction, numOfPresets, defaultLightPresets, customLightPresets
 
@@ -5271,12 +5274,8 @@ def processHTMLCommands(paramsList, loop):
             threadAction = "psend|" + "|".join(map(str, selectedLights))
 
 def reorderByPreferredID():
-    """Reorder availableLights so lights with preferred IDs come first (in ID order),
-    followed by lights without preferred IDs (in their original discovery order).
-
-    This ensures the GUI row numbers match the preferred IDs as closely as possible.
-    For example, if lights have preferred IDs 1, 2, 3, 4, they will appear as
-    rows 1, 2, 3, 4 in the table.
+    """Put lights with a preferred ID first, in ID order, then the rest in discovery order,
+    so table row numbers match preferred IDs where possible.
     """
     global availableLights
 
@@ -5308,12 +5307,12 @@ def returnLightIndexesFromMacAddress(addresses):
     """Resolve light addresses/IDs/names to availableLights indices.
 
     Accepts:
-      "*"           → all connected lights
-      "1" or "2"    → numeric ID (alias-aware: if aliases define id=1 for a MAC,
-                       that MAC is used regardless of discovery order)
-      "Key"         → alias name (from custom name in Light Preferences)
-      "D0:A8:..."   → MAC address
-      "1;2;Key"     → semicolon-separated mix of the above
+      "*"           all connected lights
+      "1" or "2"    numeric ID; a preferred ID set in Light Preferences wins over
+                    discovery order
+      "Key"         custom name from Light Preferences
+      "D0:A8:..."   MAC address
+      "1;2;Key"     semicolon-separated mix of the above
     """
     foundIndexes = []
 
@@ -5323,8 +5322,8 @@ def returnLightIndexesFromMacAddress(addresses):
         return foundIndexes
 
     # Build reverse lookup tables from aliases
-    aliasNameToMAC = {}   # {"key": "D0:A8:..."} (lowercase name → MAC)
-    aliasIDToMAC = {}     # {1: "D0:A8:..."} (numeric id → MAC)
+    aliasNameToMAC = {}   # {"key": "D0:A8:..."}, lowercase name to MAC
+    aliasIDToMAC = {}     # {1: "D0:A8:..."}, numeric ID to MAC
     for mac, info in lightAliases.items():
         if info.get("name"):
             aliasNameToMAC[info["name"].lower()] = mac.upper()
@@ -5533,7 +5532,7 @@ def processBatchCommands(batchInput, loop):
 
 def hsiToCCTByteVal(hue, sat, bri):
     """Convert HSI parameters to a CCT byte value for CCT-only lights.
-    Maps hue to warm/cool temperature: warm colors → low temp, cool → high temp."""
+    Maps hue to warm/cool temperature: warm colours to low temperatures, cool colours to high."""
     cctMin = globalCCTMin // 100
     cctMax = globalCCTMax // 100
     if hue <= 60 or hue >= 300:
@@ -5639,8 +5638,7 @@ def interpolateCCT(start, end, t):
 
 def animationSendFrame(frameCommands, loop):
     """Set byte values on lights and signal the worker thread to send them.
-    Does NOT call any async functions or touch the event loop directly.
-    Just sets values and lets the worker thread do the actual BLE writes."""
+    Never touches the event loop; the worker does the BLE writes."""
     global threadAction
 
     # Compute byte values for each light
@@ -5720,9 +5718,9 @@ def animationEngineThread(animation, loop, speedMultiplier=1.0, loopOverride=Non
     keyframes = animation.get("keyframes", [])
     animName = animation.get("name", "Untitled")
     currentAnimationName = animName
-    stepInterval = max(33, int(1000 / max(1, fps)))
+    stepInterval = max(33, int(1000 / max(1, fps)))  # ms between interpolation steps, capped at ~30 FPS
     completedLoops = 0
-    userStopped = False  # ms between interpolation steps (min ~30 FPS cap)
+    userStopped = False
 
     if not keyframes:
         printDebugString("Animation '" + animName + "' has no keyframes")
@@ -6150,11 +6148,9 @@ def loadAllAnimations():
 
 
 def loadLightAliases():
-    """Build the light aliases table from per-light preferences sidecar files.
-
-    Scans all sidecar files in light_prefs/ (named by MAC address without colons)
-    and extracts custom names and preferred IDs. This is called at startup so
-    aliases are available immediately for HTTP commands and animations.
+    """Build the light aliases table from the per-light files in light_prefs/
+    (named by MAC address without colons), so names and preferred IDs work in
+    HTTP commands and animations before any light is connected.
 
     Prefs file format: customName|colorTempRange|onlyCCTMode[|lastSettings][|preferredID]
     """
@@ -6178,17 +6174,12 @@ def loadLightAliases():
                 customName = fields[0] if len(fields) > 0 else ""
                 preferredID = 0
 
-                # Preferred ID is in the 5th field (index 4), but if there are
-                # 4 fields then [3] is lastSettings; if 5 then [4] is preferredID
+                # Fields: name|tempRange|cctOnly|lastSettings|preferredID
                 if len(fields) >= 5:
                     try:
                         preferredID = int(fields[4])
                     except (ValueError, IndexError):
                         pass
-                # If there are exactly 4 fields and the 4th looks like just an int
-                # (no commas), it might be a preferred ID with no lastSettings
-                # But the standard format has lastSettings as comma-separated bytes
-                # so this case won't arise with valid files
 
                 if customName or preferredID > 0:
                     lightAliases[mac] = {"id": preferredID, "name": customName}
@@ -6554,7 +6545,7 @@ class NLPythonServer(BaseHTTPRequestHandler):
                 writeHTMLSections(self, "htmlendheaders") # add the ending section to the very bottom
 
     def do_POST(self):
-        """Handle POST requests for batch commands with JSON body.
+        """Handle JSON POSTs to /NeewerLux/batch and /NeewerLux/animate.
 
         POST /NeewerLux/batch
         Content-Type: application/json
@@ -6714,7 +6705,7 @@ def writeHTMLSections(self, theSection, errorMsg = ""):
     elif theSection == "htmlheaders":
         self.wfile.write(bytes("<!DOCTYPE html>\n", "utf-8"))
         self.wfile.write(bytes("<HTML>\n<HEAD>\n", "utf-8"))
-        self.wfile.write(bytes("<TITLE>NeewerLux " + NEEWERLUX_VERSION + " — based on NeewerLite-Python by Zach Glenwright / NeewerLite by Xu Lian</TITLE>\n</HEAD>\n", "utf-8"))
+        self.wfile.write(bytes("<TITLE>NeewerLux " + NEEWERLUX_VERSION + ", based on NeewerLite-Python by Zach Glenwright / NeewerLite by Xu Lian</TITLE>\n</HEAD>\n", "utf-8"))
         self.wfile.write(bytes("<BODY>\n", "utf-8"))
     elif theSection == "errorHelp":
         self.wfile.write(bytes("<H1>Invalid request!</H1>\n", "utf-8"))
@@ -6757,10 +6748,10 @@ def writeHTMLSections(self, theSection, errorMsg = ""):
         self.wfile.write(bytes("<BR><HR><BR>\n", "utf-8"))
         self.wfile.write(bytes("<H2>Batch Commands (multiple lights, different settings)</H2>\n", "utf-8"))
         self.wfile.write(bytes("<STRONG>batch=</STRONG> - send different commands to different lights in a single request<BR>\n", "utf-8"))
-        self.wfile.write(bytes("&nbsp;&nbsp;Format: <EM>light:mode:param1:param2[:param3]</EM> — separate multiple commands with semicolons<BR>\n", "utf-8"))
+        self.wfile.write(bytes("&nbsp;&nbsp;Format: <EM>light:mode:param1:param2[:param3]</EM>. Separate multiple commands with semicolons<BR>\n", "utf-8"))
         self.wfile.write(bytes("&nbsp;&nbsp;Modes: <STRONG>CCT</STRONG> (temp:bri), <STRONG>HSI</STRONG> (hue:sat:bri), <STRONG>ANM</STRONG> (scene:bri), <STRONG>ON</STRONG>, <STRONG>OFF</STRONG><BR>\n", "utf-8"))
         self.wfile.write(bytes("&nbsp;&nbsp;Lights can be specified by index (1, 2...), MAC address, or * for all<BR>\n", "utf-8"))
-        self.wfile.write(bytes("&nbsp;&nbsp;CCT temp values: use either short (56) or full (5600) format — both become 5600K<BR><BR>\n", "utf-8"))
+        self.wfile.write(bytes("&nbsp;&nbsp;CCT temp values: use either short (56) or full (5600) format; both become 5600K<BR><BR>\n", "utf-8"))
         self.wfile.write(bytes("&nbsp;&nbsp;Examples:<BR>\n", "utf-8"))
         self.wfile.write(bytes("&nbsp;&nbsp;&nbsp;&nbsp;Set light 1 to red and light 2 to blue:<BR>\n", "utf-8"))
         self.wfile.write(bytes("&nbsp;&nbsp;&nbsp;&nbsp;<EM>http://(server address)/NeewerLux/doAction?batch=1:HSI:0:100:100;2:HSI:240:100:100</EM><BR><BR>\n", "utf-8"))
@@ -6877,7 +6868,7 @@ def resolveCustomPresetsFile():
 def loadPrefsFile(globalPrefsFile = ""):
     global findLightsOnStartup, autoConnectToLights, printDebug, maxNumOfAttempts, \
            rememberLightsOnExit, acceptable_HTTP_IPs, customKeys, enableTabsOnLaunch, \
-           whiteListedMACs, rememberPresetsOnExit, autoReconnectOnDisconnect, livePreview, hideConsoleOnLaunch, minimizeToTrayOnClose, httpAutoStart, httpPort, cctFallbackMode, enableLogTab, logToFile, globalCCTMin, globalCCTMax
+           whiteListedMACs, rememberPresetsOnExit, autoReconnectOnDisconnect, livePreview, hideConsoleOnLaunch, minimizeToTrayOnClose, httpAutoStart, httpPort, cctFallbackMode, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax
 
     if globalPrefsFile != "":
         printDebugString("Loading global preferences from file...")
@@ -6890,7 +6881,7 @@ def loadPrefsFile(globalPrefsFile = ""):
             "SC_Dec_Bri_Small", "SC_Inc_Bri_Small", "SC_Dec_Bri_Large", "SC_Inc_Bri_Large", \
             "SC_Dec_1_Small", "SC_Inc_1_Small", "SC_Dec_2_Small", "SC_Inc_2_Small", "SC_Dec_3_Small", "SC_Inc_3_Small", \
             "SC_Dec_1_Large", "SC_Inc_1_Large", "SC_Dec_2_Large", "SC_Inc_2_Large", "SC_Dec_3_Large", "SC_Inc_3_Large", \
-            "enableTabsOnLaunch", "whiteListedMACs", "rememberPresetsOnExit", "autoReconnectOnDisconnect", "hideConsoleOnLaunch", "minimizeToTrayOnClose", "livePreview", "httpAutoStart", "httpPort", "cctFallbackMode", "enableLogTab", "logToFile", "globalCCTMin", "globalCCTMax"]
+            "enableTabsOnLaunch", "whiteListedMACs", "rememberPresetsOnExit", "autoReconnectOnDisconnect", "hideConsoleOnLaunch", "minimizeToTrayOnClose", "livePreview", "httpAutoStart", "httpPort", "cctFallbackMode", "enableLogTab", "logToFile", "logHeartbeat", "globalCCTMin", "globalCCTMax"]
 
         # KICK OUT ANY PARAMETERS THAT AREN'T IN THE "ACCEPTABLE ARGUMENTS" LIST ABOVE
         # THIS SECTION OF CODE IS *SLIGHTLY* DIFFERENT THAN THE CLI KICK OUT CODE
@@ -6925,6 +6916,7 @@ def loadPrefsFile(globalPrefsFile = ""):
     prefsParser.add_argument("--cctFallbackMode", default="convert")
     prefsParser.add_argument("--enableLogTab", default=1)
     prefsParser.add_argument("--logToFile", default=0)
+    prefsParser.add_argument("--logHeartbeat", default=0)
     prefsParser.add_argument("--globalCCTMin", default=3200)
     prefsParser.add_argument("--globalCCTMax", default=5600)
 
@@ -6982,8 +6974,9 @@ def loadPrefsFile(globalPrefsFile = ""):
     cctFallbackMode = mainPrefs.cctFallbackMode if mainPrefs.cctFallbackMode in ("convert", "ignore") else "convert"
     enableLogTab = bool(int(mainPrefs.enableLogTab))
     logToFile = bool(int(mainPrefs.logToFile))
+    logHeartbeat = bool(int(mainPrefs.logHeartbeat))
     globalCCTMin = int(mainPrefs.globalCCTMin)
-    globalCCTMax = int(mainPrefs.globalCCTMax) # whether closing the window minimizes to tray or quits
+    globalCCTMax = int(mainPrefs.globalCCTMax)
 
     if type(mainPrefs.acceptableIPs) is not list: # we have a string in the return, so we need to post-process it
         acceptable_HTTP_IPs = mainPrefs.acceptableIPs.replace(" ", "").split(";") # split the IP addresses into a list for acceptable IPs
@@ -7088,7 +7081,7 @@ if __name__ == '__main__':
         if cmdReturn[0] == "LIST":
             doAnotherInstanceCheck() # check to see if another instance is running, and if it is, then error out and quit
 
-            print("NeewerLux " + NEEWERLUX_VERSION + " — based on NeewerLite-Python 0.12d by Zach Glenwright / NeewerLite by Xu Lian")
+            print("NeewerLux " + NEEWERLUX_VERSION + ", based on NeewerLite-Python 0.12d by Zach Glenwright / NeewerLite by Xu Lian")
             print("Searching for nearby Neewer lights...")
             asyncioEventLoop.run_until_complete(findDevices())
 

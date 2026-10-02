@@ -8,6 +8,8 @@ echo ====================================================
 echo   NeewerLux - HTTP Server Mode
 echo   Web dashboard: http://localhost:8080/
 echo   API endpoint:  http://localhost:8080/NeewerLux/doAction?
+echo   (8080 is the default; use your own port if you changed it
+echo   in Global Preferences)
 echo   Press Ctrl+C to stop
 echo ====================================================
 echo.

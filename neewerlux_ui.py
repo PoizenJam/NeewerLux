@@ -884,8 +884,10 @@ class Ui_MainWindow(object):
         self.enableLogTab_check = QCheckBox("Enable Log tab (show debug output in GUI)")
         self.enableLogTab_check.setChecked(True)
         self.logToFile_check = QCheckBox("Also write log to file (light_prefs/NeewerLux.log)")
+        self.logHeartbeat_check = QCheckBox("Log a background heartbeat every 30 seconds")
         self.globalPrefsLay.addRow(self.enableLogTab_check)
         self.globalPrefsLay.addRow(self.logToFile_check)
+        self.globalPrefsLay.addRow(self.logHeartbeat_check)
         self.globalPrefsLay.addRow(self.printDebug_check)
 
         self.globalPrefsLay.addRow(QLabel("<br><strong>Filtering</strong>"))

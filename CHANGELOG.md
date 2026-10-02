@@ -2,19 +2,22 @@
 
 Changes relative to upstream [NeewerLite-Python v0.12d](https://github.com/taburineagle/NeewerLite-Python).
 
-## Unreleased
+## v1.3.0 - 2026-10-02
 
 ### Added
 - **More Neewer models are detected.** Lights advertising as `NW-`, `NWR` or `SL` are now picked up alongside `NEEWER`, and the TL60 RGB has its colour range built in. Contributed by @Lain2077.
+- **Heartbeat logging is optional.** The "Background Thread Running" line logged every 30 seconds is now a Logging preference, off by default.
 
 ### Changed
 - **Upgrading keeps your presets.** The shipped presets are now a template, `light_prefs/customLights.prefs.default`, copied into place on first run and never over an existing file. Release zips no longer contain a preset file, so extracting a new release over an install leaves your presets alone. Resetting every preset is no longer undone on the next launch, and a read-only install folder falls back to reading the template. Contributed by @lugoues.
 - **Reproducible builds.** Dependencies are declared in `pyproject.toml` and pinned in `uv.lock`, and the release build fails if the two disagree. PySide6 is optional, so the headless modes install without Qt. Python 3.11 or newer is required. Contributed by @lugoues.
 - The repository no longer tracks per-machine files (Visual Studio state, window position, personal presets). Contributed by @lugoues.
 - Licensed MIT, matching upstream, with a LICENSE file in the repository.
+- Em-dashes and arrows removed from interface and log text, and several comments that described the wrong line or a removed feature corrected.
 
 ### Fixed
 - The README's source install instructions pointed at a `requirements.txt` that didn't exist.
+- `NeewerLux-HTTP.bat` now says 8080 is only the default port.
 
 ## v1.2.0 - 2026-07-24
 

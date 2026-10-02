@@ -1,5 +1,5 @@
 @echo off
-REM NeewerLux — Windows Launcher (no console window)
+REM NeewerLux Windows launcher (no console window)
 REM Uses pythonw.exe so no command prompt window appears.
 REM For debugging with console output, run: python NeewerLux.py
 
