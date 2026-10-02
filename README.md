@@ -1,187 +1,127 @@
 # NeewerLux
 
-A cross-platform Neewer LED light control app for streamers and content creators. Features a keyframe animation engine with 101 presets, multi-light preset editor, visual animation editor, WebUI dashboard, and BLE parallel writes.
+Control Neewer Bluetooth LED lights from your computer, with presets, keyframe animations, and an HTTP server for driving it all from a browser or a Stream Deck.
 
-Fork of [NeewerLite-Python](https://github.com/taburineagle/NeewerLite-Python) (v0.12d) by [@taburineagle](https://github.com/taburineagle), originally based on [NeewerLite](https://github.com/keefo/NeewerLite) by [@keefo](https://github.com/keefo) (Xu Lian).
+NeewerLux is a fork of [NeewerLite-Python](https://github.com/taburineagle/NeewerLite-Python) (v0.12d) by Zach Glenwright ([@taburineagle](https://github.com/taburineagle)), which grew out of [NeewerLite](https://github.com/keefo/NeewerLite) by Xu Lian ([@keefo](https://github.com/keefo)).
 
-**NeewerLux is not affiliated with or endorsed by Neewer.**
+NeewerLux is not affiliated with or endorsed by Neewer.
 
-**Supported lights:** GL1, NL140, SNL1320, SNL1920, SNL480, SNL530, **SNL660**, SNL960, SRP16, SRP18, WRP18, ZRP16, BH30S, CB60, CL124, RGB C80, RGB CB60, RGB1000, RGB1200, RGB140, RGB168, RGB176 A1, RGB512, RGB800, SL-90, RGB1, **RGB176**, RGB18, RGB190, RGB450, **RGB480**, RGB530 PRO, RGB530, RGB650, **RGB660 PRO**, RGB660, RGB960, RGB-P200, RGB-P280, SL-70, **SL-80**, ZK-RY
+## Supported lights
 
----
+Lights are detected by their Bluetooth name. Anything advertising as `NEEWER`, `NW-`, `NWR` or `SL` is picked up, and these models have known colour temperature ranges built in:
+
+GL1, NL140, SNL1320, SNL1920, SNL480, SNL530, SNL660, SNL960, SRP16, SRP18, WRP18, ZRP16, BH30S, CB60, CL124, RGB C80, RGB CB60, RGB1000, RGB1200, RGB140, RGB168, RGB176, RGB176 A1, RGB512, RGB800, RGB1, RGB18, RGB190, RGB450, RGB480, RGB530, RGB530 PRO, RGB650, RGB660, RGB660 PRO, RGB960, RGB-P200, RGB-P280, SL-70, SL-80, SL-90, TL60 RGB, ZK-RY, Apollo.
+
+A model that isn't on the list still connects; it just gets a default colour range, which you can override per light in Light Preferences.
 
 ## Installation
 
-### Windows Executable (Recommended)
-1. Download `NeewerLux-x.x.x-win64.zip` from the [Releases](https://github.com/poizenjam/NeewerLux/releases) page
-2. Extract to any folder
-3. Run `NeewerLux.exe`
+### Windows
 
-Preset and animation files are in the `light_prefs/` folder alongside the executable and can be edited manually with any text editor.
+1. Download `NeewerLux-<version>-Windows.zip` from [Releases](https://github.com/poizenjam/NeewerLux/releases).
+2. Extract it anywhere.
+3. Run `NeewerLux.exe`.
 
-### Running from Source
+Your presets, animations and per-light settings live in the `light_prefs` folder next to the executable. They are plain text and safe to edit by hand or copy between installs. Release zips don't include a preset file, so extracting a newer release over an existing install keeps your presets.
 
-Requires Python 3.11 or newer. Dependency versions are pinned in `uv.lock`, so an
-install from the lockfile reproduces exactly what the release builds against.
+### From source
 
-Using [uv](https://docs.astral.sh/uv/) (recommended):
+Requires Python 3.11 or newer. Dependency versions are pinned in `uv.lock`.
+
+With [uv](https://docs.astral.sh/uv/):
+
 ```
 uv sync --locked
 uv run NeewerLux.py
 ```
 
-Using pip. The version bounds match `pyproject.toml`, so this will not silently pull
-in a future PySide 7 or Bleak 4 that the app has not been tested against:
+With pip:
+
 ```
 pip install "PySide6>=6.7,<7" "bleak>=0.22,<4"
 python NeewerLux.py
 ```
 
-**Headless installs** (`--cli`, `--list`, `--http`) do not need Qt at all. To skip the
-GUI toolkit entirely:
+The command-line and HTTP-only modes (`--cli`, `--list`, `--http`) don't need Qt. To install without it:
+
 ```
 uv sync --locked --no-default-groups
 uv run --no-default-groups NeewerLux.py --http
 ```
-`uv run` re-syncs the environment before running, so `--no-default-groups` is needed on
-both commands. Without it on the second one, uv reinstates the GUI group and pulls
-PySide6 back in.
 
----
+`--no-default-groups` is needed on both commands, because `uv run` re-syncs first and would otherwise reinstall PySide6.
 
-## Features
+## Using it
 
-### Custom Animation System
+### Controlling lights
 
-A full keyframe-based animation engine that drives Neewer lights through timed color sequences with smooth interpolation. Animations are stored as JSON files in `light_prefs/animations/` and can target individual lights by MAC address, numeric ID, alias name, or all lights with the `"*"` wildcard.
+Scan, connect, then use the CCT, HSI or Scene tab. In Light Preferences you can give each light a name and a fixed number. Named lights keep their place in the table, and the name works anywhere a light is targeted: animations, presets and HTTP commands.
 
-Each keyframe specifies a hold time (how long to dwell on the color), a fade time (how long to transition from the previous keyframe), and per-light color parameters in HSI, CCT, or Scene modes. The engine handles shortest-path hue interpolation around the 360° color wheel so transitions between, say, red (0°) and magenta (300°) go the short way rather than sweeping through the entire spectrum.
+Keyboard shortcuts for brightness and the sliders act on each selected light according to its own mode, so one brightness nudge reaches CCT, HSI and Scene lights together. All shortcuts are configurable in Global Preferences.
 
-**Playback controls:**
-- **Speed** — multiplier applied to all timing values (0.25x to 4x)
-- **Rate** — BLE updates per second during fades (1-30, default 5; with Parallel enabled, ~15 is achievable regardless of light count)
-- **Brightness** — scales all brightness values at playback time without modifying the animation file (5-100%)
-- **Loop** — continuous playback with seamless wraparound fading between last and first keyframe
-- **Parallel writes** — sends BLE commands to all lights simultaneously using `asyncio.gather()` instead of sequentially, reducing per-frame time from ~50ms×N to ~50ms regardless of light count (toggle-able for legacy adapter compatibility)
+### Colour temperature limits
 
-**101 built-in animation presets** across categories:
+Global Preferences sets the CCT range your lights should stay within (2700K to 8500K, default 3200K to 5600K), and Light Preferences can override it per light. When a command falls outside a light's range, NeewerLux either clamps it to the nearest value the light can reach or skips it, whichever you choose. The same setting decides what happens when an HSI or Scene command reaches a CCT-only light.
+
+### Presets
+
+The preset buttons sit in a grid under the light table. Right-click one to save the current setup, edit, rename, reorder, duplicate or delete it; left-click recalls it; middle-click renames. A preset can set every light the same way or give each light its own settings, and the Preset Editor lays that out as a table.
+
+Eight presets ship by default: Warm Studio, Daylight, Cool White, Candlelight, Red Alert, Blue Mood, Purple Haze and Green Screen.
+
+### Animations
+
+An animation is a list of keyframes. Each keyframe holds a colour for some time, fades from the previous one over some time, and can set different lights to different colours in HSI, CCT or Scene mode. Hue fades take the short way round the colour wheel. CCT-only lights follow colour animations by mapping hue to the nearest colour temperature.
+
+101 animations ship with the app:
 
 | Category | Examples |
-|----------|---------|
+|---|---|
 | Emergency | Police Flash, Ambulance, Fire Truck, Hazard |
-| Rock Performance | Guitar Solo, Drum Solo, Metal Mosh, Encore, Power Ballad, Spotlight, Rock Anthem, Concert Build |
-| Holidays | Christmas, Halloween, Valentine's, Easter, Hanukkah, New Year's Eve, St. Patrick's, Fourth of July |
-| Practical/Studio | Interview, Warm Studio, Focus, Reading Light, Product Photo, Film Noir, Key Fill Rim, Dawn Simulator, Magic Hour, Golden Hour |
-| Multi-Light Utility | Color Chase, Ping Pong, Ripple, Alternating Flash, Gradient Sweep, Warm Cascade, Identify Lights |
-| Smooth/Ambient | Concert Sweep, Neon Nights, Retrowave, Stage Wash, Fire Flicker, Campfire, Candlelight, Sunset Fade, Ocean Waves, Northern Lights, Lava Lamp, Breathe, Color Wash, Color Cycle, Rainbow Gradient, Rainbow Chase, and many more |
+| Performance | Guitar Solo, Drum Solo, Metal Mosh, Encore, Power Ballad, Spotlight, Rock Anthem, Concert Build |
+| Holidays | Christmas, Halloween, Valentines, Easter, Hanukkah, New Years Eve, St Patricks, Fourth of July |
+| Studio | Interview, Warm Studio, Focus, Reading Light, Product Photo, Film Noir, Key Fill Rim, Dawn Simulator, Magic Hour, Golden Hour |
+| Multi-light | Color Chase, Ping Pong, Ripple, Alternating Flash, Gradient Sweep, Warm Cascade, Identify Lights |
+| Ambient | Neon Nights, Retrowave, Stage Wash, Campfire, Candlelight, Sunset Fade, Ocean Waves, Northern Lights, Lava Lamp, Breathe, and more |
 
-Six template generators are available from the GUI for creating new animations. Animations can also be authored in the Visual Editor or JSON Editor.
+Playback settings: speed (0.25x to 4x), update rate during fades (1 to 30 per second, default 5), brightness scaling (applied at playback, the file is unchanged), looping, and whether to return the lights to their previous state when the animation ends. With parallel writes on, every light is updated at once rather than one after another, which keeps fades smooth with several lights; turn it off if your Bluetooth adapter struggles.
 
-### Animation Editor
+New animations can start from one of six templates, or be built in the animation editor, which works on keyframes as a table with a live colour preview and a JSON tab for direct editing. Animation files are JSON in `light_prefs/animations` and target lights by name, number, MAC address, or `*` for all of them.
 
-A full visual editor for creating and editing animation keyframes:
-- Color-coded keyframe table showing mode, parameters, hold/fade timing, and light count per frame
-- **Light filter combo** — switch which light's parameters are displayed in the keyframe table for multi-light animations
-- Per-light parameter editing with **+ Light** / **- Light** buttons within each keyframe
-- **GradientSlider controls** — hue rainbow, saturation, brightness, and CCT sliders with visual gradient bars matching the main GUI, dynamic suffixes, endpoint labels, and value readouts that switch based on mode
-- Scene dropdown for built-in animation modes
-- Live color preview bar
-- Copy/paste settings between keyframes
-- Add, duplicate, delete, and reorder frames
-- Synced JSON editor tab for power users
-- Size persistence across sessions
+## Remote control
 
-### Preset System
+Turn on the HTTP server from the toolbar, or have it start with the app in Global Preferences. The dashboard is at `http://localhost:8080/` (the port is configurable), and the toolbar's WebUI button opens it.
 
-Presets are displayed as an 8-column scrollable button grid with right-click context menu:
-- **Save Current Settings** — capture current slider positions
-- **Edit Preset** — opens the visual Preset Editor
-- **Rename** — custom preset names (also via middle-click)
-- **Move Left/Right** — reorder presets
-- **Duplicate Preset** — deep-copy with "(copy)" suffix
-- **Delete Preset**
+Every action is also a plain URL, which is how a Stream Deck or a script drives NeewerLux:
 
-Ships with 8 default presets: Warm Studio, Daylight, Cool White, Candlelight, Red Alert, Blue Mood, Purple Haze, Green Screen.
-
-### Preset Editor
-
-A visual editor for configuring preset settings, matching the animation editor's layout:
-- Entry table showing target, mode, and parameter summary with color-coded mode cells
-- Toolbar: Add Entry, Duplicate, Delete, Move Up/Down, Copy, Paste
-- **GradientSlider controls** — same visual gradient bars as the main GUI and animation editor
-- Scene dropdown with named scenes
-- Per-light targeting with guardrails: "All Lights" disabled when multiple entries exist, duplicate targets prevented
-- Copy/paste copies mode + values (not target), enabling quick setup of similar settings across lights
-- Live color preview bar
-- Size persistence across sessions
-
-### Global CCT Range
-
-Configurable minimum/maximum color temperature bounds in Global Preferences (2700K–8500K, default 3200K–5600K). Applies to the CCT tab, Preset Editor, and Animation Editor. Per-light CCT range overrides in Light Preferences take precedence for individual lights.
-
-### CCT Clamping & Incompatibility Handling
-
-Software-side enforcement of CCT temperature bounds on all BLE write paths:
-- **Convert/Clamp** — out-of-range values clamped to the light's effective range
-- **Ignore/Skip** — out-of-range commands silently dropped
-
-Also handles HSI/Scene commands sent to CCT-only lights. Ensures consistent behavior across mixed light setups.
-
-### Light Aliases (Preferred ID)
-
-The **Light Preferences** tab includes a **Preferred ID** field (0-99) alongside the custom name:
-- GUI table reorders so preferred-ID lights appear first, in ID order
-- Animation keyframes can use names (e.g., `"Key"`, `"Fill"`) as light targets
-- HTTP batch commands work with names: `?batch=Key:HSI:0:100:50;Fill:CCT:56:80`
-- Preferred IDs resolve consistently regardless of BLE discovery order
-
-### WebUI Dashboard
-
-A browser-based control panel at `http://localhost:8080/`:
-- Live light table with status
-- CCT/HSI/Scene controls with sliders
-- Preset grid with add/delete endpoints
-- Animation browser with categorized sections and play/stop
-- Update checker
-- Collapsible API reference
-
-### HTTP Animation API
-
-**GET:** `http://server:port/NeewerLux/doAction?animate=Concert%20Sweep|2.0|10|50`
-
-**POST** to `/NeewerLux/doAction`:
-```json
-{
-  "action": "play",
-  "name": "Concert Sweep",
-  "speed": 1.0,
-  "loop": true,
-  "rate": 10,
-  "brightness": 50,
-  "parallel": true
-}
+```
+http://localhost:8080/NeewerLux/doAction?light=1&mode=CCT&temp=5600&bri=80
+http://localhost:8080/NeewerLux/doAction?use_preset=3
+http://localhost:8080/NeewerLux/doAction?animate=Halloween|1.0|10|50|true|2|true
+http://localhost:8080/NeewerLux/doAction?stop_animate
 ```
 
-### Additional Features
+The `animate` value is `Name|speed|rate|brightness|loop|maxLoops|revert`. Only the name is required. The example plays Halloween twice at half brightness, then puts the lights back how they were.
 
-- **Thread safety** — all background-to-GUI updates via Qt signals
-- **Update checker** — GitHub Releases API, displayed in GUI and WebUI
-- **Instance lock** — PID-based with stale lock detection
-- **Log tab** — thread-safe buffered file writes, auto-scroll, clear/save
-- **Info tab** — quick start guide, HTTP API reference, clickable links
-- **Console management** — auto-hidden for exe builds, toggle in preferences
-- **System tray integration** — minimize to tray on close, context menu
-- **Dark/light theme** — full QSS theme system
-- **PySide6 compatibility** — PySide2 fallback preserved
-- **Auto-reconnect on wake** — background worker re-links lights after sleep
-- **Parallel BLE writes** — `asyncio.gather()` for simultaneous multi-light commands
+For richer control, POST JSON to `/NeewerLux/batch` (several lights in one request) or `/NeewerLux/animate`:
 
----
+```json
+{ "action": "play", "name": "Concert Sweep", "speed": 1.0, "loop": true, "maxLoops": 3, "revert": true }
+```
 
-## Repository
+The Info tab and the dashboard both carry the full command reference.
 
-https://github.com/poizenjam/NeewerLux/
+**Security:** the HTTP server has no authentication. Access is limited only by the IP allowlist in Global Preferences, which by default admits this machine and common private network ranges. Don't expose the port to the internet.
+
+## Other details
+
+- Closing the window minimises to the system tray by default; quit from the tray menu.
+- Dark and light themes.
+- Lights are relinked automatically after the computer wakes from sleep.
+- Only one copy runs at a time.
+- The Log tab shows activity and can save it to a file.
+- The Windows executable has no console window. When running from source, Global Preferences can hide the console on launch.
 
 ## License
 
-Same as upstream — see [NeewerLite-Python](https://github.com/taburineagle/NeewerLite-Python) for license details.
+MIT. See [LICENSE](LICENSE).
