@@ -1,0 +1,82 @@
+# Neewer light models NeewerLux knows about.
+#
+# A light is matched by the longest pattern contained in its Bluetooth name,
+# ignoring case, spaces and hyphens, so "RGB176 A1" wins over "RGB176".
+# Any field a model leaves out comes from [defaults].
+#
+#   cct_min, cct_max   colour temperature range in kelvin
+#   cct_only           true for bi-colour lights with no HSI or scene modes;
+#                      these also take CCT as separate brightness and
+#                      temperature packets
+#   reports_status     false for lights that don't answer power and channel
+#                      queries, so the status poll skips them
+#
+# Per-light ranges set in Light Preferences override these.
+
+[scan]
+# Bluetooth name prefixes picked up by a scan. Lights whose MAC address is
+# in the whitelist in Global Preferences are picked up regardless.
+name_prefixes = ["NEEWER", "NW-", "NWR", "SL"]
+
+[defaults]
+cct_min = 3200
+cct_max = 5600
+cct_only = false
+reports_status = true
+
+# Some lights advertise a code rather than a model name. When a name contains
+# `match`, it is shown as `name` instead.
+[[rename]]
+match = "20210036"
+name = "TL60 RGB"
+
+[[rename]]
+match = "20230064"
+name = "TL60 RGB"
+
+[[model]]
+patterns = ["Apollo"]
+cct_min = 5600
+cct_max = 5600
+cct_only = true
+
+[[model]]
+patterns = ["GL1"]
+cct_min = 2900
+cct_max = 7000
+cct_only = true
+
+[[model]]
+patterns = ["NL140", "SNL1320", "SNL1920", "SNL480", "SNL530", "SNL660", "SNL960", "SRP16", "SRP18", "WRP18", "ZRP16"]
+cct_only = true
+
+[[model]]
+patterns = ["BH30S", "CL124", "RGB C80", "RGB CB60", "RGB1000", "RGB1200", "RGB140", "RGB176 A1", "RGB512", "RGB800", "SL-90", "TL60"]
+cct_min = 2500
+cct_max = 10000
+
+[[model]]
+patterns = ["CB60"]
+cct_min = 2500
+cct_max = 6500
+
+[[model]]
+patterns = ["RGB168"]
+cct_min = 2500
+cct_max = 8500
+
+[[model]]
+patterns = ["RGB176"]
+reports_status = false
+
+[[model]]
+patterns = ["RGB1", "RGB18", "RGB190", "RGB450", "RGB480", "RGB530 PRO", "RGB530", "RGB650", "RGB660 PRO", "RGB660", "RGB960", "RGB-P200", "RGB-P280"]
+
+[[model]]
+patterns = ["SL70", "SL80"]
+cct_max = 8500
+
+[[model]]
+patterns = ["ZK-RY"]
+cct_min = 5600
+cct_max = 5600

@@ -1,0 +1,108 @@
+{
+  "format": 1,
+  "name": "Example - Four Light Demo",
+  "description": "40 s demo: warm intro, colour build, chase, rim pulses, calm ending",
+  "duration_ms": 40000,
+  "fps": 20,
+  "end": "revert",
+  "cues": [
+    {
+      "at_ms": 0,
+      "target": "@key",
+      "state": {
+        "mode": "CCT",
+        "temp": 45,
+        "bri": 55,
+        "fade_ms": 1000
+      },
+      "label": "key stays a soft, steady white"
+    },
+    {
+      "at_ms": 0,
+      "target": "@fill;@ambient;@rim",
+      "state": {
+        "mode": "CCT",
+        "temp": 35,
+        "bri": 30,
+        "fade_ms": 2000
+      }
+    },
+    {
+      "at_ms": 4000,
+      "target": "@fill",
+      "state": {
+        "mode": "HSI",
+        "hue": 280,
+        "sat": 90,
+        "bri": 45,
+        "fade_ms": 3000
+      }
+    },
+    {
+      "at_ms": 4000,
+      "target": "@ambient",
+      "state": {
+        "mode": "HSI",
+        "hue": 200,
+        "sat": 90,
+        "bri": 45,
+        "fade_ms": 3000
+      }
+    },
+    {
+      "at_ms": 6000,
+      "target": "@rim",
+      "state": {
+        "mode": "HSI",
+        "hue": 320,
+        "sat": 100,
+        "bri": 60,
+        "fade_ms": 2000
+      }
+    },
+    {
+      "at_ms": 12000,
+      "duration_ms": 10000,
+      "target": "@fill;@ambient;@rim",
+      "clip": {
+        "name": "Color Chase",
+        "fit": "loop",
+        "speed": 1.0,
+        "brightness": 70
+      },
+      "label": "chase over the three colour lights"
+    },
+    {
+      "at_ms": 22000,
+      "target": "@fill;@ambient",
+      "state": {
+        "mode": "HSI",
+        "hue": 30,
+        "sat": 100,
+        "bri": 50,
+        "fade_ms": 1500
+      }
+    },
+    {
+      "at_ms": 24000,
+      "duration_ms": 6000,
+      "target": "@rim",
+      "clip": {
+        "name": "Heartbeat",
+        "fit": "loop",
+        "brightness": 80
+      }
+    },
+    {
+      "at_ms": 32000,
+      "target": "@fill;@ambient;@rim",
+      "state": {
+        "mode": "CCT",
+        "temp": 35,
+        "bri": 25,
+        "fade_ms": 4000
+      },
+      "label": "calm ending before revert"
+    }
+  ]
+}

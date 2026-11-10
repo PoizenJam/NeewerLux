@@ -12,7 +12,7 @@ Lights are detected by their Bluetooth name. Anything advertising as `NEEWER`, `
 
 GL1, NL140, SNL1320, SNL1920, SNL480, SNL530, SNL660, SNL960, SRP16, SRP18, WRP18, ZRP16, BH30S, CB60, CL124, RGB C80, RGB CB60, RGB1000, RGB1200, RGB140, RGB168, RGB176, RGB176 A1, RGB512, RGB800, RGB1, RGB18, RGB190, RGB450, RGB480, RGB530, RGB530 PRO, RGB650, RGB660, RGB660 PRO, RGB960, RGB-P200, RGB-P280, SL-70, SL-80, SL-90, TL60 RGB, ZK-RY, Apollo.
 
-A model that isn't on the list still connects; it just gets a default colour range, which you can override per light in Light Preferences.
+A model that isn't on the list still connects; it just gets a default colour range, which you can override per light in Light Preferences. The model list itself is `light_models.toml`, if you want to add a model or correct a range.
 
 ## Installation
 
@@ -88,6 +88,26 @@ Playback settings: speed (0.25x to 4x), update rate during fades (1 to 30 per se
 
 New animations can start from one of six templates, or be built in the animation editor, which works on keyframes as a table with a live colour preview and a JSON tab for direct editing. Animation files are JSON in `light_prefs/animations` and target lights by name, number, MAC address, or `*` for all of them.
 
+### Light roles and brightness limits
+
+Light Preferences can give each light a role (key, fill, rim, ambient or practical), a side (left, centre or right), a sweep order and an eye-line flag. Animations, sequences and HTTP commands can then target `@rim`, `@left`, `@rim.left`, `@eyeline` or `@all` instead of light numbers, so a show keeps working when lights are renumbered. Lights without a role count as ambient.
+
+Each light can also have a maximum and minimum brightness, and Global Preferences sets the defaults. The limits apply to presets, HTTP commands, animations, effects and sequences; only the manual sliders are exempt, so you can still go bright on purpose. A light marked Locked ignores sequences and effects entirely and stays on whatever you set by hand or by preset, which is useful for a key light.
+
+### Sequences
+
+A sequence is a timed light show for a song: cues that start at set times and either set a colour (with a fade) or play one of the animations, stretched or looped to fit, on some of the lights. Sequences are JSON files in `light_prefs/sequences` and play from the Sequences panel on the Animations tab or over HTTP. Timing comes from a fixed start time rather than from a chain of waits, so a five-minute sequence stays in step with the song; the position can also be set from outside, for syncing to a game or song timer.
+
+When a sequence ends, the lights go back to how they were before it started (usually a preset), unless the sequence says to hold its last frame or recall a particular preset. Pausing puts the lights back the same way, and resuming picks the show up exactly where it stopped.
+
+The format is documented in full in [docs/SEQUENCE_FORMAT.md](docs/SEQUENCE_FORMAT.md), written so that a program or an AI model can generate sequences per song. A timeline editor is planned.
+
+### Effects on top of a sequence
+
+Animations can play on three layers above the sliders and presets. **Override** is the classic one-at-a-time slot that the GUI Play button, a Stream Deck button and any `animate` URL without a layer use. **Effect** is for things Streamer.bot triggers, such as redeems, bits, subs and raids: effects queue up behind each other or cut in, and a forever-looping effect stops after 30 seconds. **Show** holds the sequence. Each light follows the highest layer that is driving it, so an effect on the rim lights leaves the others on the sequence, and when the effect ends the rim lights rejoin the sequence in time with the song.
+
+While a sequence or effect is driving a light, moving a slider or recalling a preset doesn't change that light straight away: the change becomes what the light returns to afterwards. Lights the sequence isn't using, and Locked lights, change immediately.
+
 ## Remote control
 
 Turn on the HTTP server from the toolbar, or have it start with the app in Global Preferences. The dashboard is at `http://localhost:8080/` (the port is configurable), and the toolbar's WebUI button opens it.
@@ -103,11 +123,24 @@ http://localhost:8080/NeewerLux/doAction?stop_animate
 
 The `animate` value is `Name|speed|rate|brightness|loop|maxLoops|revert`. Only the name is required. The example plays Halloween twice at half brightness, then puts the lights back how they were.
 
-For richer control, POST JSON to `/NeewerLux/batch` (several lights in one request) or `/NeewerLux/animate`:
+Three more optional fields choose a layer: `Name|speed|rate|brightness|loop|maxLoops|revert|layer|queue|target`. Layer is `override` (the default), `effect` or `show`; queue is `queue` (the default) or `replace`; target narrows the animation to some lights, such as `@rim`. On the effect and show layers, `revert` applies to that request only.
+
+```
+http://localhost:8080/NeewerLux/doAction?animate=Strobe|1|10|100|true|5||effect||@rim
+http://localhost:8080/NeewerLux/doAction?stop_layer=effect_all
+http://localhost:8080/NeewerLux/doAction?sequence=play|Example%20-%20Four%20Light%20Demo
+http://localhost:8080/NeewerLux/doAction?sequence=pause
+http://localhost:8080/NeewerLux/doAction?status_json
+```
+
+For richer control, POST JSON to `/NeewerLux/batch` (several lights in one request), `/NeewerLux/animate` or `/NeewerLux/sequence`:
 
 ```json
 { "action": "play", "name": "Concert Sweep", "speed": 1.0, "loop": true, "maxLoops": 3, "revert": true }
+{ "action": "play", "name": "Heartbeat", "layer": "effect", "mode": "queue", "target": "@rim" }
 ```
+
+[docs/SEQUENCE_FORMAT.md](docs/SEQUENCE_FORMAT.md) lists every sequence command and layer option.
 
 The Info tab and the dashboard both carry the full command reference.
 
@@ -121,6 +154,7 @@ The Info tab and the dashboard both carry the full command reference.
 - Only one copy runs at a time.
 - The Log tab shows activity and can save it to a file.
 - The Windows executable has no console window. When running from source, Global Preferences can hide the console on launch.
+- `tests/` holds offline tests that run the real code against stand-in lights; each file's header says how to run it.
 
 ## License
 

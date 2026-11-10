@@ -42,6 +42,8 @@ jobs:
           Copy-Item -Path "light_prefs" -Destination "dist/NeewerLux/light_prefs" -Recurse
           Copy-Item -Path "README.md" -Destination "dist/NeewerLux/"
           Copy-Item -Path "CHANGELOG.md" -Destination "dist/NeewerLux/"
+          Copy-Item -Path "LICENSE" -Destination "dist/NeewerLux/"
+          Copy-Item -Path "docs" -Destination "dist/NeewerLux/docs" -Recurse
 
       - name: Create EXE zip
         run: |
@@ -65,10 +67,13 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           zip -r "NeewerLux-${VERSION}-Source.zip" \
             NeewerLux.py \
+            light_models.toml \
+            LICENSE \
             neewerlux_ui.py \
             neewerlux_theme.py \
             neewerlux_webui.py \
             neewerlux_anim_editor.py \
+            neewerlux_show.py \
             NeewerLux.bat \
             NeewerLux-HTTP.bat \
             pyproject.toml \
@@ -78,6 +83,7 @@ jobs:
             com.github.poizenjam.NeewerLux.png \
             README.md \
             CHANGELOG.md \
+            docs/ \
             light_prefs/
 
       - name: Upload source artifact

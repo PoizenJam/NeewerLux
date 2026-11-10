@@ -15,7 +15,7 @@
 ##          Windows, Linux/Ubuntu, MacOS and RPi
 ############################################################
 
-NEEWERLUX_VERSION = "1.3.0"
+NEEWERLUX_VERSION = "1.3.1"
 NEEWERLUX_REPO_URL = "https://github.com/poizenjam/NeewerLux/"
 NEEWERLUX_RELEASES_API = "https://api.github.com/repos/poizenjam/NeewerLux/releases/latest"
 
@@ -31,6 +31,7 @@ if sys.stderr is None:
 
 import math # used for calculating the RGB values of color temperatures
 import json # used for animation files and HTTP batch/animation APIs
+import tomllib # reads the light model table
 import shutil # used to seed the default preset file on first run
 import tempfile
 import faulthandler
@@ -46,6 +47,8 @@ import threading
 import time
 
 from datetime import datetime
+
+import neewerlux_show as show # layered show engine: animation timelines, sequences, compositor
 
 # IMPORT BLEAK (this is the library that allows the program to communicate with the lights) - THIS IS NECESSARY!
 try:
@@ -82,7 +85,7 @@ PYSIDE_VERSION = 0
 # IMPORT PYSIDE6 (preferred, actively maintained) OR PYSIDE2 (legacy fallback)
 try:
     import PySide6
-    from PySide6.QtCore import Qt, QItemSelectionModel, Signal as QtSignal
+    from PySide6.QtCore import Qt, QItemSelectionModel, QTimer, Signal as QtSignal
     from PySide6.QtGui import QLinearGradient, QColor, QKeySequence, QFont, QIcon, QShortcut
     from PySide6.QtWidgets import QApplication, QMainWindow, QTableWidgetItem, QMessageBox, QInputDialog, QListWidgetItem, QSizePolicy, QPushButton
     PYSIDE_VERSION = 6
@@ -91,7 +94,7 @@ except Exception as e:
     print(f"  [DEBUG] PySide6 import failed: {type(e).__name__}: {e}")
     try:
         import PySide2
-        from PySide2.QtCore import Qt, QItemSelectionModel, Signal as QtSignal
+        from PySide2.QtCore import Qt, QItemSelectionModel, QTimer, Signal as QtSignal
         from PySide2.QtGui import QLinearGradient, QColor, QKeySequence, QFont, QIcon
         from PySide2.QtWidgets import QApplication, QMainWindow, QTableWidgetItem, QShortcut, QMessageBox, QInputDialog, QListWidgetItem, QSizePolicy, QPushButton
         PYSIDE_VERSION = 2
@@ -230,17 +233,24 @@ presetNames = {} # dict of {preset_index: "custom name"} for user-assigned names
 # ============================================================================
 # CUSTOM ANIMATION SYSTEM
 # ============================================================================
-animationRunning = False       # whether an animation is currently playing
-animationStopFlag = False      # set True to request the animation to stop
-_animChainStop = False         # set when stopping to chain into another animation (skips revert)
-currentAnimationName = ""      # name of the currently playing animation
+animationRunning = False       # whether an animation is playing on the override layer (the v1.3.0 slot)
+currentAnimationName = ""      # name of the animation on the override layer
 savedAnimations = {}           # dict of {name: animation_dict} loaded from disk
 animationsDir = os.path.dirname(os.path.abspath(sys.argv[0])) + os.sep + "light_prefs" + os.sep + "animations"
 lightAliases = {}  # {MAC: {"id": int, "name": str}}, built from per-light prefs sidecar files
-workerWakeEvent = threading.Event()  # signaled by animation thread to wake the worker immediately
+workerWakeEvent = threading.Event()  # signaled by the show engine to wake the worker immediately
 animParallelWrites = True  # send BLE commands to all lights simultaneously during animations
 animRevertOnFinish = True  # revert lights to pre-animation state when a non-looping animation finishes
-preAnimationStates = {}    # {light_index: byte_list} saved before animation starts
+
+# SHOWS: SEQUENCES, LAYERS, LIGHT ROLES AND BRIGHTNESS LIMITS
+showEngine = None              # neewerlux_show.ShowCompositor, created by initShowEngine()
+savedSequences = {}            # dict of {name: sequence_dict} loaded from disk
+sequencesDir = os.path.dirname(os.path.abspath(sys.argv[0])) + os.sep + "light_prefs" + os.sep + "sequences"
+lightShowPrefs = {}            # {MAC: {"role", "side", "order", "eyeline", "maxBri", "minBri", "locked"}}
+SHOW_PREF_DEFAULTS = {"role": "ambient", "side": "centre", "order": 0, "eyeline": False,
+                      "maxBri": -1, "minBri": -1, "locked": False} # -1 brightness = use the global default
+LIGHT_ROLES = ["key", "fill", "rim", "ambient", "practical"]
+LIGHT_SIDES = ["left", "centre", "right"]
 
 # HTTP SERVER (GUI-LAUNCHED) MANAGEMENT
 httpServerInstance = None   # ThreadingHTTPServer object (when running from GUI)
@@ -268,7 +278,11 @@ asyncioEventLoop = None # the current asyncio loop
 setLightUUID = "69400002-B5A3-F393-E0A9-E50E24DCCA99" # the UUID to send information to the light
 notifyLightUUID = "69400003-B5A3-F393-E0A9-E50E24DCCA99" # the UUID for notify callbacks from the light
 
-receivedData = "" # the data received from the Notify characteristic
+# Notification subscriptions, keyed by MAC so they survive table re-sorting. Each light
+# is subscribed once per connection: re-subscribing on every status poll leaks event
+# registrations in the Windows Bluetooth backend.
+_notifyClients = {} # {mac: the BleakClient the subscription belongs to}
+_notifyData = {}    # {mac: the last notification payload, or None while waiting}
 
 # SET FROM THE PREFERENCES FILE ON LAUNCH
 findLightsOnStartup = True # whether or not to look for lights when the program starts
@@ -288,6 +302,10 @@ logToFile = False # whether to also write log entries to a file
 logHeartbeat = False # whether the worker thread logs "Background Thread Running" every ~30s
 globalCCTMin = 3200 # global default minimum color temperature (K)
 globalCCTMax = 5600 # global default maximum color temperature (K)
+envMaxBri = 100 # default brightness ceiling for every source except the manual sliders (per-light setting overrides)
+envMinBri = 0 # default brightness floor for lights that are on (0% and OFF still pass)
+seqFrameRate = 20 # default sequence frame rate (BLE updates per second), 1-30
+effectMaxSeconds = 30 # cap for looping effect-layer animations that have no loop count
 autoReconnectOnDisconnect = True # whether or not to automatically try reconnecting to lights that disconnect (e.g. after sleep/wake)
 acceptable_HTTP_IPs = [] # the acceptable IPs for the HTTP server, set on launch by prefs file
 customKeys = [] # custom keymappings for keyboard shortcuts, set on launch by the prefs file
@@ -398,6 +416,8 @@ try: # try to load the GUI
         _updateResultSignal = QtSignal(str, str, str, str)
         # Thread-safe signal for appending log messages from any thread
         _logSignal = QtSignal(str)
+        # Thread-safe signal for refreshing the sequence list after an HTTP save
+        _sequenceListSignal = QtSignal()
 
         def __init__(self):
             QMainWindow.__init__(self)
@@ -409,6 +429,13 @@ try: # try to load the GUI
 
             # Connect the thread-safe table update signal
             self._tableUpdateSignal.connect(self.setTheTable)
+
+            # Sequences panel, and a GUI-thread timer that mirrors show engine state into the labels
+            self._sequenceListSignal.connect(self.seqRefreshList)
+            self._lastShowLabels = None
+            self._showStatusTimer = QTimer(self)
+            self._showStatusTimer.timeout.connect(self._updateShowStatus)
+            self._showStatusTimer.start(250)
 
             # Connect the log signal and log tab buttons
             self._logSignal.connect(self._appendLog)
@@ -1283,6 +1310,84 @@ try: # try to load the GUI
                     item.setData(Qt.UserRole, name)
                     self.animList.addItem(item)
 
+        # ================================================================
+        # SEQUENCE PANEL HANDLERS
+        # ================================================================
+
+        def seqRefreshList(self):
+            self.seqList.clear()
+            for name in sorted(savedSequences.keys(), key=str.lower):
+                data = savedSequences[name]
+                secs = (data.get("duration_ms") or 0) / 1000.0
+                item = QListWidgetItem(name + "  [" + str(int(secs // 60)) + ":" + ("%04.1f" % (secs % 60)) + ", " + str(len(data.get("cues", []))) + " cues]")
+                item.setData(Qt.UserRole, name)
+                if data.get("description"):
+                    item.setToolTip(str(data["description"]))
+                self.seqList.addItem(item)
+
+        def seqReload(self):
+            loadAllSequences()
+            self.seqRefreshList()
+
+        def seqPlay(self):
+            items = self.seqList.selectedItems()
+            if not items:
+                self.seqStatusLabel.setText("Select a sequence first")
+                return
+            result = startSequence(items[0].data(Qt.UserRole))
+            if not result["success"]:
+                self.seqStatusLabel.setText("Can't play: " + result["errors"][0])
+                printDebugString("Sequence errors: " + "; ".join(result["errors"]))
+            elif result["warnings"]:
+                printDebugString("Sequence warnings: " + "; ".join(result["warnings"]))
+
+        def seqPauseResume(self):
+            seqStatus = getShowStatus()["sequence"]
+            if seqStatus is None:
+                return
+            sequenceControl("resume" if seqStatus["state"] == "paused" else "pause")
+
+        def _updateShowStatus(self):
+            """Runs on the GUI thread every 250 ms; only touches widgets when something changed."""
+            if showEngine is None:
+                return
+            st = showEngine.status()
+            ov = st["layers"].get("override")
+            if ov is not None:
+                animText = "Playing: " + ov["name"] + "\nFrame " + str(max(1, ov["keyframe"])) + "/" + str(ov["keyframes"])
+            else:
+                animText = None
+            effect = st["layers"].get("effect")
+            if effect is not None:
+                effectText = "Effect: " + effect["name"] + (" (+" + str(len(st["layers"]["effect_queue"])) + " queued)" if st["layers"]["effect_queue"] else "")
+            else:
+                effectText = ""
+            seq = st["sequence"]
+            if seq is not None:
+                def _fmt(ms):
+                    return str(int(ms // 60000)) + ":" + ("%04.1f" % ((ms % 60000) / 1000.0))
+                seqText = seq["name"] + ": " + _fmt(seq["position_ms"]) + " / " + _fmt(seq["duration_ms"]) + " (" + seq["state"] + ")"
+                pauseText = "Resume" if seq["state"] == "paused" else "Pause"
+            else:
+                seqText, pauseText = "No sequence playing", "Pause"
+            if effectText:
+                seqText += "\n" + effectText
+            labels = (animText, seqText, pauseText)
+            if labels == self._lastShowLabels:
+                return
+            previous = self._lastShowLabels
+            self._lastShowLabels = labels
+            if animText is not None:
+                self.animStatusLabel.setText(animText)
+                self.animPlayButton.setEnabled(False)
+                self.animStopButton.setEnabled(True)
+            elif previous is not None and previous[0] is not None:
+                self.animStatusLabel.setText("Stopped")
+                self.animPlayButton.setEnabled(True)
+                self.animStopButton.setEnabled(False)
+            self.seqStatusLabel.setText(seqText)
+            self.seqPauseButton.setText(pauseText)
+
         def animGetSelectedName(self):
             """Return the name of the currently selected animation, or None."""
             items = self.animList.selectedItems()
@@ -1609,6 +1714,13 @@ try: # try to load the GUI
             horizHeaders = self.lightTable.horizontalHeader()
             horizHeaders.setSectionsClickable(True)
             horizHeaders.sectionClicked.connect(self.sortByHeader)
+
+            # SEQUENCE PANEL CONNECTIONS
+            self.seqPlayButton.clicked.connect(self.seqPlay)
+            self.seqPauseButton.clicked.connect(self.seqPauseResume)
+            self.seqStopButton.clicked.connect(lambda: sequenceControl("stop"))
+            self.seqReloadButton.clicked.connect(self.seqReload)
+            self.seqList.itemDoubleClicked.connect(lambda item: self.seqPlay())
 
             # ANIMATION TAB CONNECTIONS
             self.animPlayButton.clicked.connect(self.animPlay)
@@ -2075,6 +2187,15 @@ try: # try to load the GUI
             else:
                 self.onlyCCTModeCheck.setChecked(False)
 
+            # SHOW SETTINGS
+            self.lightRoleCombo.setCurrentIndex(LIGHT_ROLES.index(getLightShowPref(selectedLight, "role")))
+            self.lightSideCombo.setCurrentIndex(LIGHT_SIDES.index(getLightShowPref(selectedLight, "side")))
+            self.lightOrderSpin.setValue(getLightShowPref(selectedLight, "order"))
+            self.lightEyelineCheck.setChecked(bool(getLightShowPref(selectedLight, "eyeline")))
+            self.lightMaxBriSpin.setValue(getLightShowPref(selectedLight, "maxBri"))
+            self.lightMinBriSpin.setValue(getLightShowPref(selectedLight, "minBri"))
+            self.lightLockedCheck.setChecked(bool(getLightShowPref(selectedLight, "locked")))
+
             self.checkLightPrefsEnables() # set up which fields on the panel are enabled
 
         def checkLightPrefsEnables(self): # enable/disable fields when clicking on checkboxes
@@ -2148,6 +2269,20 @@ try: # try to load the GUI
                     availableLights[selectedRows[0]][5] = self.onlyCCTModeCheck.isChecked() # if the option to send BRI and HUE separately is checked, then turn that on
                     changedPrefs += 1
 
+                # SHOW SETTINGS (role, side, sweep order, eye line, brightness limits, locked)
+                lightMAC = availableLights[selectedRows[0]][0].address.upper()
+                newShowPrefs = {"role": LIGHT_ROLES[self.lightRoleCombo.currentIndex()],
+                                "side": LIGHT_SIDES[self.lightSideCombo.currentIndex()],
+                                "order": self.lightOrderSpin.value(),
+                                "eyeline": self.lightEyelineCheck.isChecked(),
+                                "maxBri": self.lightMaxBriSpin.value(),
+                                "minBri": self.lightMinBriSpin.value(),
+                                "locked": self.lightLockedCheck.isChecked()}
+                showPrefsDefault = newShowPrefs == SHOW_PREF_DEFAULTS
+                if newShowPrefs != lightShowPrefs.get(lightMAC, SHOW_PREF_DEFAULTS):
+                    lightShowPrefs[lightMAC] = newShowPrefs
+                    changedPrefs += 1
+
                 # PREFERRED ID FOR LIGHT ALIASING
                 newPrefID = self.preferredIDSpin.value()
                 oldPrefID = availableLights[selectedRows[0]][8] if len(availableLights[selectedRows[0]]) > 8 else 0
@@ -2164,7 +2299,7 @@ try: # try to load the GUI
                     if defaultSettings[0] == self.customNameTF.text() and \
                     defaultSettings[1] == newRange and \
                     defaultSettings[2] == self.onlyCCTModeCheck.isChecked() and \
-                    currentPrefID == 0:
+                    currentPrefID == 0 and showPrefsDefault:
                         printDebugString("All the options that are currently set are the defaults for this light, so the preferences file will be deleted.")
                         saveLightPrefs(selectedRows[0], True) # delete the old prefs file
                     else:
@@ -2197,6 +2332,10 @@ try: # try to load the GUI
                 self.logHeartbeat_check.setChecked(logHeartbeat)
                 self.globalCCTMinSpin.setValue(globalCCTMin)
                 self.globalCCTMaxSpin.setValue(globalCCTMax)
+                self.envMaxBriSpin.setValue(envMaxBri)
+                self.envMinBriSpin.setValue(envMinBri)
+                self.seqFrameRateSpin.setValue(seqFrameRate)
+                self.effectMaxSecondsSpin.setValue(effectMaxSeconds)
                 self.maxNumOfAttempts_field.setText(str(maxNumOfAttempts))
                 self.acceptable_HTTP_IPs_field.setText("\n".join(acceptable_HTTP_IPs))
                 self.whiteListedMACs_field.setText("\n".join(whiteListedMACs))
@@ -2242,6 +2381,10 @@ try: # try to load the GUI
                 self.logHeartbeat_check.setChecked(False)
                 self.globalCCTMinSpin.setValue(3200)
                 self.globalCCTMaxSpin.setValue(5600)
+                self.envMaxBriSpin.setValue(100)
+                self.envMinBriSpin.setValue(0)
+                self.seqFrameRateSpin.setValue(20)
+                self.effectMaxSecondsSpin.setValue(30)
                 self.maxNumOfAttempts_field.setText("6")
                 self.acceptable_HTTP_IPs_field.setText("\n".join(["127.0.0.1", "192.168.", "10."]))
                 self.whiteListedMACs_field.setText("")
@@ -2272,7 +2415,7 @@ try: # try to load the GUI
 
         def saveGlobalPrefs(self):
             # change these global values to the new values in Prefs
-            global customKeys, autoConnectToLights, printDebug, rememberLightsOnExit, rememberPresetsOnExit, autoReconnectOnDisconnect, maxNumOfAttempts, acceptable_HTTP_IPs, whiteListedMACs, hideConsoleOnLaunch, minimizeToTrayOnClose, httpAutoStart, httpPort, cctFallbackMode, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, globalCCTMin, globalCCTMax, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, cctFallbackMode
+            global customKeys, autoConnectToLights, printDebug, rememberLightsOnExit, rememberPresetsOnExit, autoReconnectOnDisconnect, maxNumOfAttempts, acceptable_HTTP_IPs, whiteListedMACs, hideConsoleOnLaunch, minimizeToTrayOnClose, httpAutoStart, httpPort, cctFallbackMode, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, globalCCTMin, globalCCTMax, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, cctFallbackMode, envMaxBri, envMinBri, seqFrameRate, effectMaxSeconds
 
             finalPrefs = [] # list of final prefs to merge together at the end
 
@@ -2387,6 +2530,19 @@ try: # try to load the GUI
                 finalPrefs.append("globalCCTMin=" + str(globalCCTMin))
             if globalCCTMax != 5600:
                 finalPrefs.append("globalCCTMax=" + str(globalCCTMax))
+
+            envMaxBri = self.envMaxBriSpin.value()
+            envMinBri = self.envMinBriSpin.value()
+            if envMaxBri != 100:
+                finalPrefs.append("envMaxBri=" + str(envMaxBri))
+            if envMinBri != 0:
+                finalPrefs.append("envMinBri=" + str(envMinBri))
+            seqFrameRate = self.seqFrameRateSpin.value()
+            if seqFrameRate != 20:
+                finalPrefs.append("seqFrameRate=" + str(seqFrameRate))
+            effectMaxSeconds = self.effectMaxSecondsSpin.value()
+            if effectMaxSeconds != 30:
+                finalPrefs.append("effectMaxSeconds=" + str(effectMaxSeconds))
             
             maxAttemptText = self.maxNumOfAttempts_field.text().strip()
             if maxAttemptText == "" or not maxAttemptText.isdigit():
@@ -3622,6 +3778,9 @@ def saveLightPrefs(lightID, deleteFile = False): # save a sidecar file with the 
         preferredID = availableLights[lightID][8] if len(availableLights[lightID]) > 8 else 0
         exportString += "|" + str(preferredID)
 
+        # Show settings (fields 6-12), only written when something isn't default
+        exportString += showPrefsToFields(lightShowPrefs.get(availableLights[lightID][0].address.upper(), SHOW_PREF_DEFAULTS))
+
         # WRITE THE PREFERENCES FILE
         with open(exportFileName, mode="w", encoding="utf-8") as prefsFileToWrite:
             prefsFileToWrite.write(exportString)
@@ -3714,15 +3873,9 @@ def recallCustomPreset(numOfPreset, updateGUI=True, loop=None):
     global threadAction
 
     # If an animation is playing, stop it, user is recalling a preset
+    # (this can run on the HTTP thread; the GUI picks up the stop from its status timer)
     if animationRunning:
         stopAnimation()
-        try:
-            if mainWindow is not None:
-                mainWindow.animPlayButton.setEnabled(True)
-                mainWindow.animStopButton.setEnabled(False)
-                mainWindow.animStatusLabel.setText("Stopped")
-        except Exception:
-            pass
 
     changedLights = [] # if a snapshot preset exists in this setting, log the lights that are to be changed here
 
@@ -4175,8 +4328,7 @@ async def findDevices():
             currentScan.append((d, adv))
         else: # if this device is not whitelisted, check to see if it's valid (matches a known Neewer name prefix)
             if d.name != None:
-                acceptedPrefixes = ("NEEWER", "NW-", "SL", "NWR")
-                if d.name.upper().startswith(acceptedPrefixes):
+                if d.name.upper().startswith(loadLightModels()["prefixes"]):
                     d.name = getCorrectedName(d.name)
                     currentScan.append((d, adv)) # add this light to this session's available lights
 
@@ -4199,6 +4351,7 @@ async def findDevices():
                 else:
                     availableLights[b].append(rssi)
                 availableLights[b][1] = "" # clear the Bleak connection (as it's changed) to force the light to need re-linking
+                _forgetNotify(device.address)
 
                 break # stop checking if we've found a negative result
 
@@ -4206,6 +4359,8 @@ async def findDevices():
             printDebugString("Found new light! [" + device.name + "] " + returnMACname() + " " + device.address + " RSSI: " + str(rssi) + " dBm")
             customPrefs = getCustomLightPrefs(device.address, device.name)
             prefID = customPrefs[4] if len(customPrefs) > 4 else 0
+            if len(customPrefs) > 5:
+                lightShowPrefs[device.address.upper()] = parseShowPrefFields([str(x) for x in customPrefs])
 
             if customPrefs[3] is not None and isinstance(customPrefs[3], list): # we have previously stored parameters
                 availableLights.append([device, "", customPrefs[0], customPrefs[3], customPrefs[1], customPrefs[2], True, ["---", "---"], prefID, rssi])
@@ -4291,53 +4446,62 @@ def getCustomLightPrefs(MACAddress, lightName = ""):
         return specs
 
 # RETURN THE DEFAULT FACTORY SPECIFICATIONS FOR LIGHTS
+_lightModels = None
+
+def _normalizeModelName(name):
+    return name.replace(" ", "").replace("-", "").upper()
+
+def loadLightModels():
+    """Read light_models.toml once. A missing or broken file falls back to the defaults
+    below with no known models, so lights still work with a generic CCT range."""
+    global _lightModels
+    if _lightModels is not None:
+        return _lightModels
+
+    table = {"prefixes": ("NEEWER", "NW-", "NWR", "SL"),
+             "defaults": {"cct_min": 3200, "cct_max": 5600, "cct_only": False, "reports_status": True},
+             "renames": [], "patterns": []}
+    path = _resource_path("light_models.toml")
+    try:
+        with open(path, "rb") as f:
+            raw = tomllib.load(f)
+        table["prefixes"] = tuple(p.upper() for p in raw.get("scan", {}).get("name_prefixes", table["prefixes"]))
+        table["defaults"].update(raw.get("defaults", {}))
+        table["renames"] = [(r["match"], r["name"]) for r in raw.get("rename", [])]
+        for model in raw.get("model", []):
+            caps = dict(table["defaults"])
+            caps.update({k: v for k, v in model.items() if k != "patterns"})
+            for pattern in model["patterns"]:
+                table["patterns"].append((_normalizeModelName(pattern), caps))
+    except (OSError, tomllib.TOMLDecodeError, KeyError, TypeError) as e:
+        printDebugString("Could not load light model table " + path + " (" + str(e) + "), using generic defaults")
+
+    _lightModels = table
+    return table
+
+def getLightCaps(lightName):
+    """Capabilities for a light, from the longest model pattern contained in its name."""
+    table = loadLightModels()
+    name = _normalizeModelName(lightName or "")
+    best = None
+    for pattern, caps in table["patterns"]:
+        if pattern in name and (best is None or len(pattern) > len(best[0])):
+            best = (pattern, caps)
+    return best[1] if best else table["defaults"]
+
 def getLightSpecs(lightName, returnParam = "all"):
-    # the first section of lights here are LED only (can't use HSI), and the 2nd section are HSI-capable lights
-    # listed with their name, the max and min color temps available to use in CCT mode, and HSI only (True) or not (False)
-    masterNeewerLuxList = [
-        ["Apollo", 5600, 5600, True], ["GL1", 2900, 7000, True], ["NL140", 3200, 5600, True],
-        ["SNL1320", 3200, 5600, True], ["SNL1920", 3200, 5600, True], ["SNL480", 3200, 5600, True],
-        ["SNL530", 3200, 5600, True], ["SNL660", 3200, 5600, True], ["SNL960", 3200, 5600, True],
-        ["SRP16", 3200, 5600, True], ["SRP18", 3200, 5600, True], ["WRP18", 3200, 5600, True],
-        ["ZRP16", 3200, 5600, True],
-        ["BH30S", 2500, 10000, False], ["CB60", 2500, 6500, False], ["CL124", 2500, 10000, False],
-        ["RGB C80", 2500, 10000, False], ["RGB CB60", 2500, 10000, False], ["RGB1000", 2500, 10000, False],
-        ["RGB1200", 2500, 10000, False], ["RGB140", 2500, 10000, False], ["RGB168", 2500, 8500, False],
-        ["RGB176 A1", 2500, 10000, False], ["RGB512", 2500, 10000, False], ["RGB800", 2500, 10000, False],
-        ["SL-90", 2500, 10000, False], ["RGB1", 3200, 5600, False], ["RGB176", 3200, 5600, False],
-        ["RGB18", 3200, 5600, False], ["RGB190", 3200, 5600, False], ["RGB450", 3200, 5600, False],
-        ["RGB480", 3200, 5600, False], ["RGB530PRO", 3200, 5600, False], ["RGB530", 3200, 5600, False],
-        ["RGB650", 3200, 5600, False], ["RGB660PRO", 3200, 5600, False], ["RGB660", 3200, 5600, False],
-        ["RGB960", 3200, 5600, False], ["RGB-P200", 3200, 5600, False], ["RGB-P280", 3200, 5600, False],
-        ["SL70", 3200, 8500, False], ["SL80", 3200, 8500, False], ["TL60", 2500, 10000, False],
-        ["ZK-RY", 5600, 5600, False]
-    ]
-    
-    for a in range(len(masterNeewerLuxList)): # scan the list of preset specs above to find the current light in them
-        # the default list of preferences - no custom name, a color temp range from 3200-5600K, and RGB not restricted (False)
-        # if we don't find the name of the light in the master list, we just return these default parameters
-        customPrefs = ["", [3200, 5600], False]
+    caps = getLightCaps(lightName)
+    customPrefs = ["", [caps["cct_min"], caps["cct_max"]], caps["cct_only"]]
 
-        # check the master list to see if the current light is found - if it is, then change the prefs to reflect the light's spec
-        if masterNeewerLuxList[a][0] in lightName.replace(" ", ""):
-            # customPrefs[0] = masterNeewerLuxList[a][0] # the name of the light (for testing purposes)
-            customPrefs[1] = [masterNeewerLuxList[a][1], masterNeewerLuxList[a][2]] # the HSI color temp range
-            customPrefs[2] = masterNeewerLuxList[a][3] # whether or not to allow RGB commands
-            break # stop looking for the light!
-
-    if returnParam == "all": # we want to return all information (the default)
+    if returnParam == "all":
         return customPrefs
-    elif returnParam == "temp": # we only want to return color temp ranges for this light
+    elif returnParam == "temp":
         return customPrefs[1]
-    elif returnParam == "CCT": # we only want to return CCT-only status for this light
+    elif returnParam == "CCT":
         return customPrefs[2]
 
 def getCorrectedName(lightName):
-    newLightNames = [
-        ["20210036", "TL60 RGB"], ["20230064", "TL60 RGB"]
-    ]
-
-    for identifier, correctedName in newLightNames:
+    for identifier, correctedName in loadLightModels()["renames"]:
         if identifier in lightName:
             return correctedName
 
@@ -4426,41 +4590,48 @@ async def connectToLight(selectedLight, updateGUI=True):
     return returnValue # once the connection is over, then return either True or False (for CLI) or nothing (for GUI)
 
 async def readNotifyCharacteristic(selectedLight, diagCommand, typeOfData):
-    # clear the global variable before asking the light for info
-    global receivedData
-    receivedData = ""
+    client = availableLights[selectedLight][1]
+    mac = availableLights[selectedLight][0].address
 
-    try:
-        await availableLights[selectedLight][1].start_notify(notifyLightUUID, notifyCallback) # start reading notifications from the light
-    except Exception as e:
-        try: # if we've resorted the list, there is a possibility of a hanging callback, so this will raise an exception
-            await availableLights[selectedLight][1].stop_notify(notifyLightUUID) # so we need to try disconnecting first
-            await asyncio.sleep(0.5) # wait a little bit of time before re-connecting to the callback
-            await availableLights[selectedLight][1].start_notify(notifyLightUUID, notifyCallback) # try again to start reading notifications from the light
-        except Exception as e: # if we truly can't connect to the callback, return a blank string
-            return "" # if there is an error starting the characteristic scan, just quit out of this routine
+    if _notifyClients.get(mac) is not client: # not yet subscribed on this connection
+        try:
+            await client.start_notify(notifyLightUUID, _makeNotifyCallback(mac))
+        except Exception:
+            try: # a subscription left over from a dropped connection can block a new one
+                await client.stop_notify(notifyLightUUID)
+                await asyncio.sleep(0.5)
+                await client.start_notify(notifyLightUUID, _makeNotifyCallback(mac))
+            except Exception:
+                return ""
+        _notifyClients[mac] = client
+
+    _notifyData[mac] = None
 
     for a in range(maxNumOfAttempts): # attempt maxNumOfAttempts times to read the characteristics
         try:
-            await availableLights[selectedLight][1].write_gatt_char(setLightUUID, bytearray(diagCommand))
-        except Exception as e:
+            await client.write_gatt_char(setLightUUID, bytearray(diagCommand))
+        except Exception:
             return "" # if there is an error checking the characteristic, just quit out of this routine
 
-        if receivedData != "": # if the recieved data is populated
-            if len(receivedData) > 1: # if we have enough elements to get a status from
-                if receivedData[1] == typeOfData: # if the data returned is the correct *kind* of data
-                    break # stop scanning for data
-            else: # if we have a list, but it doesn't have a payload in it (the light didn't supply enough data)
-                receivedData = "---" # then just re-set recievedData to the default string
-                break # stop scanning for data
-        else:
-            await asyncio.sleep(0.25) # wait a little bit of time before checking again
-    try:
-        await availableLights[selectedLight][1].stop_notify(notifyLightUUID) # stop reading notifications from the light
-    except Exception as e:
-        pass # we will return whatever data remains from the scan, so if we can't stop the scan (light disconnected), just return what we have
+        data = _notifyData.get(mac)
+        if data is not None:
+            if len(data) > 1: # if we have enough elements to get a status from
+                if data[1] == typeOfData: # if the data returned is the correct *kind* of data
+                    return data
+            else: # the light answered without a payload
+                return "---"
+        await asyncio.sleep(0.25) # wait a little bit of time before checking again
 
-    return receivedData
+    return _notifyData.get(mac) or ""
+
+def _makeNotifyCallback(mac):
+    def callback(sender, data):
+        _notifyData[mac] = data
+    return callback
+
+def _forgetNotify(mac):
+    _notifyClients.pop(mac, None)
+    _notifyData.pop(mac, None)
 
 async def getLightChannelandPower(selectedLight):
     global availableLights
@@ -4494,15 +4665,19 @@ async def getLightChannelandPower(selectedLight):
     if availableLights[selectedLight][1] != "---" and returnInfo[1] != "---":
         availableLights[selectedLight][7][1] = returnInfo[1]
 
-def notifyCallback(sender, data):
-    global receivedData
-    receivedData = data
-
 # DISCONNECT FROM A LIGHT
 async def disconnectFromLight(selectedLight, updateGUI=True):
     returnValue = "" # same as above, string for GUI mode and boolean for CLI mode, default to blank string
 
     if availableLights[selectedLight][1] != "": # if there is a Bleak object attached to the light, try to disconnect
+        mac = availableLights[selectedLight][0].address
+        if _notifyClients.get(mac) is availableLights[selectedLight][1]:
+            try:
+                await availableLights[selectedLight][1].stop_notify(notifyLightUUID)
+            except Exception:
+                pass # the light may already be gone
+        _forgetNotify(mac)
+
         try:
             if availableLights[selectedLight][1].is_connected: # if the current light is connected
                 await availableLights[selectedLight][1].disconnect() # disconnect the selected light
@@ -4526,7 +4701,9 @@ async def disconnectFromLight(selectedLight, updateGUI=True):
     return returnValue
 
 # WRITE TO A LIGHT - optional arguments for the CLI version (GUI version doesn't use either of these)
-async def writeToLight(selectedLights=0, updateGUI=True, useGlobalValue=True):
+async def writeToLight(selectedLights=0, updateGUI=True, useGlobalValue=True, fromShow=False):
+    # useGlobalValue=True is the manual slider path, the only one exempt from the brightness limits.
+    # fromShow=True marks frames from the show engine, which already decided what each light shows.
     global availableLights
     returnValue = "" # same as above, return value "" for GUI, or boolean for CLI
 
@@ -4549,6 +4726,17 @@ async def writeToLight(selectedLights=0, updateGUI=True, useGlobalValue=True):
                 currentSendValue = sendValue # get this value before sending to multiple lights, to ensure the same value is sent to each one
 
                 for a in range(len(selectedLights)): # try to write each light in turn, and show the current data being sent to them in the table
+                    # A light driven by a sequence or effect keeps showing it; this write becomes its revert target
+                    if not fromShow and showEngine is not None:
+                        baseVal = currentSendValue if useGlobalValue else availableLights[selectedLights[a]][3]
+                        blocked, shown = showEngine.interceptBaseWrite(int(selectedLights[a]), baseVal)
+                        if blocked:
+                            if not useGlobalValue and shown is not None:
+                                availableLights[selectedLights[a]][3] = list(shown)
+                            if updateGUI and mainWindow is not None:
+                                mainWindow._tableUpdateSignal.emit(["", "", "", "Held: a sequence or effect is driving this light"], int(selectedLights[a]))
+                            continue
+
                     # THIS SECTION IS FOR LOADING SNAPSHOT PRESET POWER STATES
                     if useGlobalValue == False: # if we're forcing the lights to use their stored parameters, then load that in here
                         if availableLights[selectedLights[a]][3][0] == 0: # we want to turn the light off
@@ -4574,6 +4762,9 @@ async def writeToLight(selectedLights=0, updateGUI=True, useGlobalValue=True):
                                     currentSendValue = list(currentSendValue)
                                     currentSendValue[4] = clampedTemp
                                     currentSendValue[5] = calculateChecksum(currentSendValue)
+
+                            if not useGlobalValue: # manual sliders are exempt from the brightness limits
+                                currentSendValue = applyBrightnessEnvelope(int(selectedLights[a]), currentSendValue)
 
                             if availableLights[(int(selectedLights[a]))][5] == True: # if we're using the old style of light
                                 if currentSendValue[1] == 135: # if we're on CCT mode
@@ -4671,13 +4862,19 @@ async def connectToOneLight(MACAddress):
         printDebugString("Error finding the Neewer light with MAC address " + MACAddress)
         print(e)
 
-async def parallelWriteToLights(lightIndices):
+async def parallelWriteToLights(lightIndices, fromShow=False):
     """Write stored byte values to multiple lights simultaneously using asyncio.gather.
-    Used by animation engine when parallel write mode is enabled."""
+    Used by HTTP commands, batches, hotkeys and (with fromShow=True) the show engine."""
     async def writeSingleLight(idx):
         try:
             if idx < len(availableLights) and availableLights[idx][1] != "":
                 currentSendValue = availableLights[idx][3]
+                if currentSendValue is not None and not fromShow and showEngine is not None:
+                    blocked, shown = showEngine.interceptBaseWrite(idx, currentSendValue)
+                    if blocked:
+                        if shown is not None:
+                            availableLights[idx][3] = list(shown)
+                        return
                 if currentSendValue is not None:
                     # Apply CCT-only fallback if needed
                     sendVal = applyCCTFallback(idx, currentSendValue)
@@ -4692,6 +4889,7 @@ async def parallelWriteToLights(lightIndices):
                             sendVal = list(sendVal)
                             sendVal[4] = clampedTemp
                             sendVal[5] = calculateChecksum(sendVal)
+                    sendVal = applyBrightnessEnvelope(idx, sendVal)
                     if availableLights[idx][5] == True and sendVal[1] == 135:
                         # Old-style CCT light needs split commands
                         splitCmds = calculateSeparateBytestrings(sendVal)
@@ -4712,8 +4910,6 @@ async def parallelWriteToLights(lightIndices):
 def workerThread(_loop):
     global threadAction, _bgThreadLogCounter
 
-    # A LIST OF LIGHTS THAT DON'T SEND POWER/CHANNEL STATUS
-    lightsToNotCheckPower = ["NEEWER-RGB176"]
     hasGUI = mainWindow is not None  # False in HTTP-only mode
 
     if findLightsOnStartup == True: # if we're set to find lights at startup, then automatically set the thread to discovery mode
@@ -4732,7 +4928,10 @@ def workerThread(_loop):
             # SKIP HEAVY BLE STATUS POLLING WHILE AN ANIMATION IS RUNNING
             # The status check does BLE reads on every connected light which blocks the worker
             # for 1-2 seconds, causing visible stutters in animation playback.
-            if not animationRunning:
+            # A sequence can run for a whole stream, so during one the connection check and
+            # auto-reconnect still run; only the power/channel reads are skipped.
+            sequenceOnly = showEngine is not None and showEngine.sequenceActive() and not showEngine.layerActive(show.LAYER_EFFECT)
+            if not animationRunning and (sequenceOnly or showEngine is None or not showEngine.anyActive()):
                 _bgThreadLogCounter += 1
                 if _bgThreadLogCounter >= 10:  # log every ~30s instead of every ~3s
                     if logHeartbeat:
@@ -4749,6 +4948,7 @@ def workerThread(_loop):
                             if not availableLights[a][1].is_connected: # the light is disconnected, but we're reporting it isn't
                                 if hasGUI: mainWindow._tableUpdateSignal.emit(["", "", "NOT\nLINKED", "Light disconnected!"], a) # show the new status in the table
                                 availableLights[a][1] = "" # clear the Bleak object
+                                _forgetNotify(availableLights[a][0].address)
 
                                 # Queue this light for auto-reconnect if enabled
                                 if autoReconnectOnDisconnect and a not in reconnectCooldown:
@@ -4758,7 +4958,7 @@ def workerThread(_loop):
                             else:
                                 anyConnected = True
                                 reconnectCooldown.pop(a, None)  # light is connected, clear any cooldown
-                                if not availableLights[a][0].name in lightsToNotCheckPower: # if the name of the current light is not in the list to skip checking
+                                if getLightCaps(availableLights[a][0].name)["reports_status"] and not sequenceOnly: # lights that answer status queries, outside sequences
                                     try:
                                         _loop.run_until_complete(getLightChannelandPower(a)) # then check the power and light status of that light
                                     except Exception as e:
@@ -4862,13 +5062,33 @@ def workerThread(_loop):
             except Exception:
                 pass
             threadAction = ""
-        elif threadAction != "":
+        elif threadAction != "" and threadAction != "HTTP": # "HTTP" only marks a request in progress
             result = processMultipleSends(_loop, threadAction)
             threadAction = result if result is not None else ""
-        
+
+        # SHOW ENGINE FRAMES: latest value per light, written once the worker is free
+        if threadAction == "" and showEngine is not None and showEngine.hasPending():
+            sendShowFrames(_loop, showEngine.takeMailbox())
+
         # Sleep until next cycle, but wake immediately if animation signals us
         workerWakeEvent.wait(timeout=0.25)
         workerWakeEvent.clear()
+
+def sendShowFrames(_loop, frames):
+    """Write show engine frames ({index: (bytes, parallel)}). Parallel is the synchronized
+    send; animations started with Parallel off keep the v1.3.0 one-light-at-a-time path."""
+    parallelIdx, serialIdx = [], []
+    for idx, (byteVal, parallel) in frames.items():
+        if idx < len(availableLights):
+            availableLights[idx][3] = list(byteVal)
+            (parallelIdx if parallel else serialIdx).append(idx)
+    if parallelIdx:
+        _loop.run_until_complete(parallelWriteToLights(parallelIdx, fromShow=True))
+        if mainWindow is not None:
+            for idx in parallelIdx:
+                mainWindow._tableUpdateSignal.emit(["", "", "", updateStatus(True, availableLights[idx][3])], idx)
+    if serialIdx:
+        _loop.run_until_complete(writeToLight(serialIdx, True, False, fromShow=True))
 
 def processMultipleSends(_loop, threadAction, updateGUI = True):
     currentThreadAction = threadAction.split("|")
@@ -4931,7 +5151,7 @@ def processCommands(listToProcess=[]):
     if inStartupMode == True: # if we're using the GUI or CLI, then add these arguments to the list
         acceptable_arguments.extend(["--http", "--cli", "--silent", "--help"])
     else: # if we're using the HTTP server, then add these arguments to the list
-        acceptable_arguments.extend(["--custom_name", "--discover", "--nopage", "--link", "--use_preset", "--save_preset", "--add_preset", "--delete_preset", "--batch", "--animate", "--stop_animate", "--list_animations"])
+        acceptable_arguments.extend(["--custom_name", "--discover", "--nopage", "--link", "--use_preset", "--save_preset", "--add_preset", "--delete_preset", "--batch", "--animate", "--stop_animate", "--list_animations", "--sequence", "--stop_layer"])
 
     # KICK OUT ANY PARAMETERS THAT AREN'T IN THE "ACCEPTABLE ARGUMENTS" LIST
     for a in range(len(listToProcess) - 1, -1, -1):
@@ -4977,6 +5197,10 @@ def processCommands(listToProcess=[]):
             listToProcess[a] = "--stop_animate"
         elif listToProcess[a].find("--list_animations") != -1:
             listToProcess[a] = "--list_animations"
+        elif listToProcess[a] == "--stop_layer":
+            listToProcess[a] = "--stop_layer=all"
+        elif listToProcess[a] == "--sequence":
+            listToProcess[a] = "--sequence=status"
 
     # PARSE THE ARGUMENT LIST FOR CUSTOM PARAMETERS
     parser = argparse.ArgumentParser()
@@ -5001,6 +5225,8 @@ def processCommands(listToProcess=[]):
         parser.add_argument("--animate", default=-1) # play a saved animation by name
         parser.add_argument("--stop_animate", action="store_true") # stop the currently running animation
         parser.add_argument("--list_animations", action="store_true") # list available animations
+        parser.add_argument("--sequence", default=-1) # sequence control: play|Name|start_ms, pause, resume, stop, seek|ms, position|ms
+        parser.add_argument("--stop_layer", default=-1) # stop an animation layer: override, effect, effect_all, show, all
 
     parser.add_argument("--on", action="store_true", help="Turn the light on")
     parser.add_argument("--off", action="store_true", help="Turn the light off")
@@ -5067,6 +5293,12 @@ def processCommands(listToProcess=[]):
 
         if args.list_animations == True:
             return[None, args.nopage, None, "list_animations"]
+
+        if args.sequence != -1:
+            return[None, args.nopage, urllib.parse.unquote(str(args.sequence)), "sequence"]
+
+        if args.stop_layer != -1:
+            return[None, args.nopage, str(args.stop_layer), "stop_layer"]
     else:
         # If we request "LIST" from the CLI, then return a CLI list of lights available
         if args.list == True:
@@ -5105,7 +5337,7 @@ def processHTMLCommands(paramsList, loop):
     asyncioEventLoop.run_until_complete(): the worker thread owns the event loop.
     BLE work is queued through threadAction, which the worker polls.
     """
-    global threadAction, numOfPresets, defaultLightPresets, customLightPresets
+    global threadAction, numOfPresets, defaultLightPresets, customLightPresets, animRevertOnFinish
 
     # Wait briefly if worker is busy, BLE writes can take a few seconds
     for _retry in range(20):  # up to 5 seconds
@@ -5120,16 +5352,9 @@ def processHTMLCommands(paramsList, loop):
     if len(paramsList) == 0:
         return
 
-    # Stop any running animation for non-animation HTTP commands
-    if paramsList[3] not in ("animate", "stop_animate", "list_animations") and animationRunning:
+    # Stop the override animation for non-animation HTTP commands (sequences and effects keep running)
+    if paramsList[3] not in ("animate", "stop_animate", "list_animations", "sequence", "stop_layer") and animationRunning:
         stopAnimation()
-        try:
-            if mainWindow is not None:
-                mainWindow.animPlayButton.setEnabled(True)
-                mainWindow.animStopButton.setEnabled(False)
-                mainWindow.animStatusLabel.setText("Stopped")
-        except Exception:
-            pass
 
     if paramsList[3] == "discover":
         # Queue discovery, worker thread handles "discover" natively (including auto-connect)
@@ -5196,6 +5421,9 @@ def processHTMLCommands(paramsList, loop):
             loopOverride = None
             maxLoops = 0
             revertOverride = None
+            layerName = "override"
+            queueMode = "queue"
+            animTarget = None
             if "|" in animName:
                 parts = animName.split("|")
                 animName = parts[0]
@@ -5222,16 +5450,61 @@ def processHTMLCommands(paramsList, loop):
                     elif revertVal in ("0", "false", "no", "off"):
                         revertOverride = False
                 except IndexError: pass
-            # Apply revert override if specified
-            if revertOverride is not None:
-                global animRevertOnFinish
-                animRevertOnFinish = revertOverride
-            startAnimation(animName, loop, speedMult, loopOverride=loopOverride, fps=fps, briScale=briScale, maxLoops=maxLoops)
+                # Layer fields: layer (override|effect|show), queue mode (queue|replace), target
+                try:
+                    if parts[7].strip():
+                        layerName = parts[7].strip().lower()
+                except IndexError: pass
+                try:
+                    if parts[8].strip():
+                        queueMode = parts[8].strip().lower()
+                except IndexError: pass
+                try:
+                    if parts[9].strip():
+                        animTarget = parts[9].strip()
+                except IndexError: pass
+            if layerName not in ("override", "effect", "show"):
+                printDebugString("HTTP: unknown layer '" + layerName + "', using override")
+                layerName = "override"
+            if layerName == "override":
+                # v1.3.0 behaviour: the revert field sets the global "Revert on finish"
+                if revertOverride is not None:
+                    animRevertOnFinish = revertOverride
+                startAnimation(animName, loop, speedMult, loopOverride=loopOverride, fps=fps, briScale=briScale, maxLoops=maxLoops, target=animTarget)
+            else:
+                startAnimation(animName, loop, speedMult, loopOverride=loopOverride, fps=fps, briScale=briScale, maxLoops=maxLoops,
+                               layer=layerName, revert=revertOverride, queueMode=queueMode, target=animTarget)
         else:
             printDebugString("HTTP: no animation name specified")
 
     elif paramsList[3] == "stop_animate":
         stopAnimation()
+
+    elif paramsList[3] == "stop_layer":
+        # stop_layer=override|effect|show|all; "effect" stops the current effect and the queue moves on,
+        # "effect_all" also clears the queue
+        which = str(paramsList[2]).lower()
+        if which in ("override", "all"):
+            stopAnimation("override")
+        if which in ("effect", "all", "effect_all"):
+            stopAnimation("effect", clearQueue=(which != "effect"))
+        if which in ("show", "all"):
+            stopAnimation("show")
+
+    elif paramsList[3] == "sequence":
+        # sequence=play|Name|start_ms, pause, resume, stop, seek|ms, position|ms
+        seqParts = str(paramsList[2]).split("|")
+        seqAction = seqParts[0].strip().lower()
+        if seqAction == "play":
+            seqName = seqParts[1].strip() if len(seqParts) > 1 else ""
+            startMsVal = seqParts[2].strip() if len(seqParts) > 2 else 0
+            result = startSequence(seqName, startMsVal)
+            if not result["success"]:
+                printDebugString("HTTP: sequence play failed: " + "; ".join(result["errors"]))
+        else:
+            result = sequenceControl(seqAction, seqParts[1].strip() if len(seqParts) > 1 else None)
+            if not result["success"]:
+                printDebugString("HTTP: sequence " + seqAction + " failed: " + result.get("error", ""))
 
     elif paramsList[3] == "list_animations":
         pass  # handled in the HTML rendering section
@@ -5312,6 +5585,9 @@ def returnLightIndexesFromMacAddress(addresses):
                     discovery order
       "Key"         custom name from Light Preferences
       "D0:A8:..."   MAC address
+      "@rim"        lights with a role (key, fill, rim, ambient, practical), a side (left,
+                    centre, right), "eyeline" or "all"; "@rim.left" means both. Listed in
+                    sweep order.
       "1;2;Key"     semicolon-separated mix of the above
     """
     foundIndexes = []
@@ -5335,6 +5611,12 @@ def returnLightIndexesFromMacAddress(addresses):
     for addr in addressesToCheck:
         addr = addr.strip()
         if not addr:
+            continue
+
+        if addr.startswith("@"):
+            for b in resolveRoleTarget(addr[1:]):
+                if b not in foundIndexes:
+                    foundIndexes.append(b)
             continue
 
         resolvedMAC = None
@@ -5366,6 +5648,68 @@ def returnLightIndexesFromMacAddress(addresses):
                     break
 
     return foundIndexes
+
+def lightSweepKey(lightIdx):
+    """Sort key for sweeps: a set sweep order first, then preferred ID or discovery order."""
+    light = availableLights[lightIdx]
+    effectiveID = light[8] if len(light) > 8 and light[8] > 0 else lightIdx + 1
+    order = getLightShowPref(lightIdx, "order")
+    return (0, order, effectiveID) if order > 0 else (1, effectiveID, 0)
+
+
+def resolveRoleTarget(spec):
+    """Indices for "rim", "left", "rim.left", "eyeline" or "all", in sweep order."""
+    terms = [t for t in spec.lower().replace("center", "centre").split(".") if t]
+    matches = []
+    for b in range(len(availableLights)):
+        ok = True
+        for term in terms:
+            if term == "all":
+                continue
+            elif term in LIGHT_ROLES:
+                ok = getLightShowPref(b, "role") == term
+            elif term in LIGHT_SIDES:
+                ok = getLightShowPref(b, "side") == term
+            elif term == "eyeline":
+                ok = bool(getLightShowPref(b, "eyeline"))
+            else:
+                ok = False  # unknown word matches nothing rather than everything
+            if not ok:
+                break
+        if ok and terms:
+            matches.append(b)
+    return sorted(matches, key=lightSweepKey)
+
+
+def parseShowPrefFields(fields):
+    """Show settings from sidecar fields 6-12: role|side|order|eyeline|maxBri|minBri|locked."""
+    prefs = dict(SHOW_PREF_DEFAULTS)
+
+    def field(i):
+        return fields[i].strip() if len(fields) > i else ""
+
+    if field(5).lower() in LIGHT_ROLES:
+        prefs["role"] = field(5).lower()
+    side = field(6).lower().replace("center", "centre")
+    if side in LIGHT_SIDES:
+        prefs["side"] = side
+    for key, i, lo, hi in (("order", 7, 0, 99), ("maxBri", 9, -1, 100), ("minBri", 10, -1, 100)):
+        try:
+            prefs[key] = max(lo, min(hi, int(field(i))))
+        except ValueError:
+            pass
+    prefs["eyeline"] = field(8).lower() in ("true", "1")
+    prefs["locked"] = field(11).lower() in ("true", "1")
+    return prefs
+
+
+def showPrefsToFields(prefs):
+    """Sidecar fields for show settings, or "" when everything is default (keeps v1.3.0 files unchanged)."""
+    if all(prefs.get(k, v) == v for k, v in SHOW_PREF_DEFAULTS.items()):
+        return ""
+    return "|" + "|".join([prefs["role"], prefs["side"], str(prefs["order"]), "True" if prefs["eyeline"] else "",
+                           str(prefs["maxBri"]), str(prefs["minBri"]), "True" if prefs["locked"] else ""])
+
 
 # ============================================================================
 # BATCH COMMAND PROCESSING - send different commands to different lights at once
@@ -5613,311 +5957,323 @@ def applyCCTFallback(lightIdx, byteVal, mode=None, hue=0, bri=100):
 # CUSTOM ANIMATION ENGINE
 # ============================================================================
 
-def interpolateHSI(start, end, t):
-    """Interpolate between two HSI tuples (hue, sat, bri) at fraction t (0.0-1.0).
-    Hue interpolation takes the shortest path around the 360-degree wheel."""
-    h1, s1, b1 = start
-    h2, s2, b2 = end
-
-    # Shortest path hue interpolation
-    diff = (h2 - h1 + 540) % 360 - 180  # wrap to [-180, 180]
-    hue = (h1 + diff * t) % 360
-
-    sat = s1 + (s2 - s1) * t
-    bri = b1 + (b2 - b1) * t
-
-    return (int(hue), int(sat), int(bri))
-
-
-def interpolateCCT(start, end, t):
-    """Interpolate between two CCT tuples (temp, bri) at fraction t."""
-    t1, b1 = start
-    t2, b2 = end
-    return (int(t1 + (t2 - t1) * t), int(b1 + (b2 - b1) * t))
-
-
-def animationSendFrame(frameCommands, loop):
-    """Set byte values on lights and signal the worker thread to send them.
-    Never touches the event loop; the worker does the BLE writes."""
-    global threadAction
-
-    # Compute byte values for each light
-    changedLights = []
-    for cmd in frameCommands:
-        lightId = str(cmd.get("light", ""))
-        mode = cmd.get("mode", "").upper()
-        selectedLights = returnLightIndexesFromMacAddress(lightId)
-
-        if not selectedLights:
-            continue
-
-        try:
-            if mode == "ON":
-                byteVal = [120, 129, 1, 1, 251]
-            elif mode == "OFF":
-                byteVal = [120, 129, 1, 2, 252]
-            elif mode == "CCT":
-                temp = max(32, min(85, int(cmd.get("temp", 56))))
-                bri = max(0, min(100, int(cmd.get("bri", 100))))
-                byteVal = calculateByteString(True, colorMode="CCT", brightness=bri, temp=temp)
-            elif mode == "HSI":
-                hue = max(0, min(360, int(cmd.get("hue", 240))))
-                sat = max(0, min(100, int(cmd.get("sat", 100))))
-                bri = max(0, min(100, int(cmd.get("bri", 100))))
-                byteVal = calculateByteString(True, colorMode="HSI", HSI_H=hue, HSI_S=sat, HSI_I=bri)
-            elif mode == "ANM":
-                scene = max(1, min(9, int(cmd.get("scene", 1))))
-                bri = max(0, min(100, int(cmd.get("bri", 100))))
-                byteVal = calculateByteString(True, colorMode="ANM", animation=scene, brightness=bri)
-            else:
-                continue
-        except (ValueError, TypeError):
-            continue
-
-        for lightIdx in selectedLights:
-            if lightIdx < len(availableLights):
-                # Apply CCT-only fallback using shared helper
-                actualByteVal = applyCCTFallback(lightIdx, byteVal, mode=mode,
-                                                 hue=cmd.get("hue", 240), bri=cmd.get("bri", 100))
-                if actualByteVal is None:
-                    continue  # ignore mode, skip this light
-                availableLights[lightIdx][3] = actualByteVal
-                if lightIdx not in changedLights:
-                    changedLights.append(lightIdx)
-
-    if not changedLights:
-        return
-
-    # Wait for the worker thread to be free (up to 2 seconds with 10ms granularity)
-    for _ in range(200):
-        if threadAction == "" or threadAction == "finished":
-            break
-        time.sleep(0.01)
-    else:
-        printDebugString("Animation frame dropped: worker busy")
-        return  # worker is still busy, drop this frame (logged, not silent)
-
-    # Signal the worker thread and return immediately, do NOT wait for completion.
-    # The next call's "wait for free" check handles sequencing.
-    if animParallelWrites:
-        threadAction = "psend|" + "|".join(map(str, changedLights))
-    else:
-        threadAction = "send|" + "|".join(map(str, changedLights))
-    workerWakeEvent.set()
-
-
-def animationEngineThread(animation, loop, speedMultiplier=1.0, loopOverride=None, fps=5, briScale=1.0, maxLoops=0):
-    """Main animation playback thread. Runs keyframes with timing and interpolation.
-    maxLoops: 0 = infinite (if shouldLoop), N>0 = play exactly N times then stop."""
-    global animationRunning, animationStopFlag, currentAnimationName, preAnimationStates, threadAction, _animChainStop
-
-    animationRunning = True
-    animationStopFlag = False
-    _animChainStop = False  # safe to clear now that the new thread is running
-    shouldLoop = loopOverride if loopOverride is not None else animation.get("loop", False)
-    keyframes = animation.get("keyframes", [])
-    animName = animation.get("name", "Untitled")
-    currentAnimationName = animName
-    stepInterval = max(33, int(1000 / max(1, fps)))  # ms between interpolation steps, capped at ~30 FPS
-    completedLoops = 0
-    userStopped = False
-
-    if not keyframes:
-        printDebugString("Animation '" + animName + "' has no keyframes")
-        animationRunning = False
-        currentAnimationName = ""
-        return
-
-    printDebugString("Animation '" + animName + "' starting (" + str(len(keyframes)) + " keyframes, loop=" + str(shouldLoop) + ", speed=" + str(speedMultiplier) + "x, rate=" + str(fps) + "/s, bri=" + str(int(briScale * 100)) + "%)")
-
-    frameIndex = 0
-    totalFrames = len(keyframes)
-    prevFrameIndex = -1  # tracks previous frame for fade interpolation (-1 = none yet)
-    lastGUIUpdate = 0  # throttle GUI updates to avoid cross-thread blocking
-
+def commandToByteValue(lightIdx, cmd):
+    """Byte value for one animation-style command on one light, after the CCT-only fallback.
+    Returns None when the light should be skipped (unknown mode, or the 'ignore' fallback)."""
+    mode = str(cmd.get("mode", "")).upper()
     try:
-        while not animationStopFlag:
-            keyframe = keyframes[frameIndex]
-            hold_ms = keyframe.get("hold_ms", 200)
-            fade_ms = keyframe.get("fade_ms", 0)
-            lights = keyframe.get("lights", {})
-
-            # Apply speed multiplier to timing
-            hold_ms = max(50, int(hold_ms / speedMultiplier))
-            fade_ms = max(0, int(fade_ms / speedMultiplier))
-
-            # For looping animations: if we just wrapped around to frame 0 from the last frame
-            # and frame 0 has fade_ms=0, auto-apply a fade using the last keyframe's fade_ms.
-            # This makes loops seamless without requiring the user to set fade on the first frame.
-            if frameIndex == 0 and prevFrameIndex == totalFrames - 1 and fade_ms == 0 and shouldLoop:
-                lastFade = keyframes[-1].get("fade_ms", 0)
-                if lastFade > 0:
-                    fade_ms = max(0, int(lastFade / speedMultiplier))
-
-            # Update GUI status (throttled to max once per second to avoid
-            # cross-thread Qt blocking that causes animation stutters)
-            now = time.time()
-            if now - lastGUIUpdate >= 1.0:
-                lastGUIUpdate = now
-                try:
-                    if mainWindow is not None:
-                        mainWindow.animStatusLabel.setText("Playing: " + animName + "\nFrame " + str(frameIndex + 1) + "/" + str(totalFrames))
-                except Exception:
-                    pass
-
-            # === FADE TRANSITION (if fade_ms > 0 and we have a previous frame) ===
-            if fade_ms > 0 and prevFrameIndex >= 0:
-                prevLights = keyframes[prevFrameIndex].get("lights", {})
-                steps = max(1, fade_ms // stepInterval)
-
-                for step in range(steps):
-                    if animationStopFlag:
-                        break
-                    t = (step + 1) / steps
-                    frameCommands = []
-
-                    for lightKey, targetParams in lights.items():
-                        mode = targetParams.get("mode", "HSI").upper()
-                        prevParams = prevLights.get(lightKey, targetParams)
-                        prevMode = prevParams.get("mode", mode).upper()
-
-                        # Only interpolate if modes match
-                        if mode == prevMode and mode == "HSI":
-                            h, s, b = interpolateHSI(
-                                (prevParams.get("hue", 0), prevParams.get("sat", 100), prevParams.get("bri", 100)),
-                                (targetParams.get("hue", 0), targetParams.get("sat", 100), targetParams.get("bri", 100)),
-                                t
-                            )
-                            frameCommands.append({"light": lightKey, "mode": "HSI", "hue": h, "sat": s, "bri": max(0, min(100, int(b * briScale)))})
-                        elif mode == prevMode and mode == "CCT":
-                            temp, bri = interpolateCCT(
-                                (prevParams.get("temp", 56), prevParams.get("bri", 100)),
-                                (targetParams.get("temp", 56), targetParams.get("bri", 100)),
-                                t
-                            )
-                            frameCommands.append({"light": lightKey, "mode": "CCT", "temp": temp, "bri": max(0, min(100, int(bri * briScale)))})
-                        else:
-                            # Can't interpolate across modes; just snap on last step
-                            if step == steps - 1:
-                                scaledTarget = dict(targetParams)
-                                if "bri" in scaledTarget:
-                                    scaledTarget["bri"] = max(0, min(100, int(scaledTarget["bri"] * briScale)))
-                                frameCommands.append({"light": lightKey, **scaledTarget})
-
-                    if frameCommands and not animationStopFlag:
-                        animationSendFrame(frameCommands, loop)
-                    time.sleep(stepInterval / 1000.0)
-
-            else:
-                # === INSTANT JUMP to this keyframe ===
-                frameCommands = []
-                for lightKey, params in lights.items():
-                    scaledParams = dict(params)
-                    if "bri" in scaledParams:
-                        scaledParams["bri"] = max(0, min(100, int(scaledParams["bri"] * briScale)))
-                    frameCommands.append({"light": lightKey, **scaledParams})
-
-                if frameCommands and not animationStopFlag:
-                    animationSendFrame(frameCommands, loop)
-
-            # === HOLD on this keyframe ===
-            holdSteps = max(1, hold_ms // 50)
-            for _ in range(holdSteps):
-                if animationStopFlag:
-                    break
-                time.sleep(0.05)
-
-            # Advance to next keyframe
-            prevFrameIndex = frameIndex
-            frameIndex += 1
-            if frameIndex >= totalFrames:
-                completedLoops += 1
-                if shouldLoop and not animationStopFlag:
-                    # Check maxLoops: 0 = infinite, N = stop after N loops
-                    if maxLoops > 0 and completedLoops >= maxLoops:
-                        break  # reached loop limit
-                    frameIndex = 0  # loop back to start (prevFrameIndex stays as last frame)
-                else:
-                    break  # animation complete
-
-    except Exception as e:
-        printDebugString("Animation engine error: " + str(e))
-
-    userStopped = animationStopFlag
-    isChaining = _animChainStop  # must be read before animationRunning=False releases stopAnimation()
-    animationRunning = False
-    currentAnimationName = ""
-    printDebugString("Animation '" + animName + "' stopped" + (" (completed " + str(completedLoops) + " loop(s))" if completedLoops > 0 else ""))
-
-    # Skipped when chaining: the incoming animation inherits preAnimationStates
-    if animRevertOnFinish and preAnimationStates and not isChaining:
-        printDebugString("Reverting lights to pre-animation state")
-        changedLights = []
-        for lightIdx, savedState in preAnimationStates.items():
-            if lightIdx < len(availableLights):
-                availableLights[lightIdx][3] = savedState
-                changedLights.append(lightIdx)
-        if changedLights:
-            threadAction = "psend|" + "|".join(map(str, changedLights))
-        preAnimationStates = {}
-
-    try:
-        if mainWindow is not None:
-            mainWindow.animStatusLabel.setText("Stopped")
-            mainWindow.animPlayButton.setEnabled(True)
-            mainWindow.animStopButton.setEnabled(False)
-    except Exception:
-        pass
+        if mode == "ON":
+            byteVal = [120, 129, 1, 1, 251]
+        elif mode == "OFF":
+            byteVal = [120, 129, 1, 2, 252]
+        elif mode == "CCT":
+            temp = max(32, min(85, int(cmd.get("temp", 56))))
+            bri = max(0, min(100, int(cmd.get("bri", 100))))
+            byteVal = calculateByteString(True, colorMode="CCT", brightness=bri, temp=temp)
+        elif mode == "HSI":
+            hue = max(0, min(360, int(cmd.get("hue", 240))))
+            sat = max(0, min(100, int(cmd.get("sat", 100))))
+            bri = max(0, min(100, int(cmd.get("bri", 100))))
+            byteVal = calculateByteString(True, colorMode="HSI", HSI_H=hue, HSI_S=sat, HSI_I=bri)
+        elif mode == "ANM":
+            scene = max(1, min(9, int(cmd.get("scene", 1))))
+            bri = max(0, min(100, int(cmd.get("bri", 100))))
+            byteVal = calculateByteString(True, colorMode="ANM", animation=scene, brightness=bri)
+        else:
+            return None
+    except (ValueError, TypeError):
+        return None
+    if lightIdx >= len(availableLights):
+        return None
+    return applyCCTFallback(lightIdx, byteVal, mode=mode, hue=cmd.get("hue", 240), bri=cmd.get("bri", 100))
 
 
-def startAnimation(animName, loop, speedMultiplier=1.0, loopOverride=None, fps=5, briScale=1.0, maxLoops=0):
-    """Start an animation by name. Stops any currently running animation first.
-    maxLoops: 0 = use animation's loop setting, N>0 = play N times then stop."""
-    global animationStopFlag, savedAnimations, preAnimationStates, _animChainStop
+def getLightShowPref(lightIdx, key):
+    """A light's show setting (role, side, order, eyeline, maxBri, minBri, locked), or its default."""
+    if 0 <= lightIdx < len(availableLights):
+        prefs = lightShowPrefs.get(availableLights[lightIdx][0].address.upper())
+        if prefs is not None and key in prefs:
+            return prefs[key]
+    return SHOW_PREF_DEFAULTS[key]
 
-    # Case-insensitive name lookup, HTTP args get lowercased by the argument parser
-    resolvedName = None
+
+def applyBrightnessEnvelope(lightIdx, sendVal):
+    """Clamp brightness to the light's limits (or the global defaults). 0% and power commands pass.
+    Runs in the BLE write paths after all brightness scaling, beside the CCT clamp."""
+    if not isinstance(sendVal, (list, tuple)) or len(sendVal) < 6:
+        return sendVal
+    if sendVal[1] in (135, 136):
+        pos = 3
+    elif sendVal[1] == 134 and len(sendVal) >= 8:
+        pos = 6
+    else:
+        return sendVal
+    maxB = getLightShowPref(lightIdx, "maxBri")
+    minB = getLightShowPref(lightIdx, "minBri")
+    maxB = envMaxBri if maxB < 0 else maxB
+    minB = envMinBri if minB < 0 else minB
+    b = sendVal[pos]
+    if b <= 0:
+        return sendVal
+    newB = max(min(b, maxB), min(minB, maxB))
+    if newB == b:
+        return sendVal
+    clamped = list(sendVal)
+    clamped[pos] = newB
+    clamped[-1] = calculateChecksum(clamped)
+    return clamped
+
+
+def resolveAnimationName(animName):
+    """Case-insensitive lookup; HTTP arguments arrive lowercased."""
     for key in savedAnimations:
-        if key.lower() == animName.lower():
-            resolvedName = key
-            break
+        if key.lower() == str(animName).lower():
+            return key
+    return None
+
+
+def resolveSequenceName(seqName):
+    for key in savedSequences:
+        if key.lower() == str(seqName).lower():
+            return key
+    return None
+
+
+def _showResolve(target):
+    return returnLightIndexesFromMacAddress(str(target))
+
+
+class _ShowHooks:
+    """What the show engine needs from NeewerLux, kept in one place."""
+
+    def resolve(self, target):
+        return _showResolve(target)
+
+    def lightCount(self):
+        return len(availableLights)
+
+    def encode(self, lightIdx, cmd):
+        return commandToByteValue(lightIdx, cmd)
+
+    def currentBytes(self, lightIdx):
+        if 0 <= lightIdx < len(availableLights):
+            return availableLights[lightIdx][3]
+        return None
+
+    def isLocked(self, lightIdx):
+        return bool(getLightShowPref(lightIdx, "locked"))
+
+    def wake(self):
+        workerWakeEvent.set()
+
+    def globalRevert(self):
+        return animRevertOnFinish
+
+    def recallPreset(self, presetNumber):
+        if 1 <= presetNumber <= numOfPresets:
+            printDebugString("Sequence finished, recalling preset " + str(presetNumber))
+            recallCustomPreset(presetNumber - 1, False, asyncioEventLoop)
+
+    def onStatus(self, info):
+        global animationRunning, currentAnimationName
+        if info["layer"] == "override":
+            if info["event"] == "start":
+                animationRunning = True
+                currentAnimationName = info["name"]
+            elif info["event"] == "end" and info.get("reason") != "chained":
+                animationRunning = False
+                currentAnimationName = ""
+        if info["event"] == "end":
+            printDebugString(info["kind"].capitalize() + " '" + info["name"] + "' stopped on the " + info["layer"] + " layer (" + info.get("reason", "") + ")")
+        elif info["event"] in ("queued", "pause", "resume"):
+            printDebugString(info["kind"].capitalize() + " '" + info["name"] + "' " + info["event"] + (" on the " + info["layer"] + " layer" if info["event"] == "queued" else ""))
+
+
+def initShowEngine():
+    """Create and start the show compositor. Safe to call more than once."""
+    global showEngine
+    if showEngine is None:
+        showEngine = show.ShowCompositor(_ShowHooks())
+        showEngine.startThread()
+
+
+def startAnimation(animName, loop, speedMultiplier=1.0, loopOverride=None, fps=5, briScale=1.0, maxLoops=0,
+                   layer="override", revert=None, queueMode="queue", target=None):
+    """Start an animation by name on a layer.
+
+    layer "override" (the default, and what every v1.3.0 caller gets) keeps the old
+    one-at-a-time behaviour: it replaces the running override animation, reverts by the
+    global "Revert on finish" setting, and chained animations revert to the state before
+    the first one. "effect" queues (or replaces, queueMode="replace") above sequences;
+    "show" plays under effects as a background look. revert applies per request on those
+    layers. target ("@rim", "1;2", ...) remaps the animation's numbered lights onto it.
+    Returns "playing", "queued", or False when the name is unknown or the queue is full.
+    """
+    initShowEngine()
+    resolvedName = resolveAnimationName(animName)
     if resolvedName is None:
-        printDebugString("Animation '" + animName + "' not found")
+        printDebugString("Animation '" + str(animName) + "' not found")
         return False
-    animName = resolvedName
+    layerNum = show.LAYER_BY_NAME.get(str(layer).lower(), show.LAYER_OVERRIDE)
+    if layerNum == show.LAYER_BASE:
+        layerNum = show.LAYER_OVERRIDE
 
-    # Chaining: keep the states captured before the first animation in the chain.
-    # Cleared by the new animation thread, not here, to avoid racing the old thread's revert check.
-    wasRunning = animationRunning
-    if wasRunning:
-        _animChainStop = True
-    stopAnimation()
+    animation = savedAnimations[resolvedName]
+    timeline = show.AnimationTimeline(animation, speed=speedMultiplier, fps=fps, briScale=briScale,
+                                      loop=loopOverride, maxLoops=maxLoops, legacy=True)
+    if not timeline.keyframes:
+        printDebugString("Animation '" + resolvedName + "' has no keyframes")
+        return False
+    maxMs = None
+    if layerNum == show.LAYER_EFFECT and timeline.duration is None:
+        maxMs = effectMaxSeconds * 1000  # a forever-looping alert would hold up the queue
+    if layerNum == show.LAYER_OVERRIDE:
+        playerRevert = None
+    else:
+        playerRevert = True if revert is None else bool(revert)
+    player = show.AnimationPlayer(resolvedName, timeline, _showResolve, target=target or None,
+                                  revert=playerRevert, maxMs=maxMs, parallel=animParallelWrites,
+                                  legacy=(layerNum == show.LAYER_OVERRIDE))
 
-    if not wasRunning:
-        preAnimationStates = {}
-        for i, light in enumerate(availableLights):
-            if light[3] is not None and isinstance(light[3], list) and len(light[3]) > 0:
-                preAnimationStates[i] = list(light[3])
-
-    animation = savedAnimations[animName].copy()
-    t = threading.Thread(target=animationEngineThread,
-                         args=(animation, asyncioEventLoop, speedMultiplier, loopOverride, fps, briScale, maxLoops),
-                         name="animationThread", daemon=True)
-    t.start()
-    return True
+    printDebugString("Animation '" + resolvedName + "' starting on the " + show.LAYER_NAMES[layerNum] + " layer (" + str(len(timeline.keyframes)) + " keyframes, loop=" + str(timeline.loop) + ", speed=" + str(speedMultiplier) + "x, rate=" + str(fps) + "/s, bri=" + str(int(briScale * 100)) + "%" + (", target=" + target if target else "") + ")")
+    result = showEngine.playAnimation(player, layerNum, queueMode)
+    if result == "queue_full":
+        printDebugString("Effect queue is full (" + str(show.EFFECT_QUEUE_MAX) + "), '" + resolvedName + "' was not queued")
+        return False
+    return result
 
 
-def stopAnimation():
-    """Stop the currently running animation."""
-    global animationStopFlag
-    if animationRunning:
-        animationStopFlag = True
-        # Wait up to 2 seconds for it to actually stop
-        for _ in range(40):
-            if not animationRunning:
-                break
-            time.sleep(0.05)
+def stopAnimation(layer="override", clearQueue=False):
+    """Stop the animation on a layer ("override" by default, as in v1.3.0). Returns once its
+    lights have been handed back to the next active layer."""
+    if showEngine is None:
+        return False
+    layerNum = show.LAYER_BY_NAME.get(str(layer).lower(), show.LAYER_OVERRIDE)
+    stopped = showEngine.stopLayer(layerNum, clearQueue)
+    if stopped:
         printDebugString("Animation stop requested")
+    return stopped
+
+
+# ============================================================================
+# SEQUENCES
+# ============================================================================
+
+def ensureSequencesDir():
+    if not os.path.exists(sequencesDir):
+        os.makedirs(sequencesDir)
+
+
+def loadAllSequences():
+    """Load every sequence JSON file in light_prefs/sequences/."""
+    global savedSequences
+    savedSequences = {}
+    if not os.path.isdir(sequencesDir):
+        return
+    for filename in sorted(os.listdir(sequencesDir)):
+        if not filename.lower().endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(sequencesDir, filename), "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict) and data.get("name"):
+                savedSequences[str(data["name"])] = data
+        except (IOError, OSError, ValueError) as e:
+            printDebugString("Could not load sequence " + filename + ": " + str(e))
+    if savedSequences:
+        printDebugString("Loaded " + str(len(savedSequences)) + " sequence(s)")
+
+
+def saveSequenceToFile(sequence):
+    """Save a sequence as light_prefs/sequences/<name>.json."""
+    ensureSequencesDir()
+    safeName = "".join(c for c in sequence["name"] if c.isalnum() or c in " _-").strip() or "sequence"
+    with open(os.path.join(sequencesDir, safeName + ".json"), "w", encoding="utf-8") as f:
+        json.dump(sequence, f, indent=2)
+    savedSequences[sequence["name"]] = sequence
+
+
+def buildSequence(data):
+    """Validate a sequence dict. Returns (parsed or None, errors, warnings)."""
+    return show.parseSequence(data, lambda n: resolveAnimationName(n) is not None,
+                              defaultFps=seqFrameRate, resolveTarget=_showResolve)
+
+
+def _sequenceBaseCommand(lightIdx):
+    # Fades that start a sequence begin from what the light returns to, not from an effect on top
+    base = showEngine.baseStates.get(lightIdx) if showEngine is not None else None
+    if base is None and 0 <= lightIdx < len(availableLights):
+        base = availableLights[lightIdx][3]
+    return show.bytesToCommand(base)
+
+
+def startSequence(nameOrData, startMs=0):
+    """Play a saved sequence by name, or an inline sequence dict (never saved).
+    Returns a dict with success, sequence name, errors and warnings."""
+    initShowEngine()
+    if isinstance(nameOrData, dict):
+        data = nameOrData
+    else:
+        resolved = resolveSequenceName(nameOrData)
+        if resolved is None:
+            return {"success": False, "errors": ["no sequence named " + repr(nameOrData)], "warnings": [],
+                    "available": sorted(savedSequences.keys())}
+        data = savedSequences[resolved]
+    seq, errors, seqWarnings = buildSequence(data)
+    if seq is None:
+        return {"success": False, "errors": errors, "warnings": seqWarnings}
+    player = show.SequencePlayer(seq, _showResolve, lambda n: savedAnimations.get(resolveAnimationName(n)),
+                                 _sequenceBaseCommand)
+    try:
+        startMs = max(0, int(startMs or 0))
+    except (TypeError, ValueError):
+        startMs = 0
+    showEngine.playSequence(player, startMs)
+    printDebugString("Sequence '" + seq.name + "' playing from " + str(startMs) + " ms (" + str(len(seq.cues)) + " cues, " + str(seq.duration) + " ms, " + str(seq.fps) + " fps)")
+    return {"success": True, "sequence": seq.name, "errors": [], "warnings": seqWarnings}
+
+
+def sequenceControl(action, ms=None):
+    """pause, resume, stop, seek (ms), position (ms, slews small offsets) or status. Returns a result dict."""
+    if action == "status":
+        return {"success": True, "action": "status", "status": getShowStatus()["sequence"]}
+    if showEngine is None or not showEngine.sequenceActive():
+        return {"success": False, "error": "no sequence is playing"}
+    if action == "pause":
+        ok = showEngine.pauseSequence()
+    elif action == "resume":
+        ok = showEngine.resumeSequence()
+    elif action == "stop":
+        ok = showEngine.stopSequence()
+    elif action in ("seek", "position", "set_position"):
+        try:
+            ms = int(float(ms))
+        except (TypeError, ValueError):
+            return {"success": False, "error": "'" + action + "' needs a position in ms"}
+        if action == "seek":
+            ok = showEngine.seekSequence(ms)
+        else:
+            ok = showEngine.setSequencePosition(ms)
+            return {"success": ok is not None, "action": "set_position", "correction": ok}
+    else:
+        return {"success": False, "error": "unknown sequence action " + repr(action)}
+    return {"success": bool(ok), "action": action}
+
+
+def getShowStatus():
+    """Layer, sequence and per-light status for the HTTP status endpoints and the GUI."""
+    if showEngine is None:
+        return {"layers": {}, "sequence": None, "lights": []}
+    st = showEngine.status()
+    lights = []
+    for idx, light in enumerate(availableLights):
+        prefID = light[8] if len(light) > 8 else 0
+        lights.append({"id": prefID if prefID > 0 else idx + 1,
+                       "name": light[2] if light[2] else light[0].name,
+                       "role": getLightShowPref(idx, "role"), "side": getLightShowPref(idx, "side"),
+                       "locked": bool(getLightShowPref(idx, "locked")),
+                       "layer": show.LAYER_NAMES[st["owners"].get(idx, 0)]})
+    return {"layers": st["layers"], "sequence": st["sequence"], "lights": lights}
 
 
 # ============================================================================
@@ -6153,9 +6509,11 @@ def loadLightAliases():
     HTTP commands and animations before any light is connected.
 
     Prefs file format: customName|colorTempRange|onlyCCTMode[|lastSettings][|preferredID]
+    [|role|side|sweepOrder|eyeline|maxBri|minBri|locked]
     """
-    global lightAliases
+    global lightAliases, lightShowPrefs
     lightAliases = {}
+    lightShowPrefs = {}
 
     prefsDir = os.path.dirname(os.path.abspath(sys.argv[0])) + os.sep + "light_prefs"
     if not os.path.isdir(prefsDir):
@@ -6183,6 +6541,24 @@ def loadLightAliases():
 
                 if customName or preferredID > 0:
                     lightAliases[mac] = {"id": preferredID, "name": customName}
+                if len(fields) > 5:
+                    lightShowPrefs[mac] = parseShowPrefFields(fields)
+            except (IOError, OSError):
+                pass
+
+    # macOS addresses are GUIDs, so their sidecars aren't 12-hex names; read show
+    # settings for lights already found by their own sidecar path
+    for light in availableLights:
+        address = light[0].address.upper()
+        if address in lightShowPrefs:
+            continue
+        sidecar = prefsDir + os.sep + "".join(light[0].address.split(":"))
+        if os.path.isfile(sidecar):
+            try:
+                with open(sidecar, mode="r", encoding="utf-8") as f:
+                    fields = f.read().strip().split("|")
+                if len(fields) > 5:
+                    lightShowPrefs[address] = parseShowPrefFields(fields)
             except (IOError, OSError):
                 pass
 
@@ -6284,6 +6660,17 @@ class NLPythonServer(BaseHTTPRequestHandler):
                     self.send_response(302)
                     self.send_header('Location', '/NeewerLux/')
                     self.end_headers()
+                    return
+
+                if queryPart.startswith("status_json"):
+                    # Show engine status: layers, effect queue, sequence position, layer per light
+                    statusBody = json.dumps(getShowStatus()).encode("utf-8")
+                    self.send_response(200)
+                    self._send_cors_headers()
+                    self.send_header("Content-Type", "application/json;charset=UTF-8")
+                    self.send_header("Content-Length", str(len(statusBody)))
+                    self.end_headers()
+                    self.wfile.write(statusBody)
                     return
 
                 if queryPart.startswith("list_json"):
@@ -6562,6 +6949,8 @@ class NLPythonServer(BaseHTTPRequestHandler):
 
         Response: JSON with per-command results.
         """
+        global threadAction, animParallelWrites, animRevertOnFinish
+
         # IP CHECK (same as do_GET)
         clientIP = self.client_address[0]
         acceptedIP = False
@@ -6575,15 +6964,16 @@ class NLPythonServer(BaseHTTPRequestHandler):
             return
 
         # ONLY ACCEPT REQUESTS TO SUPPORTED POST ENDPOINTS
-        if self.path not in ("/NeewerLux/batch", "/NeewerLux/animate", "/NeewerLite-Python/batch", "/NeewerLite-Python/animate"):
-            self.send_error(404, "POST requests are supported at /NeewerLux/batch and /NeewerLux/animate")
+        if self.path not in ("/NeewerLux/batch", "/NeewerLux/animate", "/NeewerLux/sequence", "/NeewerLite-Python/batch", "/NeewerLite-Python/animate"):
+            self.send_error(404, "POST requests are supported at /NeewerLux/batch, /NeewerLux/animate and /NeewerLux/sequence")
             return
 
         # READ AND PARSE THE JSON BODY
         try:
             contentLength = int(self.headers.get("Content-Length", 0))
-            if contentLength > 65536:  # 64KB sanity limit
-                self.send_error(413, "Request body too large (max 64KB)")
+            maxBody = 262144 if self.path == "/NeewerLux/sequence" else 65536  # a song-length inline sequence needs more room
+            if contentLength > maxBody:
+                self.send_error(413, "Request body too large (max " + str(maxBody // 1024) + "KB)")
                 return
             if contentLength == 0:
                 self.send_error(400, "Empty request body")
@@ -6605,7 +6995,6 @@ class NLPythonServer(BaseHTTPRequestHandler):
 
             printDebugString("POST batch request from " + clientIP + " with " + str(len(commands)) + " command(s)")
 
-            global threadAction
             if threadAction != "" and threadAction != "finished":
                 resultData = {"success": False, "error": "Server is busy processing another command. Please retry."}
             else:
@@ -6615,7 +7004,8 @@ class NLPythonServer(BaseHTTPRequestHandler):
                 except Exception as e:
                     resultData = {"success": False, "error": str(e)}
                 finally:
-                    threadAction = ""
+                    if threadAction == "HTTP": # don't clear the send processBatchCommands just queued
+                        threadAction = ""
 
         elif self.path in ("/NeewerLux/animate", "/NeewerLite-Python/animate"):
             action = body.get("action", "play")  # play, stop, list, create
@@ -6627,31 +7017,38 @@ class NLPythonServer(BaseHTTPRequestHandler):
                 loop = body.get("loop", None)
                 fps = body.get("rate", body.get("fps", 5))
                 briScale = body.get("brightness", body.get("bri", 100)) / 100.0
+                layerName = str(body.get("layer", "override")).lower()
                 if "parallel" in body:
-                    global animParallelWrites
                     animParallelWrites = bool(body.get("parallel", True))
-                if animName:
-                    # Case-insensitive name resolution
-                    resolvedAnimName = None
-                    for key in savedAnimations:
-                        if key.lower() == animName.lower():
-                            resolvedAnimName = key
-                            break
-                if resolvedAnimName:
+                resolvedAnimName = resolveAnimationName(animName) if animName else None
+                if layerName not in ("override", "effect", "show"):
+                    resultData = {"success": False, "error": "layer must be override, effect or show"}
+                elif resolvedAnimName:
                     animName = resolvedAnimName
                     maxLoops = int(body.get("maxLoops", body.get("max_loops", 0)))
-                    # Handle revert flag from web UI
-                    if "revert" in body:
-                        global animRevertOnFinish
-                        animRevertOnFinish = bool(body.get("revert", True))
-                    startAnimation(animName, asyncioEventLoop, speed, loop, fps=int(fps), briScale=briScale, maxLoops=maxLoops)
-                    resultData = {"success": True, "action": "play", "animation": animName}
+                    if layerName == "override":
+                        # Handle revert flag from web UI (v1.3.0: sets the global setting)
+                        if "revert" in body:
+                            animRevertOnFinish = bool(body.get("revert", True))
+                        started = startAnimation(animName, asyncioEventLoop, speed, loop, fps=int(fps), briScale=briScale,
+                                                 maxLoops=maxLoops, target=body.get("target"))
+                    else:
+                        started = startAnimation(animName, asyncioEventLoop, speed, loop, fps=int(fps), briScale=briScale,
+                                                 maxLoops=maxLoops, layer=layerName, revert=body.get("revert"),
+                                                 queueMode=str(body.get("mode", "queue")).lower(), target=body.get("target"))
+                    resultData = {"success": bool(started), "action": "play", "animation": animName,
+                                  "layer": layerName, "result": started if started else "queue_full"}
                 else:
                     resultData = {"success": False, "error": "Animation '" + str(animName) + "' not found",
                                   "available": list(savedAnimations.keys())}
             elif action == "stop":
-                stopAnimation()
-                resultData = {"success": True, "action": "stop"}
+                layerName = str(body.get("layer", "override")).lower()
+                if layerName == "all":
+                    for stopLayerName in ("override", "effect", "show"):
+                        stopAnimation(stopLayerName, clearQueue=True)
+                else:
+                    stopAnimation(layerName, clearQueue=bool(body.get("clear_queue", False)))
+                resultData = {"success": True, "action": "stop", "layer": layerName}
             elif action == "list":
                 animList = []
                 for aName, aData in sorted(savedAnimations.items()):
@@ -6680,7 +7077,39 @@ class NLPythonServer(BaseHTTPRequestHandler):
                         pass
             elif action == "status":
                 resultData = {"success": True, "running": animationRunning,
-                              "animation": currentAnimationName if animationRunning else None}
+                              "animation": currentAnimationName if animationRunning else None,
+                              "show": getShowStatus()}
+            else:
+                resultData = {"success": False, "error": "Unknown action: " + action}
+
+        elif self.path == "/NeewerLux/sequence":
+            action = str(body.get("action", "play")).lower()
+            printDebugString("POST sequence request from " + clientIP + ": " + action)
+            if action == "play":
+                source = body.get("sequence") if isinstance(body.get("sequence"), dict) else body.get("name", "")
+                resultData = startSequence(source, body.get("start_ms", 0))
+                resultData["action"] = "play"
+            elif action in ("pause", "resume", "stop", "seek", "set_position", "position", "status"):
+                resultData = sequenceControl(action, body.get("ms", body.get("position_ms")))
+            elif action == "list":
+                resultData = {"success": True, "sequences": [
+                    {"name": n, "duration_ms": d.get("duration_ms"), "cues": len(d.get("cues", [])),
+                     "description": d.get("description", "")} for n, d in sorted(savedSequences.items())]}
+            elif action in ("validate", "save"):
+                seqData = body.get("sequence")
+                seq, errors, seqWarnings = buildSequence(seqData)
+                resultData = {"success": seq is not None, "action": action, "errors": errors, "warnings": seqWarnings}
+                if seq is not None and action == "save":
+                    existing = resolveSequenceName(seq.name)
+                    if existing is not None and not body.get("overwrite", False):
+                        resultData = {"success": False, "action": "save", "errors": ["a sequence named " + repr(existing) + " exists; send \"overwrite\": true to replace it"], "warnings": seqWarnings}
+                    else:
+                        if existing is not None and existing != seq.name:
+                            savedSequences.pop(existing, None)
+                        saveSequenceToFile(seqData)
+                        resultData["sequence"] = seq.name
+                        if mainWindow is not None:
+                            mainWindow._sequenceListSignal.emit()
             else:
                 resultData = {"success": False, "error": "Unknown action: " + action}
 
@@ -6868,7 +7297,8 @@ def resolveCustomPresetsFile():
 def loadPrefsFile(globalPrefsFile = ""):
     global findLightsOnStartup, autoConnectToLights, printDebug, maxNumOfAttempts, \
            rememberLightsOnExit, acceptable_HTTP_IPs, customKeys, enableTabsOnLaunch, \
-           whiteListedMACs, rememberPresetsOnExit, autoReconnectOnDisconnect, livePreview, hideConsoleOnLaunch, minimizeToTrayOnClose, httpAutoStart, httpPort, cctFallbackMode, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax
+           whiteListedMACs, rememberPresetsOnExit, autoReconnectOnDisconnect, livePreview, hideConsoleOnLaunch, minimizeToTrayOnClose, httpAutoStart, httpPort, cctFallbackMode, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, \
+           envMaxBri, envMinBri, seqFrameRate, effectMaxSeconds
 
     if globalPrefsFile != "":
         printDebugString("Loading global preferences from file...")
@@ -6881,7 +7311,8 @@ def loadPrefsFile(globalPrefsFile = ""):
             "SC_Dec_Bri_Small", "SC_Inc_Bri_Small", "SC_Dec_Bri_Large", "SC_Inc_Bri_Large", \
             "SC_Dec_1_Small", "SC_Inc_1_Small", "SC_Dec_2_Small", "SC_Inc_2_Small", "SC_Dec_3_Small", "SC_Inc_3_Small", \
             "SC_Dec_1_Large", "SC_Inc_1_Large", "SC_Dec_2_Large", "SC_Inc_2_Large", "SC_Dec_3_Large", "SC_Inc_3_Large", \
-            "enableTabsOnLaunch", "whiteListedMACs", "rememberPresetsOnExit", "autoReconnectOnDisconnect", "hideConsoleOnLaunch", "minimizeToTrayOnClose", "livePreview", "httpAutoStart", "httpPort", "cctFallbackMode", "enableLogTab", "logToFile", "logHeartbeat", "globalCCTMin", "globalCCTMax"]
+            "enableTabsOnLaunch", "whiteListedMACs", "rememberPresetsOnExit", "autoReconnectOnDisconnect", "hideConsoleOnLaunch", "minimizeToTrayOnClose", "livePreview", "httpAutoStart", "httpPort", "cctFallbackMode", "enableLogTab", "logToFile", "logHeartbeat", "globalCCTMin", "globalCCTMax", \
+            "envMaxBri", "envMinBri", "seqFrameRate", "effectMaxSeconds"]
 
         # KICK OUT ANY PARAMETERS THAT AREN'T IN THE "ACCEPTABLE ARGUMENTS" LIST ABOVE
         # THIS SECTION OF CODE IS *SLIGHTLY* DIFFERENT THAN THE CLI KICK OUT CODE
@@ -6919,6 +7350,10 @@ def loadPrefsFile(globalPrefsFile = ""):
     prefsParser.add_argument("--logHeartbeat", default=0)
     prefsParser.add_argument("--globalCCTMin", default=3200)
     prefsParser.add_argument("--globalCCTMax", default=5600)
+    prefsParser.add_argument("--envMaxBri", default=100)
+    prefsParser.add_argument("--envMinBri", default=0)
+    prefsParser.add_argument("--seqFrameRate", default=20)
+    prefsParser.add_argument("--effectMaxSeconds", default=30)
 
     # SHORTCUT KEY CUSTOMIZATIONS
     prefsParser.add_argument("--SC_turnOffButton", default="Ctrl+PgDown") # 0
@@ -6977,6 +7412,17 @@ def loadPrefsFile(globalPrefsFile = ""):
     logHeartbeat = bool(int(mainPrefs.logHeartbeat))
     globalCCTMin = int(mainPrefs.globalCCTMin)
     globalCCTMax = int(mainPrefs.globalCCTMax)
+
+    def _intPref(value, default, lo, hi):
+        try:
+            return max(lo, min(hi, int(value)))
+        except (ValueError, TypeError):
+            return default
+
+    envMaxBri = _intPref(mainPrefs.envMaxBri, 100, 1, 100)
+    envMinBri = _intPref(mainPrefs.envMinBri, 0, 0, 100)
+    seqFrameRate = _intPref(mainPrefs.seqFrameRate, 20, 1, show.MAX_FPS)
+    effectMaxSeconds = _intPref(mainPrefs.effectMaxSeconds, 30, 1, 600)
 
     if type(mainPrefs.acceptableIPs) is not list: # we have a string in the return, so we need to post-process it
         acceptable_HTTP_IPs = mainPrefs.acceptableIPs.replace(" ", "").split(";") # split the IP addresses into a list for acceptable IPs
@@ -7043,9 +7489,11 @@ if __name__ == '__main__':
         if cmdReturn[0] == "HTTP":
             doAnotherInstanceCheck() # check to see if another instance is running, and if it is, then error out and quit
 
-            # Load animations and light aliases for HTTP access
+            # Load animations, sequences and light aliases for HTTP access
             loadAllAnimations()
             loadLightAliases()
+            loadAllSequences()
+            initShowEngine()
 
             # Start a worker thread to process BLE operations (discover, connect, send, etc.)
             # Without this, threadAction commands from processHTMLCommands would never be picked up.
@@ -7215,8 +7663,11 @@ if __name__ == '__main__':
                 # LOAD SAVED ANIMATIONS AND POPULATE THE ANIMATION LIST
                 loadAllAnimations()
                 loadLightAliases()
+                loadAllSequences()
+                initShowEngine()
                 print("[TRACE] loadAllAnimations() + loadLightAliases() complete")
                 mainWindow.animRefreshList()
+                mainWindow.seqRefreshList()
                 print("[TRACE] animRefreshList() complete")
 
                 # START THE BACKGROUND THREAD

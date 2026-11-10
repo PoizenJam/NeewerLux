@@ -18,6 +18,7 @@ a = Analysis(
     datas=[
         ('com.github.poizenjam.NeewerLux.ico', '.'),
         ('com.github.poizenjam.NeewerLux.png', '.'),
+        ('light_models.toml', '.'),
     ] + bleak_datas,
     hiddenimports=[
         'bleak',
@@ -26,6 +27,7 @@ a = Analysis(
         'neewerlux_theme',
         'neewerlux_webui',
         'neewerlux_anim_editor',
+        'neewerlux_show',
         'PySide6',
         'PySide6.QtWidgets',
         'PySide6.QtCore',

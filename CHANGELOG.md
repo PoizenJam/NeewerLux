@@ -2,6 +2,31 @@
 
 Changes relative to upstream [NeewerLite-Python v0.12d](https://github.com/taburineagle/NeewerLite-Python).
 
+## v1.3.1 - 2026-11-03
+
+### Added
+- **Sequences.** Timed light shows for songs: cues that set a colour with a fade, or play an animation stretched or looped to fit, on chosen lights. Files live in `light_prefs/sequences`; the format is documented in `docs/SEQUENCE_FORMAT.md` for hand-writing or generating per song. Play, pause, resume, stop, seek and an external position sync (small offsets slew at up to 5%, large ones jump) from the new Sequences panel on the Animations tab, from GET (`sequence=`) or POST `/NeewerLux/sequence`, which can also validate, save and list sequences and play one sent inline. A shipped example covers a four-light rig.
+- **Return to the starting state.** When a sequence ends or is paused, the lights go back to the state they were in before it started, usually a preset; resuming carries on from the same point. A sequence can instead hold its last frame or recall a specific preset at the end.
+- **Layers.** Animations can play as an *override* (the existing one-at-a-time behaviour, still the default for every URL, the GUI and the pedal), an *effect* (queued or cutting in, for Streamer.bot redeems, bits, subs and raids; forever-looping effects stop after a configurable 30 s), or a *show*. Each light follows the highest layer driving it, so an effect on some lights leaves the rest on the sequence, and the covered lights rejoin it in time when the effect ends. Sequences can instead pause while interrupted. `animate=` takes optional layer, queue mode and target fields; `stop_layer=` stops a layer; `status_json` reports layers, the effect queue, the sequence position and the layer driving each light.
+- **Light roles.** Light Preferences sets a role (key, fill, rim, ambient, practical), side, sweep order and eye-line flag per light. Targets such as `@rim`, `@left`, `@rim.left`, `@eyeline` and `@all` work in animations, sequences, batch and HTTP commands, listed in sweep order.
+- **Brightness limits.** A maximum and minimum brightness per light, with defaults in Global Preferences, applied to presets, HTTP commands, animations, effects and sequences in the Bluetooth write path. The manual sliders are exempt. A Locked light ignores sequences and effects and keeps its manual or preset state.
+- **Offline tests** in `tests/`: a fake-Bluetooth harness, a comparison of every existing URL type against v1.3.0, behaviour tests for the features above, an offscreen GUI test and the pre-release static checks.
+
+### Changed
+- Animations now play from a fixed start time instead of a chain of sleeps, so they no longer drift. Their timing rules are unchanged (holds still step in 50 ms ticks and fades in whole steps of the update rate), and the frames each light receives for existing URLs match v1.3.0 exactly. Inside sequences, clips use exact timing.
+- While a sequence or effect is driving a light, slider moves, presets and mode commands for that light become what it returns to afterwards instead of interrupting the show. Lights the show isn't using, and Locked lights, change immediately. Sequences only stop when told to.
+- During a sequence, the background check still relinks lights that drop out (it was skipped during animations); only the power and channel reads are skipped.
+- **Light models live in `light_models.toml`.** Colour ranges, CCT-only models, the Bluetooth name prefixes a scan looks for, the TL60 name correction and lights that skip the status poll are now data rather than code, so adding a model is a one-line edit. Adapted from [Lumiere](https://github.com/lugoues/lumiere).
+- **Status polling keeps one notification subscription per light** instead of opening and closing two every few seconds, and each light's replies are kept separately so two lights answering at once can't mix them up. Adapted from Lumiere.
+
+### Fixed
+- **POST `/NeewerLux/batch` rarely reached the lights.** The handler cleared the queued send before the worker picked it up.
+- **A command that stopped an animation could leave the other lights on the animation's last frame.** With "Revert on finish" on, sending a mode or preset command while an animation played logged the revert, but the new command overwrote it before it was sent. The revert now completes.
+- POST `/NeewerLux/animate` with `play` and no name raised an error instead of returning one.
+- RGB CB60, RGB C80 and RGB176 A1 lights now get their correct 2500-10000K range. Model names containing a space never matched their own entry.
+- Release zips now include the LICENSE file.
+- Animation status in the GUI was set from a background thread; it is now updated on the GUI thread.
+
 ## v1.3.0 - 2026-10-02
 
 ### Added
