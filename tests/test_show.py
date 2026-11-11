@@ -779,6 +779,41 @@ def t_listJsonStructured(rig):
     check(rig.getJSON("status_json")["apiVersion"] == 2, "status_json carries apiVersion")
 
 
+def t_commandsDontWaitForStatusPoll(rig):
+    """Status polling reads each light in turn; with slow replies (a real light, or Windows'
+    15.6 ms timer) a round takes a while. Light commands and show starts must not wait for it."""
+    nl = rig.nl
+    old = [l[0].latencyMs for l in nl.availableLights]
+    try:
+        for l in nl.availableLights:
+            l[0].latencyMs = (60, 60)  # each status query takes about 60 ms to answer
+        worst = 0.0
+        for n in range(8):
+            time.sleep(0.37)  # land at different points of the poll cycle
+            t0 = time.monotonic()
+            rig.post("/NeewerLux/batch", {"commands": [{"light": "2", "mode": "CCT", "temp": 50, "bri": 20 + n}]})
+            while time.monotonic() - t0 < 2.0 and bri(rig.rec.last(rig.mac(FILL)) or [0] * 8) != 20 + n:
+                time.sleep(0.005)
+            worst = max(worst, time.monotonic() - t0)
+        RESULTS.append("    command latency with 60 ms status replies: worst %.0f ms" % (worst * 1000))
+        check(worst < 0.25, "a command waited %.0f ms behind status polling" % (worst * 1000))
+        worstSeq = 0.0
+        for n in range(6):
+            time.sleep(0.41)
+            hue = 30 + n * 40
+            t0 = time.monotonic()
+            rig.post("/NeewerLux/sequence", {"action": "play", "sequence": stepSequence("pollstart", [hue], 300, target="2")})
+            while time.monotonic() - t0 < 2.0 and hueOf(rig.rec.last(rig.mac(FILL)) or [0] * 8) != hue:
+                time.sleep(0.005)
+            worstSeq = max(worstSeq, time.monotonic() - t0)
+            rig.post("/NeewerLux/sequence", {"action": "stop"})
+        RESULTS.append("    sequence start latency with 60 ms status replies: worst %.0f ms" % (worstSeq * 1000))
+        check(worstSeq < 0.25, "a sequence's first cue waited %.0f ms behind status polling" % (worstSeq * 1000))
+    finally:
+        for l, lat in zip(nl.availableLights, old):
+            l[0].latencyMs = lat
+
+
 # ----------------------------------------------------------------- 1.3.3: editors over HTTP
 
 def t_presetEditAPI(rig):
@@ -876,7 +911,7 @@ TESTS = [t_maxBrightnessHTTP, t_maxBrightnessAnimationAndSequence, t_minBrightne
          t_stageTilesAndStatusColours, t_renderMatchesPlayback, t_renderRespectsLimitsAndLocks, t_renderPNG,
          t_batchKelvin, t_batchCoalescesUnderLoad, t_getDuringBusyWorkerNotDropped, t_batchStopsOverrideAnimation,
          t_batchDuringSequenceBecomesRevertTarget, t_listJsonStructured,
-         t_presetEditAPI, t_animationEditAPI, t_sequenceEditAPI,
+         t_presetEditAPI, t_animationEditAPI, t_sequenceEditAPI, t_commandsDontWaitForStatusPoll,
          t_addSimulatedRig]
 
 

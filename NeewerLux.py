@@ -5002,8 +5002,11 @@ async def readNotifyCharacteristic(selectedLight, diagCommand, typeOfData):
             return "" # if there is an error checking the characteristic, just quit out of this routine
 
         # Look for the reply every 25 ms rather than sleeping a fixed 250 ms: lights answer in
-        # a few ms, and while this runs the worker can't send anything else (show frames included)
+        # a few ms, and while this runs the worker can't send anything else. Give up as soon as
+        # a light command is queued or a show starts (None: no answer this round, keep the old status)
         for _slice in range(10):
+            if _pendingSends or (showEngine is not None and showEngine.anyActive()):
+                return None
             data = _notifyData.get(mac)
             if data is not None:
                 if len(data) > 1: # if we have enough elements to get a status from
@@ -5029,6 +5032,8 @@ async def getLightChannelandPower(selectedLight):
     returnInfo = ["---", "---"] # the information to return to the light
 
     powerInfo = await readNotifyCharacteristic(selectedLight, [120, 133, 0, 253], 2)
+    if powerInfo is None:
+        return  # interrupted by a command or a show: keep the last status
 
     try:
         if powerInfo != "":
@@ -5039,6 +5044,8 @@ async def getLightChannelandPower(selectedLight):
         
             # IF THE LIGHT IS ON, THEN ATTEMPT TO READ THE CURRENT CHANNEL
             chanInfo = await readNotifyCharacteristic(selectedLight, [120, 132, 0, 252], 1)
+            if chanInfo is None:
+                chanInfo = ""  # interrupted: keep the last channel
 
             if chanInfo != "": # if we got a result from the query
                 try:
@@ -5368,7 +5375,7 @@ def workerThread(_loop):
 
                 # CHECK EACH LIGHT AGAINST THE TABLE TO SEE IF THERE ARE CONNECTION ISSUES
                 for a in range(len(availableLights)):
-                    if threadAction == "": # if we're not sending, then update the light info... (check this before scanning each light)
+                    if threadAction == "" and not _pendingSends: # if we're not sending, then update the light info... (check this before scanning each light)
                         if availableLights[a][1] != "": # if there is a Bleak object, then check to see if it's connected
                             if not availableLights[a][1].is_connected: # the light is disconnected, but we're reporting it isn't
                                 if hasGUI: mainWindow._tableUpdateSignal.emit(["", "", "NOT\nLINKED", "Light disconnected!"], a) # show the new status in the table
