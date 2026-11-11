@@ -28,6 +28,8 @@ a = Analysis(
         'neewerlux_webui',
         'neewerlux_anim_editor',
         'neewerlux_show',
+        'neewerlux_sim',
+        'neewerlux_stage',
         'PySide6',
         'PySide6.QtWidgets',
         'PySide6.QtCore',

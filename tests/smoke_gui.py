@@ -48,6 +48,34 @@ def main():
     win._updateShowStatus()
     assert win.seqStatusLabel.text() == "No sequence playing"
 
+    # Stage window, table swatches and the render dialog
+    nl.startSequence({"format": 1, "name": "StageCheck", "duration_ms": 3000,
+                      "cues": [{"at_ms": 0, "target": "@left", "state": {"mode": "HSI", "hue": 280, "sat": 90, "bri": 70}},
+                               {"at_ms": 0, "target": "@rim", "state": {"mode": "HSI", "hue": 20, "sat": 100, "bri": 90}}]})
+    time.sleep(0.4)
+    win.openStage()
+    app.processEvents()
+    stage = win._stageWindow
+    stage.refresh()
+    assert len(stage.view.tiles) == 4 and stage.view.tiles[0]["layer"] == "show", stage.view.tiles
+    stage.resize(600, 220)
+    app.processEvents()
+    shot = os.path.join(rig.workdir, "stage.png")
+    stage.grab().save(shot)
+    print("stage screenshot:", shot)
+    win._updateShowStatus()
+    swatch = win.lightTable.item(0, 0).data(nl.Qt.DecorationRole)
+    assert swatch is not None, "no swatch on the first light row"
+    stage.hide()
+    assert not stage.timer.isActive(), "Stage polling must stop while hidden"
+    nl.sequenceControl("stop")
+    from neewerlux_stage import RenderDialog
+    result = nl.renderSequence("Example - Four Light Demo")
+    dlg = RenderDialog(nl.renderSequencePNG(result), result["sequence"], win)
+    dlg.show()
+    app.processEvents()
+    dlg.close()
+
     # Light Prefs round trip through the sidecar file
     win.lightTable.selectRow(0)
     app.processEvents()
@@ -71,15 +99,17 @@ def main():
     # Global prefs save and reload
     win.envMaxBriSpin.setValue(80)
     win.seqFrameRateSpin.setValue(15)
+    win.simulatedLightsCombo.setCurrentIndex(3)
+    win.simulatedCCTOnlyCheck.setChecked(True)
     nl.globalPrefsFile = os.path.join(rig.workdir, "light_prefs", "NeewerLux.prefs")
     win.saveGlobalPrefs()
     text = open(nl.globalPrefsFile, encoding="utf-8").read()
-    assert "envMaxBri=80" in text and "seqFrameRate=15" in text, text
-    nl.envMaxBri, nl.seqFrameRate = 100, 20
+    assert "envMaxBri=80" in text and "seqFrameRate=15" in text and "simulatedLights=3" in text and "simulatedCCTOnly=1" in text, text
+    nl.envMaxBri, nl.seqFrameRate, nl.simulatedLights, nl.simulatedCCTOnly = 100, 20, 0, False
     nl.loadPrefsFile(nl.globalPrefsFile)
-    assert nl.envMaxBri == 80 and nl.seqFrameRate == 15
+    assert nl.envMaxBri == 80 and nl.seqFrameRate == 15 and nl.simulatedLights == 3 and nl.simulatedCCTOnly is True
     win.setupGlobalLightPrefsTab(True)
-    assert win.envMaxBriSpin.value() == 100 and win.effectMaxSecondsSpin.value() == 30
+    assert win.envMaxBriSpin.value() == 100 and win.effectMaxSecondsSpin.value() == 30 and win.simulatedLightsCombo.currentIndex() == 0
     print("GUI smoke test: PASS")
     return 0
 

@@ -15,7 +15,7 @@
 ##          Windows, Linux/Ubuntu, MacOS and RPi
 ############################################################
 
-NEEWERLUX_VERSION = "1.3.1"
+NEEWERLUX_VERSION = "1.3.2"
 NEEWERLUX_REPO_URL = "https://github.com/poizenjam/NeewerLux/"
 NEEWERLUX_RELEASES_API = "https://api.github.com/repos/poizenjam/NeewerLux/releases/latest"
 
@@ -49,6 +49,7 @@ import time
 from datetime import datetime
 
 import neewerlux_show as show # layered show engine: animation timelines, sequences, compositor
+import neewerlux_sim as sim # simulated lights for testing without hardware
 
 # IMPORT BLEAK (this is the library that allows the program to communicate with the lights) - THIS IS NECESSARY!
 try:
@@ -186,7 +187,7 @@ def _resource_path(filename):
 _isFrozenExe = getattr(sys, 'frozen', False)
 
 CCTSlider = -1 # the current slider moved in the CCT window - 1 - Brightness / 2 - Hue / -1 - Both Brightness and Hue
-sendValue = [120, 135, 2, 20, 56, 157] # an array to hold the values to be sent to the light - the default is CCT / 5600K / 20%
+sendValue = [120, 135, 2, 20, 56, 77] # an array to hold the values to be sent to the light - the default is CCT / 5600K / 20%
 lastAnimButtonPressed = 1 # which animation button you clicked last - if none, then it defaults to 1 (the police sirens)
 lastSelection = [] # the current light selection (this is for snapshot preset entering/leaving buttons)
 lastSortingField = -1 # the last field used for sorting purposes
@@ -306,6 +307,9 @@ envMaxBri = 100 # default brightness ceiling for every source except the manual 
 envMinBri = 0 # default brightness floor for lights that are on (0% and OFF still pass)
 seqFrameRate = 20 # default sequence frame rate (BLE updates per second), 1-30
 effectMaxSeconds = 30 # cap for looping effect-layer animations that have no loop count
+simulatedLights = 0 # simulated lights to add at startup (rig preset 0-4); --simulate overrides for one run
+simulatedCCTOnly = False # also add a simulated CCT-only light, to exercise the CCT-only fallback
+simulateFaults = False # --simulate-faults: simulated lights drop some writes and disconnect now and then
 autoReconnectOnDisconnect = True # whether or not to automatically try reconnecting to lights that disconnect (e.g. after sleep/wake)
 acceptable_HTTP_IPs = [] # the acceptable IPs for the HTTP server, set on launch by prefs file
 customKeys = [] # custom keymappings for keyboard shortcuts, set on launch by the prefs file
@@ -433,6 +437,8 @@ try: # try to load the GUI
             # Sequences panel, and a GUI-thread timer that mirrors show engine state into the labels
             self._sequenceListSignal.connect(self.seqRefreshList)
             self._lastShowLabels = None
+            self._stageWindow = None
+            self._swatches = {}
             self._showStatusTimer = QTimer(self)
             self._showStatusTimer.timeout.connect(self._updateShowStatus)
             self._showStatusTimer.start(250)
@@ -1341,14 +1347,46 @@ try: # try to load the GUI
             elif result["warnings"]:
                 printDebugString("Sequence warnings: " + "; ".join(result["warnings"]))
 
+        def seqRender(self):
+            items = self.seqList.selectedItems()
+            if not items:
+                self.seqStatusLabel.setText("Select a sequence first")
+                return
+            result = renderSequence(items[0].data(Qt.UserRole))
+            if not result["success"]:
+                self.seqStatusLabel.setText("Can't render: " + result["errors"][0])
+                return
+            from neewerlux_stage import RenderDialog
+            pyside_exec(RenderDialog(renderSequencePNG(result), result["sequence"], self))
+
         def seqPauseResume(self):
             seqStatus = getShowStatus()["sequence"]
             if seqStatus is None:
                 return
             sequenceControl("resume" if seqStatus["state"] == "paused" else "pause")
 
+        def openStage(self):
+            from neewerlux_stage import StageWindow
+            if self._stageWindow is None:
+                self._stageWindow = StageWindow(getStageTiles, self)
+            self._stageWindow.show()
+            self._stageWindow.raise_()
+            self._stageWindow.activateWindow()
+
+        def _updateSwatches(self):
+            """Colour square beside each light's name: what it's showing, approximately."""
+            for row in range(min(self.lightTable.rowCount(), len(availableLights))):
+                item = self.lightTable.item(row, 0)
+                if item is None:
+                    continue
+                rgb = getLightDisplayState(row)[1]
+                if self._swatches.get(row) != rgb or item.data(Qt.DecorationRole) is None:
+                    self._swatches[row] = rgb
+                    item.setData(Qt.DecorationRole, QColor(*rgb) if rgb is not None else QColor(70, 70, 70))
+
         def _updateShowStatus(self):
             """Runs on the GUI thread every 250 ms; only touches widgets when something changed."""
+            self._updateSwatches()
             if showEngine is None:
                 return
             st = showEngine.status()
@@ -1704,6 +1742,7 @@ try: # try to load the GUI
             self.turnOnButton.clicked.connect(self.turnLightOn)
 
             self.scanCommandButton.clicked.connect(self.startSelfSearch)
+            self.stageButton.clicked.connect(self.openStage)
             self.tryConnectButton.clicked.connect(self.startConnect)
             self.selectAllButton.clicked.connect(self.lightTable.selectAll)
 
@@ -1720,6 +1759,7 @@ try: # try to load the GUI
             self.seqPauseButton.clicked.connect(self.seqPauseResume)
             self.seqStopButton.clicked.connect(lambda: sequenceControl("stop"))
             self.seqReloadButton.clicked.connect(self.seqReload)
+            self.seqRenderButton.clicked.connect(self.seqRender)
             self.seqList.itemDoubleClicked.connect(lambda item: self.seqPlay())
 
             # ANIMATION TAB CONNECTIONS
@@ -2336,6 +2376,8 @@ try: # try to load the GUI
                 self.envMinBriSpin.setValue(envMinBri)
                 self.seqFrameRateSpin.setValue(seqFrameRate)
                 self.effectMaxSecondsSpin.setValue(effectMaxSeconds)
+                self.simulatedLightsCombo.setCurrentIndex(simulatedLights)
+                self.simulatedCCTOnlyCheck.setChecked(simulatedCCTOnly)
                 self.maxNumOfAttempts_field.setText(str(maxNumOfAttempts))
                 self.acceptable_HTTP_IPs_field.setText("\n".join(acceptable_HTTP_IPs))
                 self.whiteListedMACs_field.setText("\n".join(whiteListedMACs))
@@ -2385,6 +2427,8 @@ try: # try to load the GUI
                 self.envMinBriSpin.setValue(0)
                 self.seqFrameRateSpin.setValue(20)
                 self.effectMaxSecondsSpin.setValue(30)
+                self.simulatedLightsCombo.setCurrentIndex(0)
+                self.simulatedCCTOnlyCheck.setChecked(False)
                 self.maxNumOfAttempts_field.setText("6")
                 self.acceptable_HTTP_IPs_field.setText("\n".join(["127.0.0.1", "192.168.", "10."]))
                 self.whiteListedMACs_field.setText("")
@@ -2415,7 +2459,7 @@ try: # try to load the GUI
 
         def saveGlobalPrefs(self):
             # change these global values to the new values in Prefs
-            global customKeys, autoConnectToLights, printDebug, rememberLightsOnExit, rememberPresetsOnExit, autoReconnectOnDisconnect, maxNumOfAttempts, acceptable_HTTP_IPs, whiteListedMACs, hideConsoleOnLaunch, minimizeToTrayOnClose, httpAutoStart, httpPort, cctFallbackMode, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, globalCCTMin, globalCCTMax, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, cctFallbackMode, envMaxBri, envMinBri, seqFrameRate, effectMaxSeconds
+            global customKeys, autoConnectToLights, printDebug, rememberLightsOnExit, rememberPresetsOnExit, autoReconnectOnDisconnect, maxNumOfAttempts, acceptable_HTTP_IPs, whiteListedMACs, hideConsoleOnLaunch, minimizeToTrayOnClose, httpAutoStart, httpPort, cctFallbackMode, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, globalCCTMin, globalCCTMax, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, cctFallbackMode, envMaxBri, envMinBri, seqFrameRate, effectMaxSeconds, simulatedLights, simulatedCCTOnly
 
             finalPrefs = [] # list of final prefs to merge together at the end
 
@@ -2543,6 +2587,14 @@ try: # try to load the GUI
             effectMaxSeconds = self.effectMaxSecondsSpin.value()
             if effectMaxSeconds != 30:
                 finalPrefs.append("effectMaxSeconds=" + str(effectMaxSeconds))
+
+            # Simulated lights take effect at the next start (the light list isn't rebuilt live)
+            simulatedLights = self.simulatedLightsCombo.currentIndex()
+            simulatedCCTOnly = self.simulatedCCTOnlyCheck.isChecked()
+            if simulatedLights != 0:
+                finalPrefs.append("simulatedLights=" + str(simulatedLights))
+            if simulatedCCTOnly:
+                finalPrefs.append("simulatedCCTOnly=1")
             
             maxAttemptText = self.maxNumOfAttempts_field.text().strip()
             if maxAttemptText == "" or not maxAttemptText.isdigit():
@@ -4316,11 +4368,16 @@ async def findDevices():
 
     # Use return_adv=True to get AdvertisementData (which carries RSSI in newer Bleak)
     try:
-        scan_results = await BleakScanner.discover(return_adv=True)  # returns dict[str, tuple[BLEDevice, AdvertisementData]]
-    except TypeError:
-        # Very old Bleak that doesn't support return_adv, fall back
-        scan_results_list = await BleakScanner.discover()
-        scan_results = {d.address: (d, None) for d in scan_results_list}
+        try:
+            scan_results = await BleakScanner.discover(return_adv=True)  # returns dict[str, tuple[BLEDevice, AdvertisementData]]
+        except TypeError:
+            # Very old Bleak that doesn't support return_adv, fall back
+            scan_results_list = await BleakScanner.discover()
+            scan_results = {d.address: (d, None) for d in scan_results_list}
+    except Exception as e:
+        # No adapter, or Bluetooth switched off: simulated lights should still work
+        printDebugString("Bluetooth scan failed (" + str(e) + ")")
+        scan_results = {}
 
     for addr, (d, adv) in scan_results.items(): # go through all of the devices Bleak just found
         if d.address in whiteListedMACs: # if the MAC address is in the list of whitelisted addresses, add this device
@@ -4365,12 +4422,41 @@ async def findDevices():
             if customPrefs[3] is not None and isinstance(customPrefs[3], list): # we have previously stored parameters
                 availableLights.append([device, "", customPrefs[0], customPrefs[3], customPrefs[1], customPrefs[2], True, ["---", "---"], prefID, rssi])
             else: # no stored parameters, use defaults
-                availableLights.append([device, "", customPrefs[0], [120, 135, 2, 20, 56, 157], customPrefs[1], customPrefs[2], True, ["---", "---"], prefID, rssi])
+                availableLights.append([device, "", customPrefs[0], [120, 135, 2, 20, 56, 77], customPrefs[1], customPrefs[2], True, ["---", "---"], prefID, rssi])
 
     if threadAction != "quit":
         return "" # once the device scan is over, set the threadAction to nothing
     else: # if we're requesting that we quit, then just quit
         return "quit"
+
+def addSimulatedLights(count, includeCCTOnly=False, faults=False):
+    """Add a simulated rig (preset of 1 to 4 lights, plus an optional CCT-only light) to the
+    light list. Roles, sides, sweep order and IDs come from the preset only until the light
+    has its own saved preferences."""
+    faultSettings = sim.SimFaults(dropRate=0.02, disconnectMeanSec=300) if faults else None
+    added = 0
+    for device, preset in sim.buildRig(count, includeCCTOnly, faultSettings):
+        if any(light[0].address == device.address for light in availableLights):
+            continue
+        hasSidecar = os.path.exists(os.path.dirname(os.path.abspath(sys.argv[0])) + os.sep + "light_prefs" + os.sep + "".join(device.address.split(":")))
+        customPrefs = getCustomLightPrefs(device.address, device.name)
+        prefID = customPrefs[4] if len(customPrefs) > 4 else 0
+        if not hasSidecar:
+            prefID = preset["preferredID"]
+            lightShowPrefs[device.address.upper()] = dict(SHOW_PREF_DEFAULTS, role=preset["role"], side=preset["side"], order=preset["order"])
+        elif len(customPrefs) > 5:
+            lightShowPrefs[device.address.upper()] = parseShowPrefFields([str(x) for x in customPrefs])
+        lastParams = customPrefs[3] if isinstance(customPrefs[3], list) else [120, 135, 2, 20, 56, 77]
+        availableLights.append([device, "", customPrefs[0], lastParams, customPrefs[1], customPrefs[2], True, ["---", "---"], prefID, -40])
+        if not hasSidecar:
+            # Save the preset as the light's own preferences right away, so its ID and role
+            # resolve like any light's and survive the alias reload after a preferences save
+            saveLightPrefs(len(availableLights) - 1)
+        added += 1
+    if added:
+        loadLightAliases()
+        printDebugString("Added " + str(added) + " simulated light(s)" + (" with fault injection" if faults else ""))
+    return added
 
 def getCustomLightPrefs(MACAddress, lightName = ""):
     customPrefsPath = MACAddress.split(":")
@@ -4529,7 +4615,10 @@ async def connectToLight(selectedLight, updateGUI=True):
         lightIdx = returnLightIndexesFromMacAddress(lightMAC)[0]
         device = availableLights[lightIdx][0]
         try:
-            availableLights[lightIdx][1] = BleakClient(device)
+            if sim.isSimulated(device):
+                availableLights[lightIdx][1] = device.makeClient()
+            else:
+                availableLights[lightIdx][1] = BleakClient(device)
         except (AttributeError, TypeError):
             # BLEDevice.details may be None if re-discovered without advertisement data
             # Fall back to MAC address string
@@ -4613,14 +4702,17 @@ async def readNotifyCharacteristic(selectedLight, diagCommand, typeOfData):
         except Exception:
             return "" # if there is an error checking the characteristic, just quit out of this routine
 
-        data = _notifyData.get(mac)
-        if data is not None:
-            if len(data) > 1: # if we have enough elements to get a status from
-                if data[1] == typeOfData: # if the data returned is the correct *kind* of data
-                    return data
-            else: # the light answered without a payload
-                return "---"
-        await asyncio.sleep(0.25) # wait a little bit of time before checking again
+        # Look for the reply every 25 ms rather than sleeping a fixed 250 ms: lights answer in
+        # a few ms, and while this runs the worker can't send anything else (show frames included)
+        for _slice in range(10):
+            data = _notifyData.get(mac)
+            if data is not None:
+                if len(data) > 1: # if we have enough elements to get a status from
+                    if data[1] == typeOfData: # if the data returned is the correct *kind* of data
+                        return data
+                else: # the light answered without a payload
+                    return "---"
+            await asyncio.sleep(0.025)
 
     return _notifyData.get(mac) or ""
 
@@ -4958,7 +5050,8 @@ def workerThread(_loop):
                             else:
                                 anyConnected = True
                                 reconnectCooldown.pop(a, None)  # light is connected, clear any cooldown
-                                if getLightCaps(availableLights[a][0].name)["reports_status"] and not sequenceOnly: # lights that answer status queries, outside sequences
+                                showStarted = showEngine is not None and showEngine.anyActive() # re-checked per light: a show may start mid-poll
+                                if getLightCaps(availableLights[a][0].name)["reports_status"] and not showStarted: # lights that answer status queries, outside shows
                                     try:
                                         _loop.run_until_complete(getLightChannelandPower(a)) # then check the power and light status of that light
                                     except Exception as e:
@@ -6233,6 +6326,138 @@ def startSequence(nameOrData, startMs=0):
     return {"success": True, "sequence": seq.name, "errors": [], "warnings": seqWarnings}
 
 
+def renderSequence(nameOrData, stepMs=None, startMs=0, endMs=None):
+    """Play a sequence on a simulated clock against the current lights and return what each
+    light would show, without waiting in real time and without sending anything.
+
+    Each light's CCT-only fallback, brightness limits and Locked flag are applied, so the
+    result matches what the lights would actually do. Lights a cue doesn't drive show their
+    current state. Returns a dict: per-light change lists ([time_ms, colour, brightness,
+    mode, source]), the cue list, and any validation errors or warnings."""
+    if isinstance(nameOrData, dict):
+        data = nameOrData
+    else:
+        resolved = resolveSequenceName(nameOrData)
+        if resolved is None:
+            return {"success": False, "errors": ["no sequence named " + repr(nameOrData)], "warnings": []}
+        data = savedSequences[resolved]
+    seq, errors, seqWarnings = buildSequence(data)
+    if seq is None:
+        return {"success": False, "errors": errors, "warnings": seqWarnings}
+
+    player = show.SequencePlayer(seq, _showResolve, lambda n: savedAnimations.get(resolveAnimationName(n)),
+                                 _sequenceBaseCommand)
+    player.start(0.0, 0)
+    try:
+        startMs = max(0, int(startMs or 0))
+        endMs = min(seq.duration, int(endMs)) if endMs else seq.duration
+        step = int(stepMs) if stepMs else int(round(1000.0 / seq.fps))
+    except (TypeError, ValueError):
+        return {"success": False, "errors": ["start_ms, end_ms and step_ms must be numbers"], "warnings": seqWarnings}
+    step = max(10, step, -(-(endMs - startMs) // 20000))  # at most 20,000 samples per light
+
+    lights, changes, last, baseShown = [], {}, {}, {}
+    for idx, light in enumerate(availableLights):
+        prefID = light[8] if len(light) > 8 else 0
+        lightID = str(prefID if prefID > 0 else idx + 1)
+        lights.append({"id": lightID, "name": light[2] if light[2] else light[0].name,
+                       "role": getLightShowPref(idx, "role"), "side": getLightShowPref(idx, "side"),
+                       "locked": bool(getLightShowPref(idx, "locked")), "simulated": sim.isSimulated(light[0])})
+        changes[lightID] = []
+        baseShown[idx] = _sequenceBaseCommand(idx)
+
+    for t in range(startMs, endMs, step):
+        out, _ = player.frame(float(t))
+        for idx, meta in enumerate(lights):
+            cmd = None if meta["locked"] else out.get(idx)
+            source = "base"
+            shown = baseShown[idx]
+            if cmd is not None:
+                byteVal = commandToByteValue(idx, cmd)
+                if byteVal is not None:
+                    shown = show.bytesToCommand(applyBrightnessEnvelope(idx, byteVal))
+                    source = "sequence"
+                else:
+                    shown = last.get(idx, (None, shown))[1]  # the CCT-only "ignore" setting leaves the light as it was
+            entry = (shown["mode"] if shown else None, shown.get("bri") if shown else None,
+                     show.rgbHex(show.commandToRGB(shown)), source)
+            if last.get(idx, (None,))[0] != entry:
+                last[idx] = (entry, shown)
+                changes[meta["id"]].append([t, entry[2], entry[1], entry[0], entry[3]])
+
+    cues = []
+    for cue in seq.cues:
+        if cue.kind == "clip":
+            what = cue.clipName + " (" + cue.fit + (", " + str(cue.brightness) + "%" if cue.brightness != 100 else "") + ")"
+        else:
+            st = cue.state
+            what = ("HSI %d/%d/%d" % (st["hue"], st["sat"], st["bri"])) if st["mode"] == "HSI" else ("CCT %dK %d%%" % (st["temp"] * 100, st["bri"]))
+            if cue.fade:
+                what += ", fade " + str(cue.fade) + " ms"
+        cues.append({"index": cue.index, "at_ms": cue.at, "duration_ms": cue.dur, "target": cue.target,
+                     "kind": cue.kind, "what": what, "label": cue.raw.get("label", "")})
+    return {"success": True, "sequence": seq.name, "duration_ms": seq.duration, "start_ms": startMs,
+            "end_ms": endMs, "step_ms": step, "lights": lights, "changes": changes, "cues": cues,
+            "warnings": seqWarnings}
+
+
+def renderSequencePNG(result, width=1600):
+    """Draw a render result as an image strip (one row per light, time left to right, cue
+    marks on the ruler) and return PNG bytes. Needs Qt and a running app object, because
+    text drawing needs the font system; a headless --http install gets the data only."""
+    try:
+        from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QRectF, Qt as _Qt
+        from PySide6.QtGui import QImage, QPainter, QColor as _QColor, QGuiApplication, QPen as _QPen
+    except ImportError:
+        from PySide2.QtCore import QBuffer, QByteArray, QIODevice, QRectF, Qt as _Qt
+        from PySide2.QtGui import QImage, QPainter, QColor as _QColor, QGuiApplication, QPen as _QPen
+    if QGuiApplication.instance() is None:
+        raise RuntimeError("the image strip needs the NeewerLux window running; use format json")
+
+    labelW, rowH, rulerH, pad = 220, 26, 26, 36
+    rows = result["lights"]
+    span = max(1, result["end_ms"] - result["start_ms"])
+    img = QImage(labelW + width + pad, rulerH + len(rows) * rowH + pad, QImage.Format_RGB32)
+    img.fill(_QColor(24, 24, 24))
+    p = QPainter(img)
+
+    def xAt(t):
+        return labelW + (t - result["start_ms"]) * width / span
+
+    for r, meta in enumerate(rows):
+        y = rulerH + r * rowH
+        p.setPen(_QColor(225, 225, 225))
+        p.drawText(QRectF(6, y, labelW - 12, rowH), _Qt.AlignLeft | _Qt.AlignVCenter, meta["name"] + "  (" + meta["role"] + ")")
+        segs = result["changes"].get(meta["id"], [])
+        for i, (t, colour, bri, mode, source) in enumerate(segs):
+            tEnd = segs[i + 1][0] if i + 1 < len(segs) else result["end_ms"]
+            fill = _QColor(colour) if colour else _QColor(60, 60, 60)
+            p.fillRect(QRectF(xAt(t), y + 3, max(1.0, xAt(tEnd) - xAt(t)), rowH - 6), fill)
+
+    secs = span / 1000.0
+    tick = next((n for n in (1, 2, 5, 10, 15, 30, 60, 120) if secs / n <= 16), 300)
+    p.setPen(_QColor(150, 150, 150))
+    t = (result["start_ms"] // (tick * 1000)) * tick * 1000
+    while t <= result["end_ms"]:
+        if t >= result["start_ms"]:
+            x = xAt(t)
+            p.drawLine(int(x), rulerH - 6, int(x), rulerH)
+            p.drawText(QRectF(x + 2, 2, 60, rulerH - 6), _Qt.AlignLeft, "%d:%02d" % (t // 60000, (t // 1000) % 60))
+        t += tick * 1000
+    p.setPen(_QPen(_QColor(255, 255, 255, 70), 1))
+    for cue in result["cues"]:
+        if result["start_ms"] <= cue["at_ms"] < result["end_ms"]:
+            x = int(xAt(cue["at_ms"]))
+            p.drawLine(x, rulerH, x, rulerH + len(rows) * rowH)
+    p.end()
+
+    data = QByteArray()
+    buf = QBuffer(data)
+    buf.open(QIODevice.WriteOnly)
+    img.save(buf, "PNG")
+    return bytes(data)
+
+
 def sequenceControl(action, ms=None):
     """pause, resume, stop, seek (ms), position (ms, slews small offsets) or status. Returns a result dict."""
     if action == "status":
@@ -6260,6 +6485,34 @@ def sequenceControl(action, ms=None):
     return {"success": bool(ok), "action": action}
 
 
+def getLightDisplayState(lightIdx):
+    """What a light is showing, as far as NeewerLux knows: (command, rgb, linked, simulated).
+    Simulated lights report the state built from packets they accepted; real lights report
+    the last value sent to them."""
+    light = availableLights[lightIdx]
+    simulated = sim.isSimulated(light[0])
+    cmd = light[0].state.toCommand() if simulated else show.bytesToCommand(light[3])
+    try:
+        linked = light[1] != "" and bool(light[1].is_connected)
+    except Exception:
+        linked = False
+    return cmd, show.commandToRGB(cmd), linked, simulated
+
+
+def getStageTiles():
+    """Tiles for the Stage window, in sweep order."""
+    tiles = []
+    owners = showEngine.owner if showEngine is not None else {}
+    for idx in sorted(range(len(availableLights)), key=lightSweepKey):
+        cmd, rgb, linked, simulated = getLightDisplayState(idx)
+        light = availableLights[idx]
+        tiles.append({"name": light[2] if light[2] else light[0].name, "role": getLightShowPref(idx, "role"),
+                      "rgb": rgb, "mode": cmd["mode"] if cmd else "", "bri": cmd.get("bri", "") if cmd else "",
+                      "linked": linked, "simulated": simulated,
+                      "layer": "base" if getLightShowPref(idx, "locked") else show.LAYER_NAMES[owners.get(idx, 0)]})
+    return tiles
+
+
 def getShowStatus():
     """Layer, sequence and per-light status for the HTTP status endpoints and the GUI."""
     if showEngine is None:
@@ -6268,11 +6521,15 @@ def getShowStatus():
     lights = []
     for idx, light in enumerate(availableLights):
         prefID = light[8] if len(light) > 8 else 0
+        cmd, rgb, linked, simulated = getLightDisplayState(idx)
         lights.append({"id": prefID if prefID > 0 else idx + 1,
                        "name": light[2] if light[2] else light[0].name,
                        "role": getLightShowPref(idx, "role"), "side": getLightShowPref(idx, "side"),
                        "locked": bool(getLightShowPref(idx, "locked")),
-                       "layer": show.LAYER_NAMES[st["owners"].get(idx, 0)]})
+                       "layer": show.LAYER_NAMES[st["owners"].get(idx, 0)],
+                       "linked": linked, "simulated": simulated,
+                       "mode": cmd["mode"] if cmd else None, "bri": cmd.get("bri") if cmd else None,
+                       "color": show.rgbHex(rgb)})
     return {"layers": st["layers"], "sequence": st["sequence"], "lights": lights}
 
 
@@ -7095,6 +7352,23 @@ class NLPythonServer(BaseHTTPRequestHandler):
                 resultData = {"success": True, "sequences": [
                     {"name": n, "duration_ms": d.get("duration_ms"), "cues": len(d.get("cues", [])),
                      "description": d.get("description", "")} for n, d in sorted(savedSequences.items())]}
+            elif action == "render":
+                source = body.get("sequence") if isinstance(body.get("sequence"), dict) else body.get("name", "")
+                resultData = renderSequence(source, body.get("step_ms"), body.get("start_ms", 0), body.get("end_ms"))
+                resultData["action"] = "render"
+                if resultData["success"] and str(body.get("format", "json")).lower() == "png":
+                    try:
+                        pngBytes = renderSequencePNG(resultData, int(body.get("width", 1600)))
+                    except (RuntimeError, ImportError, ValueError) as e:
+                        resultData = {"success": False, "action": "render", "errors": [str(e)], "warnings": []}
+                    else:
+                        self.send_response(200)
+                        self._send_cors_headers()
+                        self.send_header("Content-Type", "image/png")
+                        self.send_header("Content-Length", str(len(pngBytes)))
+                        self.end_headers()
+                        self.wfile.write(pngBytes)
+                        return
             elif action in ("validate", "save"):
                 seqData = body.get("sequence")
                 seq, errors, seqWarnings = buildSequence(seqData)
@@ -7298,7 +7572,7 @@ def loadPrefsFile(globalPrefsFile = ""):
     global findLightsOnStartup, autoConnectToLights, printDebug, maxNumOfAttempts, \
            rememberLightsOnExit, acceptable_HTTP_IPs, customKeys, enableTabsOnLaunch, \
            whiteListedMACs, rememberPresetsOnExit, autoReconnectOnDisconnect, livePreview, hideConsoleOnLaunch, minimizeToTrayOnClose, httpAutoStart, httpPort, cctFallbackMode, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, \
-           envMaxBri, envMinBri, seqFrameRate, effectMaxSeconds
+           envMaxBri, envMinBri, seqFrameRate, effectMaxSeconds, simulatedLights, simulatedCCTOnly
 
     if globalPrefsFile != "":
         printDebugString("Loading global preferences from file...")
@@ -7312,7 +7586,7 @@ def loadPrefsFile(globalPrefsFile = ""):
             "SC_Dec_1_Small", "SC_Inc_1_Small", "SC_Dec_2_Small", "SC_Inc_2_Small", "SC_Dec_3_Small", "SC_Inc_3_Small", \
             "SC_Dec_1_Large", "SC_Inc_1_Large", "SC_Dec_2_Large", "SC_Inc_2_Large", "SC_Dec_3_Large", "SC_Inc_3_Large", \
             "enableTabsOnLaunch", "whiteListedMACs", "rememberPresetsOnExit", "autoReconnectOnDisconnect", "hideConsoleOnLaunch", "minimizeToTrayOnClose", "livePreview", "httpAutoStart", "httpPort", "cctFallbackMode", "enableLogTab", "logToFile", "logHeartbeat", "globalCCTMin", "globalCCTMax", \
-            "envMaxBri", "envMinBri", "seqFrameRate", "effectMaxSeconds"]
+            "envMaxBri", "envMinBri", "seqFrameRate", "effectMaxSeconds", "simulatedLights", "simulatedCCTOnly"]
 
         # KICK OUT ANY PARAMETERS THAT AREN'T IN THE "ACCEPTABLE ARGUMENTS" LIST ABOVE
         # THIS SECTION OF CODE IS *SLIGHTLY* DIFFERENT THAN THE CLI KICK OUT CODE
@@ -7354,6 +7628,8 @@ def loadPrefsFile(globalPrefsFile = ""):
     prefsParser.add_argument("--envMinBri", default=0)
     prefsParser.add_argument("--seqFrameRate", default=20)
     prefsParser.add_argument("--effectMaxSeconds", default=30)
+    prefsParser.add_argument("--simulatedLights", default=0)
+    prefsParser.add_argument("--simulatedCCTOnly", default=0)
 
     # SHORTCUT KEY CUSTOMIZATIONS
     prefsParser.add_argument("--SC_turnOffButton", default="Ctrl+PgDown") # 0
@@ -7423,6 +7699,8 @@ def loadPrefsFile(globalPrefsFile = ""):
     envMinBri = _intPref(mainPrefs.envMinBri, 0, 0, 100)
     seqFrameRate = _intPref(mainPrefs.seqFrameRate, 20, 1, show.MAX_FPS)
     effectMaxSeconds = _intPref(mainPrefs.effectMaxSeconds, 30, 1, 600)
+    simulatedLights = _intPref(mainPrefs.simulatedLights, 0, 0, len(sim.RIG_LIGHTS))
+    simulatedCCTOnly = _intPref(mainPrefs.simulatedCCTOnly, 0, 0, 1) == 1
 
     if type(mainPrefs.acceptableIPs) is not list: # we have a string in the return, so we need to post-process it
         acceptable_HTTP_IPs = mainPrefs.acceptableIPs.replace(" ", "").split(";") # split the IP addresses into a list for acceptable IPs
@@ -7475,6 +7753,24 @@ if __name__ == '__main__':
     if customPresetsSource is not None:
         loadCustomPresets(customPresetsSource) # if there's a custom mapping for presets, then load that into memory
 
+    # --simulate[=N] (rig preset 1-4, default 4) and --simulate-faults apply to this run only,
+    # so they go in their own variable and never reach the saved preference
+    simRigThisRun = simulatedLights
+    for simArg in list(sys.argv[1:]):
+        if simArg == "--simulate-faults":
+            simulateFaults = True
+            sys.argv.remove(simArg)
+        elif simArg == "--simulate" or simArg.startswith("--simulate="):
+            simRigThisRun = 4
+            if "=" in simArg:
+                try:
+                    simRigThisRun = max(0, min(len(sim.RIG_LIGHTS), int(simArg.split("=", 1)[1])))
+                except ValueError:
+                    print("Ignoring " + simArg + ": expected --simulate=1 to 4")
+            sys.argv.remove(simArg)
+    if simulateFaults and simRigThisRun == 0:
+        simRigThisRun = 4
+
     setUpAsyncio() # set up the asyncio loop
     cmdReturn = [True] # initially set to show the GUI interface over the CLI interface
 
@@ -7493,6 +7789,8 @@ if __name__ == '__main__':
             loadAllAnimations()
             loadLightAliases()
             loadAllSequences()
+            if simRigThisRun > 0 or simulatedCCTOnly:
+                addSimulatedLights(simRigThisRun, simulatedCCTOnly, simulateFaults)
             initShowEngine()
 
             # Start a worker thread to process BLE operations (discover, connect, send, etc.)
@@ -7664,6 +7962,9 @@ if __name__ == '__main__':
                 loadAllAnimations()
                 loadLightAliases()
                 loadAllSequences()
+                if simRigThisRun > 0 or simulatedCCTOnly:
+                    if addSimulatedLights(simRigThisRun, simulatedCCTOnly, simulateFaults):
+                        mainWindow.updateLights()
                 initShowEngine()
                 print("[TRACE] loadAllAnimations() + loadLightAliases() complete")
                 mainWindow.animRefreshList()

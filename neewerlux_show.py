@@ -13,6 +13,7 @@ keep their clocks running.
 """
 
 import bisect
+import math
 import threading
 import time
 
@@ -66,7 +67,11 @@ def _lerpCCT(p, q, t):
 def bytesToCommand(byteVal):
     """Turn a stored light byte value back into an animation-style command, for fades
     that start from the base state. Returns None for values that can't be faded from."""
-    if not isinstance(byteVal, (list, tuple)) or len(byteVal) < 5:
+    if not isinstance(byteVal, (list, tuple)) or len(byteVal) < 4:
+        return None
+    if byteVal[0] == 0 or (byteVal[1] == 129 and byteVal[3] == 2):
+        return {"mode": "OFF"}  # a leading 0 is how snapshot presets mark a light as off
+    if len(byteVal) < 5:
         return None
     if byteVal[1] == 135:
         return {"mode": "CCT", "bri": byteVal[3], "temp": byteVal[4]}
@@ -75,6 +80,52 @@ def bytesToCommand(byteVal):
     if byteVal[1] == 136:
         return {"mode": "ANM", "bri": byteVal[3], "scene": byteVal[4]}
     return None
+
+
+def kelvinToRGB(kelvin):
+    """Approximate colour of a white light at a colour temperature (Tanner Helland's fit
+    to blackbody data), as 0-255 floats. Good enough for a preview, not for colour work."""
+    t = max(1000, min(40000, kelvin)) / 100.0
+    if t <= 66:
+        r = 255.0
+        g = 99.4708025861 * math.log(t) - 161.1195681661
+        b = 0.0 if t <= 19 else 138.5177312231 * math.log(t - 10) - 305.0447927307
+    else:
+        r = 329.698727446 * ((t - 60) ** -0.1332047592)
+        g = 288.1221695283 * ((t - 60) ** -0.0755148492)
+        b = 255.0
+    return tuple(max(0.0, min(255.0, c)) for c in (r, g, b))
+
+
+def commandToRGB(cmd):
+    """Approximate on-screen colour of a light command, brightness included, as an (r, g, b)
+    tuple of ints, or None when the colour isn't known (a bare ON). Brightness goes through a
+    2.2 gamma so a light at 20% still reads as clearly lit, roughly as it looks in a room."""
+    if not cmd:
+        return None
+    mode = str(cmd.get("mode", "")).upper()
+    if mode == "OFF":
+        return (0, 0, 0)
+    level = (max(0, min(100, cmd.get("bri", 100))) / 100.0) ** (1 / 2.2)
+    if mode == "HSI":
+        h = (cmd.get("hue", 0) % 360) / 60.0
+        sat = max(0, min(100, cmd.get("sat", 100))) / 100.0
+        c = sat
+        x = c * (1 - abs(h % 2 - 1))
+        r, g, b = [(c, x, 0), (x, c, 0), (0, c, x), (0, x, c), (x, 0, c), (c, 0, x)][int(h) % 6]
+        m = 1 - c
+        rgb = ((r + m) * 255, (g + m) * 255, (b + m) * 255)
+    elif mode == "CCT":
+        rgb = kelvinToRGB(cmd.get("temp", 56) * 100)
+    elif mode == "ANM":
+        rgb = (200.0, 200.0, 200.0)  # scene colours come from the light's firmware; unknown here
+    else:
+        return None
+    return tuple(int(round(c * level)) for c in rgb)
+
+
+def rgbHex(rgb):
+    return "#%02x%02x%02x" % tuple(rgb) if rgb is not None else None
 
 
 def buildKeyMap(keys, resolver, targetIdx=None):

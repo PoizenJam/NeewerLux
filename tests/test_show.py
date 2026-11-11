@@ -12,6 +12,7 @@ import sys
 import time
 import traceback
 
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")  # the render strip test creates a Qt app
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
@@ -381,7 +382,7 @@ def t_guidSidecar(rig):
     guid = "6F3A1C2E-0000-4000-8000-00000000ABCD"
     light = rig.nl.availableLights[AMB]
     oldDevice = light[0]
-    light[0] = harness.FakeDevice(guid)
+    light[0] = rig.nl.sim.SimDevice(guid, oldDevice.name)
     path = os.path.join(rig.workdir, "light_prefs", guid)
     try:
         open(path, "w", encoding="utf-8").write("Ambient||||0|practical|left|0||60|-1|")
@@ -508,12 +509,138 @@ def t_driftWallClock(rig, seconds):
     check(p99 < 20, "p99 onset error %.1f ms" % p99)
 
 
+# ----------------------------------------------------------------- 1.3.2: simulator, stage, render
+
+def t_simStateFollowsCommands(rig):
+    rig.get("light=1&mode=HSI&hue=200&sat=80&bri=60", 0.4)
+    rig.get("light=2&mode=CCT&temp=40&bri=30", 0.4)
+    rig.get("light=3&off", 0.4)
+    nl = rig.nl
+    check(nl.availableLights[KEY][0].state.toCommand() == {"mode": "HSI", "hue": 200, "sat": 80, "bri": 60}, "key state")
+    check(nl.availableLights[FILL][0].state.toCommand() == {"mode": "CCT", "temp": 40, "bri": 30}, "fill state")
+    check(nl.availableLights[RIM][0].state.toCommand() == {"mode": "OFF"}, "rim off")
+    rejected = [(l[0].address, l[0].state.lastRejected) for l in nl.availableLights if l[0].state.rejected]
+    check(not rejected, "lights rejected packets: " + str(rejected))
+
+
+def t_statusPollThroughNotifications(rig):
+    time.sleep(4.5)  # the worker polls every few seconds while idle
+    statuses = [l[7] for l in rig.nl.availableLights]
+    expected = [["ON" if l[0].state.power else "STBY", 1] for l in rig.nl.availableLights]
+    check(statuses == expected, "status poll results %s, lights are %s" % (statuses, expected))
+    check(all(rig.nl._notifyClients.get(l[0].address) is l[1] for l in rig.nl.availableLights), "one subscription per light")
+
+
+def t_cctOnlySplitPackets(rig):
+    nl = rig.nl
+    nl.availableLights[AMB][5] = True  # behave like an older CCT-only light
+    try:
+        rig.get("light=4&mode=CCT&temp=45&bri=35", 0.5)
+        st = nl.availableLights[AMB][0].state
+        check(st.toCommand() == {"mode": "CCT", "temp": 45, "bri": 35} and st.lastKind in ("BRI", "TEMP"), "split CCT: %s %s" % (st.toCommand(), st.lastKind))
+        rig.get("light=4&mode=HSI&hue=0&sat=100&bri=50", 0.5)
+        check(st.mode == "CCT", "an HSI command must reach a CCT-only light as CCT (fallback), got " + st.mode)
+    finally:
+        nl.availableLights[AMB][5] = False
+
+
+def t_stageTilesAndStatusColours(rig):
+    rig.get("light=*&mode=HSI&hue=0&sat=100&bri=100", 0.5)
+    tiles = rig.nl.getStageTiles()
+    check([t["role"] for t in tiles] == ["fill", "ambient", "rim", "key"], "stage tiles in sweep order: " + str([t["role"] for t in tiles]))
+    check(all(t["rgb"] == (255, 0, 0) and t["linked"] and t["simulated"] for t in tiles), "stage tile colours: " + str([t["rgb"] for t in tiles]))
+    st = rig.getJSON("status_json")
+    check(all(l["color"] == "#ff0000" and l["mode"] == "HSI" and l["bri"] == 100 for l in st["lights"]), "status_json colours")
+    rig.post("/NeewerLux/sequence", {"action": "play", "sequence": stepSequence("tiles", [120, 240], 600)}, 0.3)
+    check(all(t["layer"] == "show" for t in rig.nl.getStageTiles()), "tiles should show the sequence layer")
+
+
+def t_renderMatchesPlayback(rig):
+    hues = [0, 60, 120, 180, 240, 300]
+    seq = stepSequence("rendercheck", hues, 400, target="@left")
+    seq["cues"].append({"at_ms": 1000, "duration_ms": 600, "target": "@rim", "clip": {"name": "Heartbeat", "fit": "stretch"}})
+    r = rig.post("/NeewerLux/sequence", {"action": "render", "sequence": seq})
+    check(r["success"], "render failed: " + str(r.get("errors")))
+    byName = {l["role"]: l["id"] for l in r["lights"]}
+    fillChanges = r["changes"][byName["fill"]]
+    check([c[4] for c in fillChanges].count("sequence") == len(hues), "fill should change once per cue: " + str(fillChanges))
+    check(all(c[4] == "base" for c in r["changes"][byName["key"]]), "the key isn't targeted, so it stays on base")
+    rimSeq = [c for c in r["changes"][byName["rim"]] if c[4] == "sequence"]
+    check(rimSeq and rimSeq[0][0] == 1000 and r["changes"][byName["rim"]][-1][4] == "base", "rim clip window: " + str(r["changes"][byName["rim"]][:3]))
+    check(len(r["cues"]) == len(hues) + 1 and r["cues"][-1]["what"].startswith("Heartbeat"), "cue list")
+    # Now play it for real and compare the fill's colours, in order, with the render
+    tStart = time.monotonic()
+    rig.post("/NeewerLux/sequence", {"action": "play", "sequence": seq}, 2.8)
+    played = []
+    for t, d in writesFor(rig, FILL, tStart):
+        h = hueOf(d)
+        if h is not None and (not played or played[-1] != h):
+            played.append(h)
+    rendered = [int(c[1][1:3], 16) for c in fillChanges if c[4] == "sequence"]
+    check(played[:len(hues)] == hues, "played hues %s" % played)
+    check(len(rendered) == len(hues), "rendered %d sequence changes" % len(rendered))
+
+
+def t_renderRespectsLimitsAndLocks(rig):
+    rig.setShowPrefs(FILL, maxBri=30)
+    rig.setShowPrefs(RIM, locked=True)
+    r = rig.nl.renderSequence(stepSequence("limits", [0, 90], 300))
+    byRole = {l["role"]: l["id"] for l in r["lights"]}
+    check(all(c[2] <= 30 for c in r["changes"][byRole["fill"]] if c[4] == "sequence"), "render ignored the fill's max brightness")
+    check(all(c[4] == "base" for c in r["changes"][byRole["rim"]]), "render drove a locked light")
+
+
+def t_renderPNG(rig):
+    r = rig.post("/NeewerLux/sequence", {"action": "render", "name": "Example - Four Light Demo", "format": "png"})
+    check(not r["success"] and "window" in r["errors"][0], "png without the app should explain why: " + str(r))
+    try:
+        from PySide6.QtWidgets import QApplication
+    except ImportError:
+        from PySide2.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    url = "http://127.0.0.1:%d/NeewerLux/sequence" % rig.port
+    import urllib.request
+    req = urllib.request.Request(url, data=json.dumps({"action": "render", "name": "Example - Four Light Demo", "format": "png", "width": 800}).encode(),
+                                 headers={"Content-Type": "application/json"}, method="POST")
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        body = resp.read()
+        ctype = resp.headers.get("Content-Type")
+    check(ctype == "image/png" and body[:8] == b"\x89PNG\r\n\x1a\n", "png response: %s, %r" % (ctype, body[:8]))
+    with open(os.path.join(rig.workdir, "render.png"), "wb") as f:
+        f.write(body)
+    RESULTS.append("    render strip: %d bytes, saved to %s" % (len(body), os.path.join(rig.workdir, "render.png")))
+    del app
+
+
+def t_addSimulatedRig(rig):
+    """Runs last: appends a preset rig to the harness's four lights, then removes it."""
+    nl = rig.nl
+    before = len(nl.availableLights)
+    try:
+        added = nl.addSimulatedLights(2, includeCCTOnly=True)
+        check(added == 3, "added %d lights" % added)
+        newLights = nl.availableLights[before:]
+        check([l[0].name for l in newLights] == ["SIM-RGB660-Key", "SIM-RGB660-Fill", "SIM-SNL660-Practical"], "names")
+        check([l[8] for l in newLights] == [91, 92, 95], "preferred IDs %s" % [l[8] for l in newLights])
+        check(newLights[2][5] is True and newLights[2][4] == [3200, 5600], "CCT-only light takes its model's specs")
+        check(nl.getLightShowPref(before + 2, "role") == "practical", "preset role")
+        check(nl.addSimulatedLights(2, includeCCTOnly=True) == 0, "adding the same rig twice must not duplicate it")
+        check(nl.returnLightIndexesFromMacAddress("91") == [before], "ID 91 resolves to the simulated key")
+    finally:
+        for l in nl.availableLights[before:]:
+            nl.lightShowPrefs.pop(l[0].address.upper(), None)
+        del nl.availableLights[before:]
+
+
 TESTS = [t_maxBrightnessHTTP, t_maxBrightnessAnimationAndSequence, t_minBrightness, t_globalDefaultLimit,
          t_slidersExempt, t_lockedLight, t_roleTargets, t_effectOverPartOfRigRejoinsInSync, t_revertToPresetAtEnd,
          t_endPreset, t_holdAtEnd, t_pauseRevertsAndResumes, t_seekAndSetPosition, t_effectQueueReplaceFull,
          t_effectCap, t_overrideOverSequence, t_onInterruptPause, t_baseWriteDuringSequenceBecomesRevertTarget,
          t_manualCommandStopsAnimationAndReverts, t_postBatchDelivers, t_postPlayEmptyName,
-         t_sequenceValidateSaveListPlay, t_clipStretchAndTarget, t_docExamplesValidate, t_guidSidecar, t_statusShape, t_driftVirtualClock]
+         t_sequenceValidateSaveListPlay, t_clipStretchAndTarget, t_docExamplesValidate, t_guidSidecar, t_statusShape, t_driftVirtualClock,
+         t_simStateFollowsCommands, t_statusPollThroughNotifications, t_cctOnlySplitPackets,
+         t_stageTilesAndStatusColours, t_renderMatchesPlayback, t_renderRespectsLimitsAndLocks, t_renderPNG,
+         t_addSimulatedRig]
 
 
 def main():

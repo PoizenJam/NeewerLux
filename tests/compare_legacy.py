@@ -43,7 +43,7 @@ SCENARIO = [
 def run(srcDir, outPath):
     sys.path.insert(0, HERE)
     import harness
-    rig = harness.boot(srcDir, roles=False)
+    rig = harness.boot(srcDir, roles=False, model="RGB176")
     rig.reset()
     t0 = None
     for query, wait in SCENARIO:

@@ -108,6 +108,14 @@ Animations can play on three layers above the sliders and presets. **Override** 
 
 While a sequence or effect is driving a light, moving a slider or recalling a preset doesn't change that light straight away: the change becomes what the light returns to afterwards. Lights the sequence isn't using, and Locked lights, change immediately.
 
+### Simulated lights and the Stage window
+
+Global Preferences can add a simulated rig of 1 to 4 lights (key, fill, rim, ambient), plus an optional CCT-only light, for trying sequences, effects, HTTP commands and Stream Deck buttons without hardware. Simulated lights take the same Bluetooth packets as real ones, answer status queries, and can be renamed, given roles and limits, and used alongside real lights. The setting takes effect at the next start; launching with `--simulate` (or `--simulate=2` and so on) does the same for one run, and `--simulate-faults` makes them drop the odd write and disconnect now and then, for testing reconnects.
+
+The **Stage** button opens a window with one tile per light, in sweep order, showing roughly what each light is showing and which layer is driving it. Simulated lights show what they actually received; real lights show what was last sent to them. The light table also shows a colour swatch beside each light. Colours on screen are approximations of the real output.
+
+The **Render** button on the Sequences panel draws a whole sequence as a strip, one row per light with time running left to right, without playing it. It applies each light's brightness limits, Locked flag and CCT-only fallback, so it shows what the lights would really do.
+
 ## Remote control
 
 Turn on the HTTP server from the toolbar, or have it start with the app in Global Preferences. The dashboard is at `http://localhost:8080/` (the port is configurable), and the toolbar's WebUI button opens it.
@@ -139,6 +147,8 @@ For richer control, POST JSON to `/NeewerLux/batch` (several lights in one reque
 { "action": "play", "name": "Concert Sweep", "speed": 1.0, "loop": true, "maxLoops": 3, "revert": true }
 { "action": "play", "name": "Heartbeat", "layer": "effect", "mode": "queue", "target": "@rim" }
 ```
+
+`{"action": "render", "name": "...", "format": "png"}` on `/NeewerLux/sequence` returns the render strip as an image, and `"format": "json"` (the default) returns each light's colour changes over time, which is what a script or an AI model generating sequences should check its work against. `GET /NeewerLux/doAction?status_json` includes each light's current colour.
 
 [docs/SEQUENCE_FORMAT.md](docs/SEQUENCE_FORMAT.md) lists every sequence command and layer option.
 

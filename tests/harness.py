@@ -5,8 +5,10 @@ folder (so tests never write into the repo), imports it, replaces the four light
 with stand-ins whose write_gatt_char records (monotonic time, MAC, bytes), starts
 the real worker thread and the real HTTP server on a free local port.
 
-The stand-in lights use the model name NEEWER-RGB176, which the worker already skips
-for power/channel reads, so no BLE reads are needed.
+The stand-in lights are neewerlux_sim simulated lights, so packets are decoded, power and
+channel queries are answered through notifications, and the worker's status polling runs.
+compare_legacy.py boots with model "RGB176" (a light that skips status polling) because
+v1.3.0's polling would otherwise add timing noise to an exact comparison.
 """
 import importlib.util
 import json
@@ -19,7 +21,6 @@ import time
 import urllib.parse
 import urllib.request
 
-LIGHT_NAME = "NEEWER-RGB176"
 # Robert's rig: front right key, front left fill, rear right rim, rear left ambient
 RIG = [
     ("AA:00:00:00:00:01", "Key", {"role": "key", "side": "right", "order": 4}),
@@ -27,7 +28,7 @@ RIG = [
     ("AA:00:00:00:00:03", "Rim", {"role": "rim", "side": "right", "order": 3}),
     ("AA:00:00:00:00:04", "Ambient", {"role": "ambient", "side": "left", "order": 2}),
 ]
-START_BYTES = [120, 135, 2, 20, 56, 157]  # CCT 5600K 20%
+START_BYTES = [120, 135, 2, 20, 56, 77]  # CCT 5600K 20%
 
 
 class Recorder:
@@ -36,6 +37,8 @@ class Recorder:
         self.writes = []
 
     def add(self, mac, data):
+        if len(data) > 1 and data[1] in (132, 133):
+            return  # status queries from the worker's poll, not light changes
         with self.lock:
             self.writes.append((time.monotonic(), mac, list(data)))
 
@@ -54,20 +57,16 @@ class Recorder:
         return None
 
 
-class FakeDevice:
-    def __init__(self, address):
-        self.address = address
-        self.name = LIGHT_NAME
-
-
-class FakeClient:
-    def __init__(self, address, recorder):
-        self.address = address
-        self.recorder = recorder
-        self.is_connected = True
-
-    async def write_gatt_char(self, uuid, data, response=False):
-        self.recorder.add(self.address, data)
+def _simModule(nl):
+    """The simulator module NeewerLux itself imported (so its isinstance checks see our
+    lights), or this checkout's copy when booting a version that predates it."""
+    if hasattr(nl, "sim"):
+        return nl.sim
+    spec = importlib.util.spec_from_file_location("neewerlux_sim_harness",
+                                                  os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "neewerlux_sim.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 class Rig:
@@ -147,7 +146,7 @@ def _copyTree(src, dst):
     os.makedirs(os.path.join(dst, "light_prefs"), exist_ok=True)
 
 
-def boot(srcDir, verbose=False, roles=True):
+def boot(srcDir, verbose=False, roles=True, model="RGB660"):
     workdir = tempfile.mkdtemp(prefix="nlharness_")
     _copyTree(srcDir, workdir)
     sys.argv = [os.path.join(workdir, "NeewerLux.py")]
@@ -164,10 +163,14 @@ def boot(srcDir, verbose=False, roles=True):
     nl.setUpAsyncio()
 
     rec = Recorder()
+    simLib = _simModule(nl)
     lights = []
     for i, (mac, name, prefs) in enumerate(RIG):
-        lights.append([FakeDevice(mac), FakeClient(mac, rec), "", list(START_BYTES), [3200, 5600], False, True,
-                       ["---", "---"], 0, -50])
+        device = simLib.SimDevice(mac, "NEEWER-" + model, latencyMs=(1, 3))
+        device.onWrite = rec.add
+        client = device.makeClient()
+        client._connected = True
+        lights.append([device, client, "", list(START_BYTES), [3200, 5600], False, True, ["---", "---"], 0, -50])
     nl.availableLights = lights
     nl.loadAllAnimations()
     nl.loadLightAliases()

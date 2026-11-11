@@ -148,6 +148,9 @@ renumbered or replaced.
   when the swing is more than about 10 brightness points, and avoid rapid alternation
   involving saturated red.
 - Validate with the validate action and fix every error before saving.
+- Then render it (below) and look at the result: long stretches where nothing changes,
+  lights that never get a cue, or the key light swinging around are easy to spot in the
+  data, and easier still in the image strip if you can read images.
 
 ### JSON Schema
 
@@ -280,7 +283,37 @@ POST `/NeewerLux/sequence` (body up to 256 KB):
 {"action": "list"}
 {"action": "validate", "sequence": {...}}
 {"action": "save", "sequence": {...}, "overwrite": false}
+{"action": "render", "name": "...", "step_ms": 50, "start_ms": 0, "end_ms": 60000}
+{"action": "render", "sequence": {...}, "format": "png", "width": 1600}
 ```
+
+### Render
+
+Render plays a sequence on a simulated clock against the lights NeewerLux currently has
+(real or simulated) and reports what each light would show, without sending anything and
+without waiting in real time. Each light's CCT-only fallback, brightness limits and Locked
+flag are applied, and lights no cue covers show their current state, exactly as in
+playback. Optional fields: `step_ms` (sampling interval, default one frame at the
+sequence's `fps`), `start_ms` and `end_ms`.
+
+The default JSON reply:
+
+```
+{"success": true, "sequence": "...", "duration_ms": 40000, "start_ms": 0, "end_ms": 40000, "step_ms": 50,
+ "lights": [{"id": "1", "name": "Key Light", "role": "key", "side": "right", "locked": false, "simulated": false}, ...],
+ "changes": {"1": [[0, "#ffd5b0", 55, "CCT", "sequence"], [32000, "#ffd5b0", 30, "CCT", "sequence"], ...], ...},
+ "cues": [{"index": 0, "at_ms": 0, "duration_ms": 0, "target": "@key", "kind": "state", "what": "CCT 4500K 55%, fade 1000 ms", "label": "..."}, ...],
+ "warnings": []}
+```
+
+Each change is `[time_ms, colour, brightness, mode, source]`, listed only when something
+changes; `source` is `sequence` when a cue drives the light and `base` when it shows its
+pre-sequence state. Colours are approximate screen colours (brightness included), meant
+for judging a show, not for colour matching.
+
+`"format": "png"` returns the same render as an image strip, one row per light with cue
+starts marked. The image needs the NeewerLux window running; a headless `--http` install
+returns an error saying so and the JSON form still works.
 
 ## Effects and other animations on top of a sequence
 

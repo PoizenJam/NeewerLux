@@ -420,6 +420,10 @@ class Ui_MainWindow(object):
         self.selectAllButton = QPushButton("Select All")
         self.selectAllButton.setToolTip("Select all lights in the table")
         toolbar.addWidget(self.selectAllButton)
+        self.stageButton = QPushButton("Stage")
+        self.stageButton.setToolTip("Open the Stage window: every light's current colour at a glance,\n"
+            "including simulated lights, and which layer is driving it")
+        toolbar.addWidget(self.stageButton)
 
         toolbar.addStretch(1)
 
@@ -634,7 +638,9 @@ class Ui_MainWindow(object):
         self.seqStopButton = QPushButton("\u25A0 Stop")
         self.seqReloadButton = QPushButton("Reload")
         self.seqReloadButton.setToolTip("Reload sequence files from light_prefs/sequences")
-        for b in [self.seqPlayButton, self.seqPauseButton, self.seqStopButton, self.seqReloadButton]:
+        self.seqRenderButton = QPushButton("Render")
+        self.seqRenderButton.setToolTip("Show the whole sequence as a strip, one row per light, without playing it")
+        for b in [self.seqPlayButton, self.seqPauseButton, self.seqStopButton, self.seqRenderButton, self.seqReloadButton]:
             seqRow.addWidget(b)
         animLeft.addLayout(seqRow)
         self.seqStatusLabel = QLabel("No sequence playing")
@@ -842,6 +848,13 @@ class Ui_MainWindow(object):
         self.seqFrameRateSpin.setToolTip("Updates per second for sequences that don't set their own 'fps'.\nSequences always use the synchronized (parallel) send.")
         self.effectMaxSecondsSpin = QSpinBox(); self.effectMaxSecondsSpin.setRange(1, 600); self.effectMaxSecondsSpin.setValue(30); self.effectMaxSecondsSpin.setSuffix(" s")
         self.effectMaxSecondsSpin.setToolTip("Effect-layer animations that loop forever stop after this long,\nso one effect can't hold up the queue")
+        self.simulatedLightsCombo = QComboBox()
+        self.simulatedLightsCombo.addItems(["Off", "1 light (key)", "2 lights (key, fill)", "3 lights (key, fill, rim)", "4 lights (key, fill, rim, ambient)"])
+        self.simulatedLightsCombo.setToolTip("Adds virtual lights that behave like real ones, for trying sequences, effects and\n"
+            "HTTP commands without hardware. They show in the light table and the Stage window\n"
+            "and can be used alongside real lights. Takes effect the next time NeewerLux starts.\n"
+            "Launching with --simulate=N does the same for one run only.")
+        self.simulatedCCTOnlyCheck = QCheckBox("Also add a CCT-only light (tests the CCT-only fallback)")
         self.maxNumOfAttempts_field = QLineEdit(); self.maxNumOfAttempts_field.setFixedWidth(50)
         self.acceptable_HTTP_IPs_field = QTextEdit(); self.acceptable_HTTP_IPs_field.setFixedHeight(70)
         self.whiteListedMACs_field = QTextEdit(); self.whiteListedMACs_field.setFixedHeight(70)
@@ -937,6 +950,10 @@ class Ui_MainWindow(object):
         self.globalPrefsLay.addRow("Default min brightness:", self.envMinBriSpin)
         self.globalPrefsLay.addRow("Sequence frame rate:", self.seqFrameRateSpin)
         self.globalPrefsLay.addRow("Looping effect time limit:", self.effectMaxSecondsSpin)
+
+        self.globalPrefsLay.addRow(QLabel("<br><strong>Simulated Lights</strong>"))
+        self.globalPrefsLay.addRow("Simulated rig:", self.simulatedLightsCombo)
+        self.globalPrefsLay.addRow("", self.simulatedCCTOnlyCheck)
 
         self.globalPrefsLay.addRow(QLabel("<br><strong>HTTP Server</strong>"))
         self.globalPrefsLay.addRow(self.httpAutoStart_check)
