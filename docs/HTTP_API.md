@@ -25,7 +25,7 @@ Wherever a light is named (`light=`, the `light` field of a batch command, anima
 
 ### The flash guard
 
-On by default, every light is kept to at most 3 flashes a second (the WCAG limit for photosensitive seizures): a change that would flash faster is held back until it's allowed. This applies to everything sent over HTTP, so a fast animation or a burst of commands plays slower than asked; `status_json` reports how many changes were held. It can be turned off in Global Preferences or with `set_global` `{"flashGuardEnabled": false}`.
+On by default, every light is kept to at most 3 flashes a second (the WCAG limit for photosensitive seizures): changes are spaced evenly, and one that would come too soon is held back and sent (as the light's latest value) once it's allowed. This applies to everything sent over HTTP, so a fast animation or a burst of commands plays slower than asked; `status_json` reports how many changes were held. It can be turned off in Global Preferences or with `set_global` `{"flashGuardEnabled": false}`.
 
 ### Units
 

@@ -252,6 +252,7 @@ lightShowPrefs = {}            # {MAC: {"role", "side", "order", "eyeline", "max
 _lastWritten = {}              # {MAC: bytes last actually written, after CCT-only conversion and limits}, for display
 API_VERSION = 2                # HTTP API contract version (docs/HTTP_API.md); v1.3.0 and earlier count as 1
 flashGuard = show.FlashGuard() # photosensitivity limit on what is actually sent (flashGuardEnabled)
+_flashHeld = {}                # {light index: time a value was held back}; the worker resends it once allowed
 _pendingSends = set()          # light indices whose stored value ([3]) still needs writing; latest value wins
 _pendingSendsLock = threading.Lock()
 _lightsOff = set()             # MACs whose last power command was OFF
@@ -5074,9 +5075,9 @@ async def readNotifyCharacteristic(selectedLight, diagCommand, typeOfData):
 
         # Look for the reply every 25 ms rather than sleeping a fixed 250 ms: lights answer in
         # a few ms, and while this runs the worker can't send anything else. Give up as soon as
-        # a light command is queued or a show starts (None: no answer this round, keep the old status)
+        # a light command is queued, the flash guard holds a value back, or a show starts (None: no answer this round, keep the old status)
         for _slice in range(10):
-            if _pendingSends or (showEngine is not None and showEngine.anyActive()):
+            if _pendingSends or _flashHeld or (showEngine is not None and showEngine.anyActive()):
                 return None
             data = _notifyData.get(mac)
             if data is not None:
@@ -5358,7 +5359,14 @@ def _flashAllowed(lightIdx, byteVal):
     shown = applyCCTFallback(lightIdx, byteVal)
     if shown is None:
         return True
-    return flashGuard.allow(availableLights[lightIdx][0].address, show.bytesToCommand(shown))
+    if flashGuard.allow(availableLights[lightIdx][0].address, show.bytesToCommand(shown), getLightDisplayState(lightIdx)[0]):
+        _flashHeld.pop(lightIdx, None)
+        return True
+    # remember it: if nothing newer comes (the last value of a fast dial, the end of a
+    # strobe), the worker sends the light's latest value as soon as the guard allows
+    _flashHeld[lightIdx] = time.monotonic()
+    workerWakeEvent.set()
+    return False
 
 
 def _recordWritten(lightIdx, byteVal):
@@ -5461,7 +5469,7 @@ def workerThread(_loop):
 
                 # CHECK EACH LIGHT AGAINST THE TABLE TO SEE IF THERE ARE CONNECTION ISSUES
                 for a in range(len(availableLights)):
-                    if threadAction == "" and not _pendingSends: # if we're not sending, then update the light info... (check this before scanning each light)
+                    if threadAction == "" and not _pendingSends and not _flashHeld: # if we're not sending, then update the light info... (check this before scanning each light)
                         if availableLights[a][1] != "": # if there is a Bleak object, then check to see if it's connected
                             if not availableLights[a][1].is_connected: # the light is disconnected, but we're reporting it isn't
                                 if hasGUI: mainWindow._tableUpdateSignal.emit(["", "", "NOT\nLINKED", "Light disconnected!"], a) # show the new status in the table
@@ -5595,12 +5603,23 @@ def workerThread(_loop):
                         if idx < len(availableLights) and availableLights[idx][3] is not None:
                             mainWindow._tableUpdateSignal.emit(["", "", "", updateStatus(True, availableLights[idx][3])], idx)
 
+        # VALUES THE FLASH GUARD HELD BACK: resend each light's latest value once allowed.
+        # fromShow=True: the value already passed the show/base arbitration when it was held.
+        if threadAction == "" and _flashHeld:
+            now = time.monotonic()
+            due = [i for i, t in list(_flashHeld.items()) if now - t >= 0.04 and i < len(availableLights)]
+            if due:
+                for i in due:
+                    _flashHeld.pop(i, None)
+                _loop.run_until_complete(parallelWriteToLights(due, fromShow=True))
+
         # SHOW ENGINE FRAMES: latest value per light, written once the worker is free
         if threadAction == "" and showEngine is not None and showEngine.hasPending():
             sendShowFrames(_loop, showEngine.takeMailbox())
 
-        # Sleep until next cycle, but wake immediately if animation signals us
-        workerWakeEvent.wait(timeout=0.25)
+        # Sleep until next cycle, but wake immediately if animation signals us (sooner while
+        # the flash guard holds a value back, so it goes out as soon as it's allowed)
+        workerWakeEvent.wait(timeout=0.05 if _flashHeld else 0.25)
         workerWakeEvent.clear()
 
 def sendShowFrames(_loop, frames):

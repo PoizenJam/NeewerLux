@@ -784,6 +784,7 @@ def t_commandsDontWaitForStatusPoll(rig):
     15.6 ms timer) a round takes a while. Light commands and show starts must not wait for it."""
     nl = rig.nl
     old = [l[0].latencyMs for l in nl.availableLights]
+    nl.flashGuardEnabled = False  # this test changes colour faster than the guard allows; it measures polling
     try:
         for l in nl.availableLights:
             l[0].latencyMs = (60, 60)  # each status query takes about 60 ms to answer
@@ -812,6 +813,7 @@ def t_commandsDontWaitForStatusPoll(rig):
     finally:
         for l, lat in zip(nl.availableLights, old):
             l[0].latencyMs = lat
+        nl.flashGuardEnabled = True
 
 
 # ----------------------------------------------------------------- 1.3.3: editors over HTTP
@@ -927,6 +929,13 @@ def t_flashGuardLimitsOutput(rig):
         RESULTS.append("    6 flashes/s animation with the guard on: lights got %.1f flashes/s at most, %d frames held"
                        % (got["flashes"], st["held"] - held0))
         check(got["flashes"] <= 3, "the guard let %.1f flashes a second through" % got["flashes"])
+        # evenly spread, not three quick flashes then a pause: gaps between brightness changes
+        show = nl.show
+        lum = [(t, show.flashLevel(show.bytesToCommand(list(d)))[0]) for t, d in writesFor(rig, FILL, t0) if d[1] in (134, 135)]
+        changes = [t for (_, a), (t, b) in zip(lum, lum[1:]) if abs(a - b) >= 0.1]  # time of the write that changed it
+        gaps = sorted(b - a for a, b in zip(changes, changes[1:]))
+        RESULTS.append("    gaps between flashes: shortest %.0f ms, median %.0f ms" % (gaps[0] * 1000, gaps[len(gaps) // 2] * 1000))
+        check(gaps and gaps[0] >= 0.17, "flashes should be spread out, shortest gap %.0f ms" % (gaps[0] * 1000))
         check(st["enabled"] and st["held"] > held0, "status_json reports held frames")
         # off: the same animation flashes at its own rate (so the guard is what limited it)
         r = rig.post("/NeewerLux/settings", {"action": "set_global", "settings": {"flashGuardEnabled": False}})

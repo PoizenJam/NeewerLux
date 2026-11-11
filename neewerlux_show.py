@@ -201,19 +201,26 @@ class FlashCounter:
             return 1 if delta > 0 else -1
         return 0
 
-    def check(self, t, level, limit=FLASH_LIMIT_PER_SECOND, window=1.0):
-        """True if moving to level at time t would exceed the limit in the last window."""
+    def check(self, t, level, limit=FLASH_LIMIT_PER_SECOND, window=1.0, paced=False):
+        """True if moving to level at time t would exceed the limit in the last window.
+        paced: also keep transitions evenly spaced (at least window / (2 x limit) apart), so a
+        fast strobe is spread out into a slower, even one instead of bursts and pauses."""
         if level is None:
             return False
         lum, red = level
+        gap = window / (2.0 * limit)
         d = self._wouldTransition(lum)
         if d and d != self.direction:
             recent = [x for x in self.transitions if t - x < window]
             if (len(recent) + 1) / 2.0 > limit:
                 return True
+            if paced and self.transitions and t - self.transitions[-1] < gap:
+                return True
         if self.lastRed is not None and red != self.lastRed:
             recent = [x for x in self.redTransitions if t - x < window]
             if (len(recent) + 1) / 2.0 > limit:
+                return True
+            if paced and self.redTransitions and t - self.redTransitions[-1] < gap:
                 return True
         return False
 
@@ -267,8 +274,9 @@ def analyzeFlashes(samples):
 
 class FlashGuard:
     """Runtime limit applied to what is actually sent to each light. A frame that would
-    push a light past the limit is held back (the light keeps its last value until a frame
-    is allowed), so a fast strobe becomes a slower one rather than a different picture."""
+    push a light past the limit, or come sooner than an even spacing allows, is held back
+    (the light keeps its last value until a frame is allowed), so a fast strobe becomes a
+    slower, even one rather than bursts of three with pauses between."""
 
     def __init__(self, limit=FLASH_LIMIT_PER_SECOND, clock=None):
         import time as _time
@@ -277,11 +285,16 @@ class FlashGuard:
         self.counters = {}
         self.held = 0
 
-    def allow(self, key, cmd):
+    def allow(self, key, cmd, current=None):
+        """current: what the light shows now, used the first time a light is seen so the
+        first change counts against it."""
         level = flashLevel(cmd)
-        counter = self.counters.setdefault(key, FlashCounter())
         t = self.clock()
-        if counter.check(t, level, self.limit, GUARD_WINDOW_S):
+        counter = self.counters.get(key)
+        if counter is None:
+            counter = self.counters[key] = FlashCounter()
+            counter.add(t - 10.0, flashLevel(current))
+        if counter.check(t, level, self.limit, GUARD_WINDOW_S, paced=True):
             self.held += 1
             return False
         counter.add(t, level)
