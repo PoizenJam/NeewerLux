@@ -241,7 +241,7 @@ def t_effectQueueReplaceFull(rig):
     check(r["result"] == "queued", "second effect should queue: " + str(r))
     st = rig.getJSON("status_json")
     check(st["layers"]["effect"]["name"] == "Strobe" and st["layers"]["effect_queue"] == ["Police Flash"], "queue state wrong: " + json.dumps(st["layers"]))
-    time.sleep(0.7)
+    time.sleep(1.5)  # three Strobe loops (400 ms each since 1.3.3 slowed it under 3 flashes a second)
     st = rig.getJSON("status_json")
     check(st["layers"]["effect"] and st["layers"]["effect"]["name"] == "Police Flash", "queued effect did not start")
     r = rig.post("/NeewerLux/animate", {"action": "play", "name": "Heartbeat", "layer": "effect", "mode": "replace"})
@@ -269,16 +269,16 @@ def t_effectCap(rig):
 
 def t_overrideOverSequence(rig):
     rig.post("/NeewerLux/sequence", {"action": "play", "sequence": stepSequence("ovr", [0, 60, 120, 180, 240, 300], 500)}, 0.3)
-    rig.get("animate=Strobe|1|10|100|true|2", 0.6)  # legacy URL = override layer
+    rig.get("animate=Strobe|1|10|100|true|2", 1.1)  # legacy URL = override layer; two 400 ms loops
     last = rig.rec.last(rig.mac(FILL))
-    check(last[5] == 100 and hueOf(last) in (60, 120), "after the override ends the light must return to the sequence, got " + str(last))
+    check(last[5] == 100 and hueOf(last) in (60, 120, 180), "after the override ends the light must return to the sequence, got " + str(last))
     check(rig.getJSON("status_json")["sequence"]["state"] == "playing", "sequence keeps running under an override")
 
 
 def t_onInterruptPause(rig):
     seq = stepSequence("oip", [0, 90, 180, 270], 500, on_interrupt="pause")
     rig.post("/NeewerLux/sequence", {"action": "play", "sequence": seq}, 0.3)
-    rig.get("animate=Strobe|1|10|100|true|10||effect", 0.2)  # 10 loops of 100 ms (v1.3.0 hold timing)
+    rig.get("animate=Strobe|1|10|100|true|2||effect", 0.2)  # 2 loops of 400 ms
     p1 = rig.getJSON("status_json")["sequence"]["position_ms"]
     time.sleep(0.3)
     p2 = rig.getJSON("status_json")["sequence"]["position_ms"]
@@ -405,7 +405,7 @@ def t_guidSidecar(rig):
 
 def t_statusShape(rig):
     st = rig.getJSON("status_json")
-    check(set(st) == {"apiVersion", "layers", "sequence", "lights"}, "status keys")
+    check(set(st) == {"apiVersion", "layers", "sequence", "lights", "flashGuard"}, "status keys")
     check([l["role"] for l in st["lights"]] == ["key", "fill", "rim", "ambient"], "roles in status")
     check(all(l["layer"] == "base" for l in st["lights"]), "idle lights are on base")
 
@@ -900,6 +900,95 @@ def t_sequenceEditAPI(rig):
     check("Web Seq 2" not in nl.savedSequences and not nl._sequenceFilesNamed("Web Seq 2"), "deleted")
 
 
+# ----------------------------------------------------------------- 1.3.3: flash guard
+
+FAST = {"name": "Harness Fast Strobe", "loop": True, "keyframes": [
+    {"hold_ms": 80, "fade_ms": 0, "lights": {"*": {"mode": "HSI", "hue": 0, "sat": 0, "bri": 100}}},
+    {"hold_ms": 80, "fade_ms": 0, "lights": {"*": {"mode": "HSI", "hue": 0, "sat": 0, "bri": 0}}}]}
+
+
+def _writtenFlashes(rig, i, since):
+    show = rig.nl.show
+    samples = [(t, show.bytesToCommand(list(d))) for t, d in writesFor(rig, i, since) if d[1] in (134, 135)]
+    return show.analyzeFlashes(samples)
+
+
+def t_flashGuardLimitsOutput(rig):
+    nl = rig.nl
+    rig.post("/NeewerLux/animate", {"action": "save", "animation": FAST, "overwrite": True})
+    try:
+        check(nl.flashGuardEnabled, "the flash guard is on by default")
+        held0 = rig.getJSON("status_json")["flashGuard"]["held"]
+        t0 = time.monotonic()
+        rig.post("/NeewerLux/animate", {"action": "play", "name": FAST["name"], "loop": True, "layer": "effect", "rate": 20}, 3.0)
+        rig.post("/NeewerLux/animate", {"action": "stop", "layer": "effect"}, 0.3)
+        got = _writtenFlashes(rig, FILL, t0)
+        st = rig.getJSON("status_json")["flashGuard"]
+        RESULTS.append("    6 flashes/s animation with the guard on: lights got %.1f flashes/s at most, %d frames held"
+                       % (got["flashes"], st["held"] - held0))
+        check(got["flashes"] <= 3, "the guard let %.1f flashes a second through" % got["flashes"])
+        check(st["enabled"] and st["held"] > held0, "status_json reports held frames")
+        # off: the same animation flashes at its own rate (so the guard is what limited it)
+        r = rig.post("/NeewerLux/settings", {"action": "set_global", "settings": {"flashGuardEnabled": False}})
+        check(r["success"] and not nl.flashGuardEnabled, "turning it off over HTTP")
+        check("flashGuard=0" in open(nl.globalPrefsFile, encoding="utf-8").read(), "off is saved as flashGuard=0")
+        t1 = time.monotonic()
+        rig.post("/NeewerLux/animate", {"action": "play", "name": FAST["name"], "loop": True, "layer": "effect", "rate": 20}, 2.0)
+        rig.post("/NeewerLux/animate", {"action": "stop", "layer": "effect"}, 0.3)
+        off = _writtenFlashes(rig, FILL, t1)
+        check(off["flashes"] > 4, "with the guard off the animation flashes at its own rate, got %.1f" % off["flashes"])
+    finally:
+        rig.post("/NeewerLux/settings", {"action": "set_global", "settings": {"flashGuardEnabled": True}})
+        rig.post("/NeewerLux/animate", {"action": "delete", "name": FAST["name"]})
+    check(nl.flashGuardEnabled and not os.path.exists(nl.globalPrefsFile), "back on: the default, nothing saved")
+
+
+def t_flashGuardRedFlashes(rig):
+    """Saturated red alternating with blue isn't a big luminance change for a light at full
+    brightness, but WCAG counts it as a red flash."""
+    nl = rig.nl
+    red = {"name": "Harness Red Blue", "loop": True, "keyframes": [
+        {"hold_ms": 100, "fade_ms": 0, "lights": {"*": {"mode": "HSI", "hue": 0, "sat": 100, "bri": 100}}},
+        {"hold_ms": 100, "fade_ms": 0, "lights": {"*": {"mode": "HSI", "hue": 240, "sat": 100, "bri": 100}}}]}
+    rig.post("/NeewerLux/animate", {"action": "save", "animation": red, "overwrite": True})
+    try:
+        t0 = time.monotonic()
+        rig.post("/NeewerLux/animate", {"action": "play", "name": red["name"], "loop": True, "layer": "effect", "rate": 20}, 2.5)
+        rig.post("/NeewerLux/animate", {"action": "stop", "layer": "effect"}, 0.3)
+        got = _writtenFlashes(rig, FILL, t0)
+        check(got["red"] <= 3 and got["flashes"] <= 3, "red flashes got through: " + str(got))
+    finally:
+        rig.post("/NeewerLux/animate", {"action": "delete", "name": red["name"]})
+
+
+def t_shippedContentUnderFlashLimit(rig):
+    """No shipped animation (at 1x speed, as the GUI, URLs and the dashboard play them by
+    default) or sequence flashes more than 3 times a second, before the guard."""
+    nl = rig.nl
+    over = []
+    worst = (0.0, "")
+    for name in sorted(nl.savedAnimations):
+        if name.startswith("Harness "):
+            continue
+        r = nl.animationFlashReport(name, 1.0)
+        check(r is not None, "couldn't check " + name)
+        rate = max(r["worst"], r["worstRed"])
+        worst = max(worst, (rate, name))
+        if rate > 3:
+            over.append((name, r["worst"], r["worstRed"]))
+    for name in sorted(nl.savedSequences):
+        r = nl.renderSequence(name, stepMs=10)
+        if r.get("success"):
+            rate = max(r["flashes"]["worst"], r["flashes"]["worstRed"])
+            worst = max(worst, (rate, name))
+            if rate > 3:
+                over.append((name, r["flashes"]["worst"], r["flashes"]["worstRed"]))
+    RESULTS.append("    shipped content: highest flash rate %.1f/s (%s), %d animations, %d sequences checked"
+                   % (worst[0], worst[1], len(nl.savedAnimations), len(nl.savedSequences)))
+    check(not over, "shipped content over 3 flashes a second: " + str(over))
+    check(rig.post("/NeewerLux/sequence", {"action": "render", "name": "Example - Four Light Demo"})["flashes"]["limit"] == 3, "render reports flashes")
+
+
 TESTS = [t_maxBrightnessHTTP, t_maxBrightnessAnimationAndSequence, t_minBrightness, t_globalDefaultLimit,
          t_slidersExempt, t_lockedLight, t_roleTargets, t_effectOverPartOfRigRejoinsInSync, t_revertToPresetAtEnd,
          t_endPreset, t_holdAtEnd, t_pauseRevertsAndResumes, t_seekAndSetPosition, t_effectQueueReplaceFull,
@@ -912,6 +1001,7 @@ TESTS = [t_maxBrightnessHTTP, t_maxBrightnessAnimationAndSequence, t_minBrightne
          t_batchKelvin, t_batchCoalescesUnderLoad, t_getDuringBusyWorkerNotDropped, t_batchStopsOverrideAnimation,
          t_batchDuringSequenceBecomesRevertTarget, t_listJsonStructured,
          t_presetEditAPI, t_animationEditAPI, t_sequenceEditAPI, t_commandsDontWaitForStatusPoll,
+         t_flashGuardLimitsOutput, t_flashGuardRedFlashes, t_shippedContentUnderFlashLimit,
          t_addSimulatedRig]
 
 

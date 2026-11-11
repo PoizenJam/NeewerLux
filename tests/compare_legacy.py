@@ -5,6 +5,10 @@ Each run is its own process through the harness (fake Bluetooth, real worker, re
 HTTP server). Per light, consecutive duplicate writes are collapsed and the value
 sequences must match one v1.3.0 run exactly; v1.3.0 runs several times because it is
 not deterministic. Timing is reported, not compared, because v1.3.0's engine drifts.
+
+This compares the engines, so the current code runs with v1.3.0's animation files and with
+the flash guard off: 1.3.3 slowed the shipped animations that flashed more than 3 times a
+second and added the guard, and tests/test_show.py checks both of those.
 """
 import json
 import os
@@ -40,10 +44,19 @@ SCENARIO = [
 # frame. The current code completes the revert. tests/test_show.py checks the new behaviour.
 
 
-def run(srcDir, outPath):
+def run(srcDir, outPath, animSrc=None):
     sys.path.insert(0, HERE)
     import harness
+    import shutil
     rig = harness.boot(srcDir, roles=False, model="RGB176")
+    if hasattr(rig.nl, "flashGuardEnabled"):
+        rig.nl.flashGuardEnabled = False
+    if animSrc:
+        src = os.path.join(animSrc, "light_prefs", "animations")
+        dst = os.path.join(rig.workdir, "light_prefs", "animations")
+        for name in os.listdir(src):
+            shutil.copy2(os.path.join(src, name), os.path.join(dst, name))
+        rig.nl.loadAllAnimations()
     rig.reset()
     t0 = None
     for query, wait in SCENARIO:
@@ -62,9 +75,9 @@ def collapse(trace):
     return perLight
 
 
-def trace(src, label):
+def trace(src, label, animSrc=None):
     out = os.path.join(HERE, "_trace_" + label + ".json")
-    subprocess.run([sys.executable, "-I", os.path.abspath(__file__), "--run", src, out], check=True)
+    subprocess.run([sys.executable, "-I", os.path.abspath(__file__), "--run", src, out] + ([animSrc] if animSrc else []), check=True)
     t = collapse(json.load(open(out)))
     os.remove(out)
     return t
@@ -76,7 +89,7 @@ def values(t):
 
 def main():
     if len(sys.argv) >= 4 and sys.argv[1] == "--run":
-        run(sys.argv[2], sys.argv[3])
+        run(sys.argv[2], sys.argv[3], sys.argv[4] if len(sys.argv) > 4 else None)
         return 0
     if len(sys.argv) < 2:
         print(__doc__)
@@ -85,7 +98,7 @@ def main():
     # v1.3.0 is not deterministic here (its animation thread and the worker race over
     # threadAction), so it runs several times and the current code must match one run exactly.
     legacyRuns = [trace(legacyDir, "v1_3_0_" + str(i)) for i in range(LEGACY_RUNS)]
-    current = trace(ROOT, "current")
+    current = trace(ROOT, "current", legacyDir)
     distinct = []
     for r in legacyRuns:
         if values(r) not in [values(x) for x in distinct]:

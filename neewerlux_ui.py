@@ -624,38 +624,8 @@ class Ui_MainWindow(object):
         self.animList = QListWidget()
         self.animList.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         animLeft = QVBoxLayout(); animLeft.setSpacing(4)
-        animLeft.addWidget(self.animList, 3)
+        animLeft.addWidget(self.animList, 1)
 
-        # Sequences: list, transport, position readout, and the timeline editor's buttons
-        seqHeader = QLabel("<strong>Sequences</strong>")
-        animLeft.addWidget(seqHeader)
-        self.seqList = QListWidget()
-        self.seqList.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        animLeft.addWidget(self.seqList, 1)
-        seqRow = QHBoxLayout()
-        self.seqPlayButton = QPushButton("\u25B6 Play")
-        self.seqPauseButton = QPushButton("Pause")
-        self.seqStopButton = QPushButton("\u25A0 Stop")
-        self.seqReloadButton = QPushButton("Reload")
-        self.seqReloadButton.setToolTip("Reload sequence files from light_prefs/sequences")
-        self.seqRenderButton = QPushButton("Render")
-        self.seqRenderButton.setToolTip("Show the whole sequence as a strip, one row per light, without playing it")
-        for b in [self.seqPlayButton, self.seqPauseButton, self.seqStopButton, self.seqRenderButton, self.seqReloadButton]:
-            seqRow.addWidget(b)
-        animLeft.addLayout(seqRow)
-        seqEditRow = QHBoxLayout()
-        self.seqNewButton = QPushButton("+New")
-        self.seqNewButton.setToolTip("Open the timeline editor on a new sequence")
-        self.seqEditButton = QPushButton("Edit")
-        self.seqEditButton.setToolTip("Open the selected sequence in the timeline editor")
-        self.seqDuplicateButton = QPushButton("Duplicate")
-        self.seqDeleteButton = QPushButton("Delete")
-        for b in [self.seqNewButton, self.seqEditButton, self.seqDuplicateButton, self.seqDeleteButton]:
-            seqEditRow.addWidget(b)
-        animLeft.addLayout(seqEditRow)
-        self.seqStatusLabel = QLabel("No sequence playing")
-        self.seqStatusLabel.setAlignment(Qt.AlignCenter)
-        animLeft.addWidget(self.seqStatusLabel)
         animLay.addLayout(animLeft, 1)
 
         animCtrlScroll = QScrollArea()
@@ -731,6 +701,53 @@ class Ui_MainWindow(object):
         animCtrlScroll.setWidget(animCtrlWidget)
         animLay.addWidget(animCtrlScroll)
         self.ColorModeTabWidget.addTab(self.animTab, "Animations")
+
+        # --- SEQUENCES ---
+        self.seqTab = QWidget()
+        seqLay = QHBoxLayout(self.seqTab)
+        seqLay.setContentsMargins(8, 8, 8, 8)
+        seqLay.setSpacing(8)
+        seqLeft = QVBoxLayout(); seqLeft.setSpacing(4)
+        self.seqList = QListWidget()
+        self.seqList.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        seqLeft.addWidget(self.seqList, 1)
+        seqRow = QHBoxLayout()
+        self.seqPlayButton = QPushButton("\u25B6 Play")
+        self.seqPauseButton = QPushButton("Pause")
+        self.seqStopButton = QPushButton("\u25A0 Stop")
+        self.seqReloadButton = QPushButton("Reload")
+        self.seqReloadButton.setToolTip("Reload sequence files from light_prefs/sequences")
+        self.seqRenderButton = QPushButton("Render")
+        self.seqRenderButton.setToolTip("Show the whole sequence as a strip, one row per light, without playing it")
+        for b in [self.seqPlayButton, self.seqPauseButton, self.seqStopButton, self.seqRenderButton, self.seqReloadButton]:
+            seqRow.addWidget(b)
+        seqLeft.addLayout(seqRow)
+        seqEditRow = QHBoxLayout()
+        self.seqNewButton = QPushButton("+New")
+        self.seqNewButton.setToolTip("Open the timeline editor on a new sequence, blank or from a starter")
+        self.seqEditButton = QPushButton("Edit")
+        self.seqEditButton.setToolTip("Open the selected sequence in the timeline editor")
+        self.seqDuplicateButton = QPushButton("Duplicate")
+        self.seqDeleteButton = QPushButton("Delete")
+        for b in [self.seqNewButton, self.seqEditButton, self.seqDuplicateButton, self.seqDeleteButton]:
+            seqEditRow.addWidget(b)
+        seqLeft.addLayout(seqEditRow)
+        self.seqStatusLabel = QLabel("No sequence playing")
+        self.seqStatusLabel.setAlignment(Qt.AlignCenter)
+        seqLeft.addWidget(self.seqStatusLabel)
+        seqLay.addLayout(seqLeft, 3)
+        # details of the selected sequence
+        self.seqInfoLabel = QLabel("Select a sequence to see its details.")
+        self.seqInfoLabel.setWordWrap(True)
+        self.seqInfoLabel.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        self.seqInfoLabel.setTextFormat(Qt.RichText)
+        self.seqInfoLabel.setMinimumWidth(220)
+        seqInfoScroll = QScrollArea()
+        seqInfoScroll.setWidgetResizable(True)
+        seqInfoScroll.setFrameShape(QFrame.NoFrame)
+        seqInfoScroll.setWidget(self.seqInfoLabel)
+        seqLay.addWidget(seqInfoScroll, 2)
+        self.ColorModeTabWidget.addTab(self.seqTab, "Sequences")
 
         # --- LIGHT PREFS ---
         self.lightPrefs = QWidget()
@@ -854,6 +871,12 @@ class Ui_MainWindow(object):
         self.envMaxBriSpin.setToolTip("Default brightness ceiling for lights without their own limit.\nApplies to presets, HTTP, animations and sequences; the manual sliders are exempt.")
         self.envMinBriSpin = QSpinBox(); self.envMinBriSpin.setRange(0, 100); self.envMinBriSpin.setValue(0); self.envMinBriSpin.setSuffix("%")
         self.envMinBriSpin.setToolTip("Default brightness floor while a light is on (0% and OFF still pass)")
+        self.flashGuardCheck = QCheckBox("Flash guard: at most 3 flashes a second per light (recommended)")
+        self.flashGuardCheck.setChecked(True)
+        self.flashGuardCheck.setToolTip("Holds back changes that would make a light flash more than 3 times a second\n"
+                                        "(the WCAG limit for photosensitive seizures), from animations, sequences, effects,\n"
+                                        "presets and HTTP commands. The manual sliders are exempt. Scenes run inside the\n"
+                                        "light and can't be limited.")
         self.seqFrameRateSpin = QSpinBox(); self.seqFrameRateSpin.setRange(1, 30); self.seqFrameRateSpin.setValue(20); self.seqFrameRateSpin.setSuffix(" /s")
         self.seqFrameRateSpin.setToolTip("Updates per second for sequences that don't set their own 'fps'.\nSequences always use the synchronized (parallel) send.")
         self.effectMaxSecondsSpin = QSpinBox(); self.effectMaxSecondsSpin.setRange(1, 600); self.effectMaxSecondsSpin.setValue(30); self.effectMaxSecondsSpin.setSuffix(" s")
@@ -958,6 +981,7 @@ class Ui_MainWindow(object):
         self.globalPrefsLay.addRow(QLabel("<br><strong>Sequences and Effects</strong>"))
         self.globalPrefsLay.addRow("Default max brightness:", self.envMaxBriSpin)
         self.globalPrefsLay.addRow("Default min brightness:", self.envMinBriSpin)
+        self.globalPrefsLay.addRow("", self.flashGuardCheck)
         self.globalPrefsLay.addRow("Sequence frame rate:", self.seqFrameRateSpin)
         self.globalPrefsLay.addRow("Looping effect time limit:", self.effectMaxSecondsSpin)
 
@@ -1118,6 +1142,11 @@ Originally from <a href="https://github.com/keefo/NeewerLite">NeewerLite</a> by 
         self.logTextEdit.setMaximumBlockCount(2000)  # cap log at 2000 lines to prevent unbounded growth (CPU creep)
         logLay.addWidget(self.logTextEdit)
         self.ColorModeTabWidget.addTab(self.logTab, "Log")
+        # Tab positions by name, so code doesn't depend on the tab order
+        tabs = self.ColorModeTabWidget
+        self.TAB_ANIM, self.TAB_SEQ = tabs.indexOf(self.animTab), tabs.indexOf(self.seqTab)
+        self.TAB_LIGHTPREFS, self.TAB_GLOBALPREFS = tabs.indexOf(self.lightPrefs), tabs.indexOf(self.globalPrefs)
+        self.TAB_INFO, self.TAB_LOG = tabs.indexOf(self.infoTab), tabs.indexOf(self.logTab)
 
         # === ASSEMBLE ===
         bottomLay.addWidget(self.ColorModeTabWidget, 1)

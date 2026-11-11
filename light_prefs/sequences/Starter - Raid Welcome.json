@@ -1,0 +1,74 @@
+{
+  "format": 1,
+  "name": "Starter - Raid Welcome",
+  "description": "15 s welcome for a raid or big moment: a colour wash, a heartbeat on the rim lights, then back to how things were.",
+  "duration_ms": 15000,
+  "end": "revert",
+  "cues": [
+    {
+      "at_ms": 0,
+      "target": "@fill;@ambient;@practical",
+      "state": {
+        "mode": "HSI",
+        "hue": 300,
+        "sat": 90,
+        "bri": 70,
+        "fade_ms": 800
+      }
+    },
+    {
+      "at_ms": 0,
+      "target": "@rim",
+      "state": {
+        "mode": "HSI",
+        "hue": 300,
+        "sat": 90,
+        "bri": 70,
+        "fade_ms": 800
+      }
+    },
+    {
+      "at_ms": 1000,
+      "duration_ms": 6000,
+      "target": "@rim",
+      "clip": {
+        "name": "Heartbeat",
+        "fit": "loop",
+        "brightness": 85
+      },
+      "label": "heartbeat"
+    },
+    {
+      "at_ms": 2000,
+      "duration_ms": 6000,
+      "target": "@fill;@ambient",
+      "clip": {
+        "name": "Color Chase",
+        "fit": "loop",
+        "brightness": 70
+      }
+    },
+    {
+      "at_ms": 8000,
+      "target": "@fill;@ambient;@rim;@practical",
+      "state": {
+        "mode": "HSI",
+        "hue": 190,
+        "sat": 90,
+        "bri": 65,
+        "fade_ms": 1500
+      },
+      "label": "settle to cyan"
+    },
+    {
+      "at_ms": 12000,
+      "target": "@key",
+      "state": {
+        "mode": "CCT",
+        "temp": 50,
+        "bri": 60,
+        "fade_ms": 1000
+      }
+    }
+  ]
+}

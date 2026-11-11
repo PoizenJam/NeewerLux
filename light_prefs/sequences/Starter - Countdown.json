@@ -1,0 +1,233 @@
+{
+  "format": 1,
+  "name": "Starter - Countdown",
+  "description": "10 s countdown: one pulse a second, red to green, then bright white. Then back to how things were.",
+  "duration_ms": 11500,
+  "end": "revert",
+  "cues": [
+    {
+      "at_ms": 0,
+      "target": "*",
+      "state": {
+        "mode": "HSI",
+        "hue": 0,
+        "sat": 100,
+        "bri": 80
+      },
+      "label": "10"
+    },
+    {
+      "at_ms": 450,
+      "target": "*",
+      "state": {
+        "mode": "HSI",
+        "hue": 0,
+        "sat": 100,
+        "bri": 15,
+        "fade_ms": 400
+      }
+    },
+    {
+      "at_ms": 1000,
+      "target": "*",
+      "state": {
+        "mode": "HSI",
+        "hue": 13,
+        "sat": 100,
+        "bri": 80
+      }
+    },
+    {
+      "at_ms": 1450,
+      "target": "*",
+      "state": {
+        "mode": "HSI",
+        "hue": 13,
+        "sat": 100,
+        "bri": 15,
+        "fade_ms": 400
+      }
+    },
+    {
+      "at_ms": 2000,
+      "target": "*",
+      "state": {
+        "mode": "HSI",
+        "hue": 27,
+        "sat": 100,
+        "bri": 80
+      }
+    },
+    {
+      "at_ms": 2450,
+      "target": "*",
+      "state": {
+        "mode": "HSI",
+        "hue": 27,
+        "sat": 100,
+        "bri": 15,
+        "fade_ms": 400
+      }
+    },
+    {
+      "at_ms": 3000,
+      "target": "*",
+      "state": {
+        "mode": "HSI",
+        "hue": 40,
+        "sat": 100,
+        "bri": 80
+      }
+    },
+    {
+      "at_ms": 3450,
+      "target": "*",
+      "state": {
+        "mode": "HSI",
+        "hue": 40,
+        "sat": 100,
+        "bri": 15,
+        "fade_ms": 400
+      }
+    },
+    {
+      "at_ms": 4000,
+      "target": "*",
+      "state": {
+        "mode": "HSI",
+        "hue": 53,
+        "sat": 100,
+        "bri": 80
+      }
+    },
+    {
+      "at_ms": 4450,
+      "target": "*",
+      "state": {
+        "mode": "HSI",
+        "hue": 53,
+        "sat": 100,
+        "bri": 15,
+        "fade_ms": 400
+      }
+    },
+    {
+      "at_ms": 5000,
+      "target": "*",
+      "state": {
+        "mode": "HSI",
+        "hue": 67,
+        "sat": 100,
+        "bri": 80
+      },
+      "label": "5"
+    },
+    {
+      "at_ms": 5450,
+      "target": "*",
+      "state": {
+        "mode": "HSI",
+        "hue": 67,
+        "sat": 100,
+        "bri": 15,
+        "fade_ms": 400
+      }
+    },
+    {
+      "at_ms": 6000,
+      "target": "*",
+      "state": {
+        "mode": "HSI",
+        "hue": 80,
+        "sat": 100,
+        "bri": 80
+      }
+    },
+    {
+      "at_ms": 6450,
+      "target": "*",
+      "state": {
+        "mode": "HSI",
+        "hue": 80,
+        "sat": 100,
+        "bri": 15,
+        "fade_ms": 400
+      }
+    },
+    {
+      "at_ms": 7000,
+      "target": "*",
+      "state": {
+        "mode": "HSI",
+        "hue": 93,
+        "sat": 100,
+        "bri": 80
+      }
+    },
+    {
+      "at_ms": 7450,
+      "target": "*",
+      "state": {
+        "mode": "HSI",
+        "hue": 93,
+        "sat": 100,
+        "bri": 15,
+        "fade_ms": 400
+      }
+    },
+    {
+      "at_ms": 8000,
+      "target": "*",
+      "state": {
+        "mode": "HSI",
+        "hue": 107,
+        "sat": 100,
+        "bri": 80
+      }
+    },
+    {
+      "at_ms": 8450,
+      "target": "*",
+      "state": {
+        "mode": "HSI",
+        "hue": 107,
+        "sat": 100,
+        "bri": 15,
+        "fade_ms": 400
+      }
+    },
+    {
+      "at_ms": 9000,
+      "target": "*",
+      "state": {
+        "mode": "HSI",
+        "hue": 120,
+        "sat": 100,
+        "bri": 80
+      },
+      "label": "1"
+    },
+    {
+      "at_ms": 9450,
+      "target": "*",
+      "state": {
+        "mode": "HSI",
+        "hue": 120,
+        "sat": 100,
+        "bri": 15,
+        "fade_ms": 400
+      }
+    },
+    {
+      "at_ms": 10000,
+      "target": "*",
+      "state": {
+        "mode": "CCT",
+        "temp": 56,
+        "bri": 85,
+        "fade_ms": 300
+      },
+      "label": "go"
+    }
+  ]
+}

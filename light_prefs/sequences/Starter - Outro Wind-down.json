@@ -1,0 +1,75 @@
+{
+  "format": 1,
+  "name": "Starter - Outro Wind-down",
+  "description": "30 s close: everything eases to warm, low light and stays there.",
+  "duration_ms": 30000,
+  "end": "hold",
+  "cues": [
+    {
+      "at_ms": 0,
+      "target": "@key",
+      "state": {
+        "mode": "CCT",
+        "temp": 38,
+        "bri": 45,
+        "fade_ms": 4000
+      }
+    },
+    {
+      "at_ms": 0,
+      "target": "@fill;@ambient",
+      "state": {
+        "mode": "HSI",
+        "hue": 230,
+        "sat": 80,
+        "bri": 30,
+        "fade_ms": 6000
+      }
+    },
+    {
+      "at_ms": 0,
+      "target": "@rim;@practical",
+      "state": {
+        "mode": "HSI",
+        "hue": 270,
+        "sat": 90,
+        "bri": 35,
+        "fade_ms": 6000
+      }
+    },
+    {
+      "at_ms": 12000,
+      "target": "@fill;@ambient",
+      "state": {
+        "mode": "HSI",
+        "hue": 240,
+        "sat": 80,
+        "bri": 12,
+        "fade_ms": 8000
+      },
+      "label": "dim down"
+    },
+    {
+      "at_ms": 12000,
+      "target": "@rim;@practical",
+      "state": {
+        "mode": "HSI",
+        "hue": 270,
+        "sat": 90,
+        "bri": 10,
+        "fade_ms": 8000
+      }
+    },
+    {
+      "at_ms": 20000,
+      "target": "@key",
+      "state": {
+        "mode": "CCT",
+        "temp": 32,
+        "bri": 15,
+        "fade_ms": 8000
+      },
+      "label": "key warms and dims"
+    }
+  ]
+}

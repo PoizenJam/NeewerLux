@@ -10,7 +10,7 @@ rejected with an error message naming the cue and field.
 
 - Saved sequences are JSON files in `light_prefs/sequences/`, one sequence per file. The
   file name doesn't matter; the `name` field does. Names are matched case-insensitively.
-- Play one from the Sequences panel on the Animations tab, or over HTTP (see the end of
+- Play one from the Sequences tab, or over HTTP (see the end of
   this document). A sequence can also be sent inline with a play request and is then
   never saved.
 - Before saving or playing a generated sequence, send it to the validate action:
@@ -305,8 +305,14 @@ The default JSON reply:
  "lights": [{"id": "1", "name": "Key Light", "role": "key", "side": "right", "locked": false, "simulated": false}, ...],
  "changes": {"1": [[0, "#ffd5b0", 55, "CCT", "sequence"], [32000, "#ffd5b0", 30, "CCT", "sequence"], ...], ...},
  "cues": [{"index": 0, "at_ms": 0, "duration_ms": 0, "target": "@key", "kind": "state", "what": "CCT 4500K 55%, fade 1000 ms", "label": "..."}, ...],
+ "flashes": {"limit": 3, "worst": 2.0, "worstRed": 2.0, "lights": {"1": {"flashes": 0.5, "red": 0.0}, ...}},
  "warnings": []}
 ```
+
+`flashes` is the most flashes any light makes in any one second (`worst` for big brightness
+changes, `worstRed` for changes to and from saturated red), checked before the flash guard. If
+either is over `limit`, the flash guard (on by default) will hold some changes back during
+playback, so the show won't look as written. Generated sequences should stay at or under it.
 
 Each change is `[time_ms, colour, brightness, mode, source]`, listed only when something
 changes; `source` is `sequence` when a cue drives the light and `base` when it shows its

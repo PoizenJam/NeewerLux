@@ -96,7 +96,7 @@ Each light can also have a maximum and minimum brightness, and Global Preference
 
 ### Sequences
 
-A sequence is a timed light show for a song: cues that start at set times and either set a colour (with a fade) or play one of the animations, stretched or looped to fit, on some of the lights. Sequences are JSON files in `light_prefs/sequences` and play from the Sequences panel on the Animations tab or over HTTP. Timing comes from a fixed start time rather than from a chain of waits, so a five-minute sequence stays in step with the song; the position can also be set from outside, for syncing to a game or song timer.
+A sequence is a timed light show for a song: cues that start at set times and either set a colour (with a fade) or play one of the animations, stretched or looped to fit, on some of the lights. Sequences are JSON files in `light_prefs/sequences` and play from the Sequences tab or over HTTP. Timing comes from a fixed start time rather than from a chain of waits, so a five-minute sequence stays in step with the song; the position can also be set from outside, for syncing to a game or song timer.
 
 When a sequence ends, the lights go back to how they were before it started (usually a preset), unless the sequence says to hold its last frame or recall a particular preset. Pausing puts the lights back the same way, and resuming picks the show up exactly where it stopped.
 
@@ -104,7 +104,9 @@ The format is documented in full in [docs/SEQUENCE_FORMAT.md](docs/SEQUENCE_FORM
 
 ### The timeline editor
 
-**+New** or **Edit** under the Sequences list opens the timeline editor: one track per light, in sweep order, with each cue drawn on the tracks of the lights it drives (a cue aimed at several lights shows on each, with a dashed outline, and moves as one). A thin band under each track shows what that light will really do, with its limits and the CCT-only conversion applied.
+Five starter sequences ship alongside the example: an intro build, an outro wind-down, a raid welcome, a ten-second countdown and a song skeleton laid out in sections at 120 BPM. They aim at roles (`@key`, `@fill`, `@rim`, `@ambient`, `@practical`), so they work on any rig with roles set, and **+New** offers them as starting points.
+
+**+New** or **Edit** on the Sequences tab opens the timeline editor: one track per light, in sweep order, with each cue drawn on the tracks of the lights it drives (a cue aimed at several lights shows on each, with a dashed outline, and moves as one). A thin band under each track shows what that light will really do, with its limits and the CCT-only conversion applied.
 
 Double-click a track to add a cue there (it starts from the colour the light already has). Drag a cue to move it, its right edge to change its length, and the notch at its top to change its fade; Ctrl or Shift selects several. Snap to a time grid or, with a tempo set, to beats, half beats or bars. The panel on the right edits the selected cue: start, which lights, colour or clip, fade, length and label. Undo and redo, copy and paste at the playhead, and duplicate all have the usual shortcuts, and Space plays.
 
@@ -116,13 +118,19 @@ Animations can play on three layers above the sliders and presets. **Override** 
 
 While a sequence or effect is driving a light, moving a slider or recalling a preset doesn't change that light straight away: the change becomes what the light returns to afterwards. Lights the sequence isn't using, and Locked lights, change immediately.
 
+### Flash guard
+
+Flashing light can trigger seizures in people with photosensitive epilepsy, in the room and on stream. The flash guard, on by default, keeps every light to at most 3 flashes a second, the WCAG limit: a change that would make a light flash faster is held back until it's allowed, so a fast strobe plays as a slower one. It counts big changes in brightness and changes to and from saturated red, and applies to animations, sequences, effects, presets and HTTP commands; only the desktop's sliders are exempt. Every shipped animation, sequence and preset stays under the limit at its default speed, and the timeline editor warns when a sequence would go over. It's in Global Preferences (and the web dashboard's Settings), and turning it off asks first.
+
+The thresholds come from WCAG, which was written for screens; lights fill more of the view, so the guard lowers the risk without ruling it out. The light's built-in scenes (Police, Lightning, Paparazzi and so on) run inside the light and can't be limited.
+
 ### Simulated lights and the Stage window
 
 Global Preferences can add a simulated rig of 1 to 4 lights (key, fill, rim, ambient), plus an optional CCT-only light, for trying sequences, effects, HTTP commands and Stream Deck buttons without hardware. Simulated lights take the same Bluetooth packets as real ones, answer status queries, and can be renamed, given roles and limits, and used alongside real lights. The setting takes effect at the next start; launching with `--simulate` (or `--simulate=2` and so on) does the same for one run, and `--simulate-faults` makes them drop the odd write and disconnect now and then, for testing reconnects.
 
 The **Stage** button opens a window with one tile per light, in sweep order, showing roughly what each light is showing and which layer is driving it. Simulated lights show what they actually received; real lights show what was last sent to them, so a CCT-only light asked for a colour shows the white it was converted to. The light table also shows a colour swatch beside each light. Colours on screen are approximations of the real output, and dim lights are drawn brighter than a literal scale would (a panel at 5% is still obviously lit in a room); only 0% or off shows as dark. Tiles size themselves to the system font and display scaling; hover a tile for a name too long to fit.
 
-The **Render** button on the Sequences panel draws a whole sequence as a strip, one row per light with time running left to right, without playing it. It applies each light's brightness limits, Locked flag and CCT-only fallback, so it shows what the lights would really do.
+The **Render** button on the Sequences tab draws a whole sequence as a strip, one row per light with time running left to right, without playing it. It applies each light's brightness limits, Locked flag and CCT-only fallback, so it shows what the lights would really do.
 
 ## Remote control
 

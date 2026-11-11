@@ -251,6 +251,7 @@ sequencesDir = os.path.dirname(os.path.abspath(sys.argv[0])) + os.sep + "light_p
 lightShowPrefs = {}            # {MAC: {"role", "side", "order", "eyeline", "maxBri", "minBri", "locked"}}
 _lastWritten = {}              # {MAC: bytes last actually written, after CCT-only conversion and limits}, for display
 API_VERSION = 2                # HTTP API contract version (docs/HTTP_API.md); v1.3.0 and earlier count as 1
+flashGuard = show.FlashGuard() # photosensitivity limit on what is actually sent (flashGuardEnabled)
 _pendingSends = set()          # light indices whose stored value ([3]) still needs writing; latest value wins
 _pendingSendsLock = threading.Lock()
 _lightsOff = set()             # MACs whose last power command was OFF
@@ -311,6 +312,7 @@ globalCCTMin = 3200 # global default minimum color temperature (K)
 globalCCTMax = 5600 # global default maximum color temperature (K)
 envMaxBri = 100 # default brightness ceiling for every source except the manual sliders (per-light setting overrides)
 envMinBri = 0 # default brightness floor for lights that are on (0% and OFF still pass)
+flashGuardEnabled = True # limit flashing to 3 per second per light (WCAG); the manual controls are exempt
 seqFrameRate = 20 # default sequence frame rate (BLE updates per second), 1-30
 effectMaxSeconds = 30 # cap for looping effect-layer animations that have no loop count
 simulatedLights = 0 # simulated lights to add at startup (rig preset 0-4); --simulate overrides for one run
@@ -488,8 +490,8 @@ try: # try to load the GUI
                 self.ColorModeTabWidget.setTabEnabled(1, False) # disable the HSI tab on launch
                 self.ColorModeTabWidget.setTabEnabled(2, False) # disable the SCENE tab on launch
                 # Animations tab (index 3) is always enabled, no light selection needed
-                self.ColorModeTabWidget.setTabEnabled(4, False) # disable the LIGHT PREFS tab on launch
-                self.ColorModeTabWidget.setCurrentIndex(6)  # default to Info tab
+                self.ColorModeTabWidget.setTabEnabled(self.TAB_LIGHTPREFS, False) # disable the LIGHT PREFS tab on launch
+                self.ColorModeTabWidget.setCurrentIndex(self.TAB_INFO)  # default to Info tab
 
             if findLightsOnStartup == True: # if we're set up to find lights on startup, then indicate that
                 self.statusBar.showMessage("Please wait - searching for Neewer lights...")
@@ -1313,6 +1315,10 @@ try: # try to load the GUI
             if lightIdx < 0:
                 self.envMaxBriSpin.setValue(envMaxBri)
                 self.envMinBriSpin.setValue(envMinBri)
+                self.flashGuardCheck.blockSignals(True)
+                self.flashGuardCheck.setChecked(flashGuardEnabled)
+                self.flashGuardCheck.blockSignals(False)
+
                 self.seqFrameRateSpin.setValue(seqFrameRate)
                 self.effectMaxSecondsSpin.setValue(effectMaxSeconds)
                 self.globalCCTMinSpin.setValue(globalCCTMin)
@@ -1345,12 +1351,41 @@ try: # try to load the GUI
             loadAllSequences()
             self.seqRefreshList()
 
+        def seqShowInfo(self, *args):
+            """Details of the selected sequence beside the list on the Sequences tab."""
+            name = self._seqSelectedName()
+            data = savedSequences.get(name) if name else None
+            if data is None:
+                self.seqInfoLabel.setText("Select a sequence to see its details.")
+                return
+            esc = lambda t: str(t).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            secs = (data.get("duration_ms") or 0) / 1000.0
+            lines = ["<b>" + esc(name) + "</b>"]
+            if data.get("artist") or data.get("song"):
+                lines.append(esc(" - ".join(x for x in (data.get("artist"), data.get("song")) if x)))
+            if data.get("description"):
+                lines.append("<i>" + esc(data["description"]) + "</i>")
+            lines.append("Length %d:%04.1f, %d cues" % (secs // 60, secs % 60, len(data.get("cues", []))))
+            tempo = data.get("tempo")
+            if isinstance(tempo, dict) and tempo.get("bpm"):
+                lines.append("Tempo %s BPM" % tempo["bpm"])
+            endText = {"revert": "returns to the earlier state", "hold": "holds the last frame"}.get(data.get("end", "revert"),
+                                                                                                  "recalls " + str(data.get("end", "")).replace(":", " "))
+            lines.append("At the end it " + endText + ".")
+            seq, errors, warns = buildSequence(data)
+            if errors:
+                lines.append("<span style='color:#e06060'>Won't play: " + esc("; ".join(errors[:3])) + "</span>")
+            elif warns:
+                lines.append("<span style='color:#d8a040'>" + esc("; ".join(warns[:3])) + "</span>")
+            self.seqInfoLabel.setText("<br>".join(lines))
+
         def _seqSelectedName(self):
             items = self.seqList.selectedItems()
             return items[0].data(Qt.UserRole) if items else None
 
-        def seqOpenEditor(self, name=None):
-            """Open the timeline editor on a saved sequence, or on a new one."""
+        def seqOpenEditor(self, name=None, template=None):
+            """Open the timeline editor on a saved sequence, or on a new one (blank, or a copy
+            of a starter sequence when template names one)."""
             from neewerlux_timeline import SequenceEditor, newSequence
             if name is not None:
                 for ed in list(self._seqEditors):
@@ -1359,12 +1394,19 @@ try: # try to load the GUI
                         ed.activateWindow()
                         return ed
             if name is None:
-                base, n = "New Sequence", 2
-                newName = base
+                base = "New Sequence"
+                if template and template in savedSequences:
+                    base = template.replace("Starter - ", "", 1)
+                n, newName = 2, base
                 while resolveSequenceName(newName) is not None:
                     newName = base + " " + str(n)
                     n += 1
-                seq, original = newSequence(newName), None
+                if template and template in savedSequences:
+                    seq = copy.deepcopy(savedSequences[template])
+                    seq["name"] = newName
+                else:
+                    seq = newSequence(newName)
+                original = None
             else:
                 seq, original = savedSequences.get(name), name
                 if seq is None:
@@ -1374,8 +1416,16 @@ try: # try to load the GUI
             ed.show()
             return ed
 
-        def seqNew(self):
-            return self.seqOpenEditor(None)
+        def seqNew(self, *args, template=None):
+            """+New: a blank sequence or a copy of one of the starter sequences."""
+            if template is None:
+                starters = sorted(n for n in savedSequences if n.startswith("Starter - "))
+                choices = ["Blank sequence"] + starters
+                choice, ok = QInputDialog.getItem(self, "New sequence", "Start from:", choices, 0, False)
+                if not ok:
+                    return None
+                template = "" if choice == "Blank sequence" else choice
+            return self.seqOpenEditor(None, template or None)
 
         def seqEdit(self):
             name = self._seqSelectedName()
@@ -1814,6 +1864,21 @@ try: # try to load the GUI
             self.animRefreshList()
             self.animStatusLabel.setText("Reloaded " + str(len(savedAnimations)) + " animation(s)")
 
+        def _flashGuardToggled(self, on):
+            """Turning the flash guard off asks first: it's the only thing between a fast
+            animation and a photosensitive viewer."""
+            if on:
+                return
+            answer = QMessageBox.warning(self, "Turn off the flash guard?",
+                "The flash guard keeps every light to at most 3 flashes a second, the WCAG limit for "
+                "photosensitive seizures. Without it, fast animations, speeds and effects can flash "
+                "much faster, in the room and on stream.\n\nTurn it off anyway?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if answer != QMessageBox.Yes:
+                self.flashGuardCheck.blockSignals(True)
+                self.flashGuardCheck.setChecked(True)
+                self.flashGuardCheck.blockSignals(False)
+
         def connectMe(self):
             self.turnOffButton.clicked.connect(self.turnLightOff)
             self.turnOnButton.clicked.connect(self.turnLightOn)
@@ -1839,6 +1904,8 @@ try: # try to load the GUI
             self.seqRenderButton.clicked.connect(self.seqRender)
             self.seqList.itemDoubleClicked.connect(lambda item: self.seqPlay())
             self.seqNewButton.clicked.connect(self.seqNew)
+            self.seqList.itemSelectionChanged.connect(self.seqShowInfo)
+            self.flashGuardCheck.toggled.connect(self._flashGuardToggled)
             self.seqEditButton.clicked.connect(self.seqEdit)
             self.seqDuplicateButton.clicked.connect(self.seqDuplicate)
             self.seqDeleteButton.clicked.connect(self.seqDelete)
@@ -1935,7 +2002,7 @@ try: # try to load the GUI
             self.SC_Tab_CCT.activated.connect(lambda: self.switchToTab(0))
             self.SC_Tab_HSI.activated.connect(lambda: self.switchToTab(1))
             self.SC_Tab_SCENE.activated.connect(lambda: self.switchToTab(2))
-            self.SC_Tab_PREFS.activated.connect(lambda: self.switchToTab(4))
+            self.SC_Tab_PREFS.activated.connect(lambda: self.switchToTab(self.TAB_LIGHTPREFS))
 
             # DECREASE/INCREASE BRIGHTNESS REGARDLESS OF WHICH TAB WE'RE ON
             self.SC_Dec_Bri_Small.activated.connect(lambda: self.adjustLightParameter(0, -1))
@@ -2240,7 +2307,7 @@ try: # try to load the GUI
                     minK, maxK = getEffectiveCCTRange(selectedLight)
                     self.setupCCTBounds(minK, maxK)
 
-            elif self.ColorModeTabWidget.currentIndex() == 4: # if we're on the Light Preferences tab
+            elif self.ColorModeTabWidget.currentIndex() == self.TAB_LIGHTPREFS: # if we're on the Light Preferences tab
                 if selectedLight != -1: # if there is a specific selected light
                     self.setupLightPrefsTab(selectedLight) # update the Prefs tab with the information for that selected light
 
@@ -2454,6 +2521,9 @@ try: # try to load the GUI
                 self.globalCCTMaxSpin.setValue(globalCCTMax)
                 self.envMaxBriSpin.setValue(envMaxBri)
                 self.envMinBriSpin.setValue(envMinBri)
+                self.flashGuardCheck.blockSignals(True)
+                self.flashGuardCheck.setChecked(flashGuardEnabled)
+                self.flashGuardCheck.blockSignals(False)
                 self.seqFrameRateSpin.setValue(seqFrameRate)
                 self.effectMaxSecondsSpin.setValue(effectMaxSeconds)
                 self.simulatedLightsCombo.setCurrentIndex(simulatedLights)
@@ -2505,6 +2575,9 @@ try: # try to load the GUI
                 self.globalCCTMaxSpin.setValue(5600)
                 self.envMaxBriSpin.setValue(100)
                 self.envMinBriSpin.setValue(0)
+                self.flashGuardCheck.blockSignals(True)
+                self.flashGuardCheck.setChecked(True)
+                self.flashGuardCheck.blockSignals(False)
                 self.seqFrameRateSpin.setValue(20)
                 self.effectMaxSecondsSpin.setValue(30)
                 self.simulatedLightsCombo.setCurrentIndex(0)
@@ -2539,7 +2612,7 @@ try: # try to load the GUI
 
         def saveGlobalPrefs(self):
             # change these global values to the new values in Prefs
-            global customKeys, autoConnectToLights, printDebug, rememberLightsOnExit, rememberPresetsOnExit, autoReconnectOnDisconnect, maxNumOfAttempts, acceptable_HTTP_IPs, whiteListedMACs, hideConsoleOnLaunch, minimizeToTrayOnClose, httpAutoStart, httpPort, cctFallbackMode, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, globalCCTMin, globalCCTMax, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, cctFallbackMode, envMaxBri, envMinBri, seqFrameRate, effectMaxSeconds, simulatedLights, simulatedCCTOnly
+            global customKeys, autoConnectToLights, printDebug, rememberLightsOnExit, rememberPresetsOnExit, autoReconnectOnDisconnect, maxNumOfAttempts, acceptable_HTTP_IPs, whiteListedMACs, hideConsoleOnLaunch, minimizeToTrayOnClose, httpAutoStart, httpPort, cctFallbackMode, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, globalCCTMin, globalCCTMax, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, cctFallbackMode, envMaxBri, envMinBri, seqFrameRate, effectMaxSeconds, simulatedLights, simulatedCCTOnly, flashGuardEnabled
 
             finalPrefs = [] # list of final prefs to merge together at the end
 
@@ -2661,6 +2734,9 @@ try: # try to load the GUI
                 finalPrefs.append("envMaxBri=" + str(envMaxBri))
             if envMinBri != 0:
                 finalPrefs.append("envMinBri=" + str(envMinBri))
+            flashGuardEnabled = self.flashGuardCheck.isChecked()
+            if not flashGuardEnabled:
+                finalPrefs.append("flashGuard=0")
             seqFrameRate = self.seqFrameRateSpin.value()
             if seqFrameRate != 20:
                 finalPrefs.append("seqFrameRate=" + str(seqFrameRate))
@@ -2884,7 +2960,7 @@ try: # try to load the GUI
                 self.tryConnectButton.setEnabled(True) # if we have light(s) selected in the table, then enable the "Connect" button
 
                 if len(selectedRows) == 1: # we have exactly one light selected
-                    self.ColorModeTabWidget.setTabEnabled(4, True) # enable the "Preferences" tab for this light
+                    self.ColorModeTabWidget.setTabEnabled(self.TAB_LIGHTPREFS, True) # enable the "Preferences" tab for this light
 
                     # SWITCH THE TURN ON/OFF BUTTONS ON, AND CHANGE TEXT TO SINGLE BUTTON TEXT
                     self.turnOffButton.setText("Turn Light Off")
@@ -2936,7 +3012,7 @@ try: # try to load the GUI
                     self.ColorModeTabWidget.setTabEnabled(0, True)
                     self.ColorModeTabWidget.setTabEnabled(1, True) # enable the "HSI" mode tab
                     self.ColorModeTabWidget.setTabEnabled(2, True) # enable the "ANM/SCENE" mode tab
-                    self.ColorModeTabWidget.setTabEnabled(4, False) # disable the "Preferences" tab, as we have multiple lights selected
+                    self.ColorModeTabWidget.setTabEnabled(self.TAB_LIGHTPREFS, False) # disable the "Preferences" tab, as we have multiple lights selected
             else: # the selection has been cleared or there are no lights to select
                 currentTab = self.ColorModeTabWidget.currentIndex() # get the currently selected tab (so when we disable the tabs, we stick on the current one)
                 self.tryConnectButton.setEnabled(False) # if we have no lights selected, disable the Connect button
@@ -2950,13 +3026,13 @@ try: # try to load the GUI
                 self.ColorModeTabWidget.setTabEnabled(0, False) # disable the "CCT" mode tab
                 self.ColorModeTabWidget.setTabEnabled(1, False) # disable the "HSI" mode tab
                 self.ColorModeTabWidget.setTabEnabled(2, False) # disable the "ANM/SCENE" mode tab
-                # Animations tab (3) stays enabled
-                self.ColorModeTabWidget.setTabEnabled(4, False) # disable the "Preferences" tab, as we have no lights selected
+                # Animations, Sequences, Global Preferences, Info and Log stay enabled
+                self.ColorModeTabWidget.setTabEnabled(self.TAB_LIGHTPREFS, False) # disable the "Preferences" tab, as we have no lights selected
 
-                if currentTab not in (3, 5): # if user is on Animations or Global Prefs, keep them there
-                    self.ColorModeTabWidget.setCurrentIndex(currentTab) # disable the tabs, but don't switch the current one shown
-                else:
-                    self.ColorModeTabWidget.setCurrentIndex(0) # if we're on Prefs, then switch to the CCT tab
+                if currentTab in (0, 1, 2, self.TAB_LIGHTPREFS): # on a tab that needs a selected light: move to Animations
+                    self.ColorModeTabWidget.setCurrentIndex(self.TAB_ANIM)
+                else: # Animations, Sequences, Global Preferences, Info, Log: stay there
+                    self.ColorModeTabWidget.setCurrentIndex(currentTab)
 
                 self.checkLightTab() # check to see if we're on the CCT tab - if we are, then restore order
 
@@ -3138,17 +3214,12 @@ try: # try to load the GUI
                 self.computeValueHSI()
             elif i == 2: # we clicked on the SCENE tab
                 pass # skip this, we don't want the animation automatically triggering when we go to this page
-            elif i == 3: # we clicked on the ANIMATIONS tab
-                pass # no automatic action needed
-            elif i == 4: # we clicked on the LIGHT PREFS tab
+            elif i == self.TAB_LIGHTPREFS: # we clicked on the LIGHT PREFS tab
                 if len(currentSelection) == 1:
                     self.setupLightPrefsTab(currentSelection[0])
-            elif i == 5: # we clicked on the Global PREFS tab
+            elif i == self.TAB_GLOBALPREFS: # we clicked on the Global PREFS tab
                 self.setupGlobalLightPrefsTab()
-            elif i == 6: # Info tab
-                pass
-            elif i == 7: # Log tab
-                pass
+            # Animations, Sequences, Info and Log need no set-up
 
         # COMPUTE A BYTESTRING FOR THE CCT SECTION
         def computeValueCCT(self, hueOrBrightness = -1):
@@ -5161,8 +5232,10 @@ async def writeToLight(selectedLights=0, updateGUI=True, useGlobalValue=True, fr
                                     currentSendValue[4] = clampedTemp
                                     currentSendValue[5] = calculateChecksum(currentSendValue)
 
-                            if not useGlobalValue: # manual sliders are exempt from the brightness limits
+                            if not useGlobalValue: # manual sliders are exempt from the brightness limits and the flash guard
                                 currentSendValue = applyBrightnessEnvelope(int(selectedLights[a]), currentSendValue)
+                                if not _flashAllowed(int(selectedLights[a]), currentSendValue):
+                                    continue  # held back by the flash guard
 
                             if availableLights[(int(selectedLights[a]))][5] == True: # if we're using the old style of light
                                 if currentSendValue[1] == 135: # if we're on CCT mode
@@ -5277,6 +5350,17 @@ def _takePendingSends():
     return indices
 
 
+def _flashAllowed(lightIdx, byteVal):
+    """The flash guard's decision for a value about to be written to a light. Values the
+    light will really show are judged (after the CCT-only conversion)."""
+    if not flashGuardEnabled or not isinstance(byteVal, (list, tuple)) or len(byteVal) < 4:
+        return True
+    shown = applyCCTFallback(lightIdx, byteVal)
+    if shown is None:
+        return True
+    return flashGuard.allow(availableLights[lightIdx][0].address, show.bytesToCommand(shown))
+
+
 def _recordWritten(lightIdx, byteVal):
     """Remember what a light was actually sent, for the Stage window, swatches and status.
     availableLights[i][3] keeps the requested value (before the CCT-only conversion), which
@@ -5321,6 +5405,8 @@ async def parallelWriteToLights(lightIndices, fromShow=False):
                             sendVal[4] = clampedTemp
                             sendVal[5] = calculateChecksum(sendVal)
                     sendVal = applyBrightnessEnvelope(idx, sendVal)
+                    if not _flashAllowed(idx, sendVal):
+                        return  # held back: this frame would flash faster than the guard allows
                     if availableLights[idx][5] == True and sendVal[1] == 135:
                         # Old-style CCT light needs split commands
                         splitCmds = calculateSeparateBytestrings(sendVal)
@@ -6817,7 +6903,7 @@ def renderSequence(nameOrData, stepMs=None, startMs=0, endMs=None):
         return {"success": False, "errors": ["start_ms, end_ms and step_ms must be numbers"], "warnings": seqWarnings}
     step = max(10, step, -(-(endMs - startMs) // 20000))  # at most 20,000 samples per light
 
-    lights, changes, last, baseShown = [], {}, {}, {}
+    lights, changes, last, baseShown, samples = [], {}, {}, {}, {}
     for idx, light in enumerate(availableLights):
         prefID = light[8] if len(light) > 8 else 0
         lightID = str(prefID if prefID > 0 else idx + 1)
@@ -6842,6 +6928,7 @@ def renderSequence(nameOrData, stepMs=None, startMs=0, endMs=None):
                     source = "sequence"
                 else:
                     shown = last.get(idx, (None, shown))[1]  # the CCT-only "ignore" setting leaves the light as it was
+            samples.setdefault(idx, []).append((t / 1000.0, shown))
             entry = (shown["mode"] if shown else None, shown.get("bri") if shown else None,
                      show.rgbHex(show.commandToRGB(shown)), source)
             if last.get(idx, (None,))[0] != entry:
@@ -6859,9 +6946,30 @@ def renderSequence(nameOrData, stepMs=None, startMs=0, endMs=None):
                 what += ", fade " + str(cue.fade) + " ms"
         cues.append({"index": cue.index, "at_ms": cue.at, "duration_ms": cue.dur, "target": cue.target,
                      "kind": cue.kind, "what": what, "label": cue.raw.get("label", "")})
+    # flash check of the result, before the flash guard (which would hold back the excess)
+    perLight = {lights[idx]["id"]: show.analyzeFlashes(smp) for idx, smp in samples.items()}
+    flashes = {"limit": show.FLASH_LIMIT_PER_SECOND, "lights": perLight,
+               "worst": max([v["flashes"] for v in perLight.values()] + [0.0]),
+               "worstRed": max([v["red"] for v in perLight.values()] + [0.0])}
     return {"success": True, "sequence": seq.name, "duration_ms": seq.duration, "start_ms": startMs,
             "end_ms": endMs, "step_ms": step, "lights": lights, "changes": changes, "cues": cues,
-            "warnings": seqWarnings}
+            "flashes": flashes, "warnings": seqWarnings}
+
+
+def animationFlashReport(name, speed=1.0, seconds=None):
+    """Flash check of a saved animation played on its own at a speed: renders it as a looped
+    clip on every light at 30 frames a second. Returns the render's flashes dict, or None."""
+    resolved = resolveAnimationName(name)
+    if resolved is None:
+        return None
+    anim = savedAnimations[resolved]
+    loopMs = sum(max(50, int(k.get("hold_ms", 0))) + int(k.get("fade_ms", 0)) for k in anim.get("keyframes", [])) / max(0.05, speed)
+    dur = int(seconds * 1000) if seconds else int(min(60000, max(6000, loopMs * 3)))
+    seqData = {"format": 1, "name": "flash check", "duration_ms": dur, "fps": 30,
+               "cues": [{"at_ms": 0, "duration_ms": dur, "target": "@all",
+                         "clip": {"name": resolved, "fit": "loop", "speed": speed}}]}
+    result = renderSequence(seqData, stepMs=10)
+    return result.get("flashes") if result.get("success") else None
 
 
 def renderSequencePNG(result, width=1600):
@@ -7004,7 +7112,8 @@ def getStageTiles():
 def getShowStatus():
     """Layer, sequence and per-light status for the HTTP status endpoints and the GUI."""
     if showEngine is None:
-        return {"apiVersion": API_VERSION, "layers": {}, "sequence": None, "lights": []}
+        return {"apiVersion": API_VERSION, "layers": {}, "sequence": None, "lights": [],
+                "flashGuard": {"enabled": flashGuardEnabled, "held": flashGuard.held}}
     st = showEngine.status()
     lights = []
     for idx, light in enumerate(availableLights):
@@ -7018,7 +7127,8 @@ def getShowStatus():
                        "linked": linked, "simulated": simulated,
                        "mode": cmd["mode"] if cmd else None, "bri": cmd.get("bri") if cmd else None,
                        "color": show.rgbHex(rgb)})
-    return {"apiVersion": API_VERSION, "layers": st["layers"], "sequence": st["sequence"], "lights": lights}
+    return {"apiVersion": API_VERSION, "layers": st["layers"], "sequence": st["sequence"], "lights": lights,
+            "flashGuard": {"enabled": flashGuardEnabled, "held": flashGuard.held}}
 
 
 def _commandJSON(cmd):
@@ -7065,7 +7175,8 @@ def lightStateJSON(lightIdx):
 WEB_GLOBAL_PREFS = {"envMaxBri": (100, 1, 100), "envMinBri": (0, 0, 100), "seqFrameRate": (20, 1, 30),
                     "effectMaxSeconds": (30, 1, 600), "globalCCTMin": (3200, 2700, 8500),
                     "globalCCTMax": (5600, 2700, 8500), "simulatedLights": (0, 0, len(sim.RIG_LIGHTS)),
-                    "simulatedCCTOnly": (False, None, None), "cctFallbackMode": ("convert", "ignore")}
+                    "simulatedCCTOnly": (False, None, None), "cctFallbackMode": ("convert", "ignore"),
+                    "flashGuardEnabled": (True, None, None)}
 
 
 def _lightIndexFromWeb(value):
@@ -7153,10 +7264,13 @@ def setWebGlobalSettings(changes):
     for name, value in new.items():
         globals()[name] = value
         default = WEB_GLOBAL_PREFS[name][0]
+        key = "flashGuard" if name == "flashGuardEnabled" else name
         if value == default:
-            fileUpdates[name] = None
+            fileUpdates[key] = None
+        elif isinstance(value, bool):
+            fileUpdates[key] = "1" if value else "0"
         else:
-            fileUpdates[name] = "1" if value is True else str(value)
+            fileUpdates[key] = str(value)
     if fileUpdates:
         _updatePrefsFile(fileUpdates)
     if mainWindow is not None:
@@ -8336,7 +8450,7 @@ def loadPrefsFile(globalPrefsFile = ""):
     global findLightsOnStartup, autoConnectToLights, printDebug, maxNumOfAttempts, \
            rememberLightsOnExit, acceptable_HTTP_IPs, customKeys, enableTabsOnLaunch, \
            whiteListedMACs, rememberPresetsOnExit, autoReconnectOnDisconnect, livePreview, hideConsoleOnLaunch, minimizeToTrayOnClose, httpAutoStart, httpPort, cctFallbackMode, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, \
-           envMaxBri, envMinBri, seqFrameRate, effectMaxSeconds, simulatedLights, simulatedCCTOnly
+           envMaxBri, envMinBri, seqFrameRate, effectMaxSeconds, simulatedLights, simulatedCCTOnly, flashGuardEnabled
 
     if globalPrefsFile != "":
         printDebugString("Loading global preferences from file...")
@@ -8350,7 +8464,7 @@ def loadPrefsFile(globalPrefsFile = ""):
             "SC_Dec_1_Small", "SC_Inc_1_Small", "SC_Dec_2_Small", "SC_Inc_2_Small", "SC_Dec_3_Small", "SC_Inc_3_Small", \
             "SC_Dec_1_Large", "SC_Inc_1_Large", "SC_Dec_2_Large", "SC_Inc_2_Large", "SC_Dec_3_Large", "SC_Inc_3_Large", \
             "enableTabsOnLaunch", "whiteListedMACs", "rememberPresetsOnExit", "autoReconnectOnDisconnect", "hideConsoleOnLaunch", "minimizeToTrayOnClose", "livePreview", "httpAutoStart", "httpPort", "cctFallbackMode", "enableLogTab", "logToFile", "logHeartbeat", "globalCCTMin", "globalCCTMax", \
-            "envMaxBri", "envMinBri", "seqFrameRate", "effectMaxSeconds", "simulatedLights", "simulatedCCTOnly"]
+            "envMaxBri", "envMinBri", "seqFrameRate", "effectMaxSeconds", "simulatedLights", "simulatedCCTOnly", "flashGuard"]
 
         # KICK OUT ANY PARAMETERS THAT AREN'T IN THE "ACCEPTABLE ARGUMENTS" LIST ABOVE
         # THIS SECTION OF CODE IS *SLIGHTLY* DIFFERENT THAN THE CLI KICK OUT CODE
@@ -8390,6 +8504,7 @@ def loadPrefsFile(globalPrefsFile = ""):
     prefsParser.add_argument("--globalCCTMax", default=5600)
     prefsParser.add_argument("--envMaxBri", default=100)
     prefsParser.add_argument("--envMinBri", default=0)
+    prefsParser.add_argument("--flashGuard", default=1)
     prefsParser.add_argument("--seqFrameRate", default=20)
     prefsParser.add_argument("--effectMaxSeconds", default=30)
     prefsParser.add_argument("--simulatedLights", default=0)
@@ -8465,6 +8580,7 @@ def loadPrefsFile(globalPrefsFile = ""):
     effectMaxSeconds = _intPref(mainPrefs.effectMaxSeconds, 30, 1, 600)
     simulatedLights = _intPref(mainPrefs.simulatedLights, 0, 0, len(sim.RIG_LIGHTS))
     simulatedCCTOnly = _intPref(mainPrefs.simulatedCCTOnly, 0, 0, 1) == 1
+    flashGuardEnabled = _intPref(mainPrefs.flashGuard, 1, 0, 1) == 1
 
     if type(mainPrefs.acceptableIPs) is not list: # we have a string in the return, so we need to post-process it
         acceptable_HTTP_IPs = mainPrefs.acceptableIPs.replace(" ", "").split(";") # split the IP addresses into a list for acceptable IPs

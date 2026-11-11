@@ -145,6 +145,51 @@ def main():
     assert r["success"], r
     app.processEvents()
     assert win.lightRoleCombo.currentText() == "Rim" and win.lightMaxBriSpin.value() == 33, (win.lightRoleCombo.currentText(), win.lightMaxBriSpin.value())
+
+    # Flash guard: on by default; unticking asks, and saying No keeps it on
+    win.setupGlobalLightPrefsTab()
+    assert win.flashGuardCheck.isChecked() and nl.flashGuardEnabled
+    real = nl.QMessageBox.warning
+    try:
+        nl.QMessageBox.warning = staticmethod(lambda *a, **k: nl.QMessageBox.No)
+        win.flashGuardCheck.setChecked(False)
+        assert win.flashGuardCheck.isChecked(), "saying No must keep the guard on"
+        nl.QMessageBox.warning = staticmethod(lambda *a, **k: nl.QMessageBox.Yes)
+        win.flashGuardCheck.setChecked(False)
+        assert not win.flashGuardCheck.isChecked()
+        win.saveGlobalPrefs()
+        assert not nl.flashGuardEnabled and "flashGuard=0" in open(nl.globalPrefsFile, encoding="utf-8").read()
+        win.flashGuardCheck.setChecked(True)
+        win.saveGlobalPrefs()
+        assert nl.flashGuardEnabled and "flashGuard" not in open(nl.globalPrefsFile, encoding="utf-8").read()
+    finally:
+        nl.QMessageBox.warning = real
+
+    # Sequences have their own tab, after Animations; clearing the selection keeps you there
+    tabs = win.ColorModeTabWidget
+    assert tabs.tabText(win.TAB_SEQ) == "Sequences" and win.TAB_SEQ == win.TAB_ANIM + 1
+    assert win.seqList.parent() is not None and win.seqTab.isAncestorOf(win.seqList)
+    assert not win.animTab.isAncestorOf(win.seqList)
+    tabs.setCurrentIndex(win.TAB_SEQ)
+    win.lightTable.clearSelection()
+    app.processEvents()
+    assert tabs.currentIndex() == win.TAB_SEQ, "clearing the light selection must not leave the Sequences tab"
+    tabs.setCurrentIndex(win.TAB_GLOBALPREFS)
+    win.lightTable.clearSelection()
+    app.processEvents()
+    assert tabs.currentIndex() == win.TAB_GLOBALPREFS, "nor Global Preferences"
+    win.seqRefreshList()
+    for i in range(win.seqList.count()):
+        if win.seqList.item(i).data(nl.Qt.UserRole) == "Starter - Countdown":
+            win.seqList.setCurrentRow(i)
+    app.processEvents()
+    assert "Starter - Countdown" in win.seqInfoLabel.text() and "21 cues" in win.seqInfoLabel.text(), win.seqInfoLabel.text()
+    win.resize(1200, 760)
+    tabs.setCurrentIndex(win.TAB_SEQ)
+    app.processEvents()
+    shot = os.path.join(rig.workdir, "sequences_tab.png")
+    win.grab().save(shot)
+    print("sequences tab screenshot:", shot)
     print("GUI smoke test: PASS")
     return 0
 

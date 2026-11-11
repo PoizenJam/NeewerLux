@@ -17,7 +17,7 @@
     },
     {
       "hold_ms": 0,
-      "fade_ms": 200,
+      "fade_ms": 250,
       "lights": {
         "*": {
           "mode": "HSI",
@@ -29,7 +29,7 @@
     },
     {
       "hold_ms": 0,
-      "fade_ms": 150,
+      "fade_ms": 190,
       "lights": {
         "*": {
           "mode": "HSI",
@@ -41,7 +41,7 @@
     },
     {
       "hold_ms": 0,
-      "fade_ms": 300,
+      "fade_ms": 380,
       "lights": {
         "*": {
           "mode": "HSI",
@@ -53,7 +53,7 @@
     },
     {
       "hold_ms": 0,
-      "fade_ms": 100,
+      "fade_ms": 130,
       "lights": {
         "*": {
           "mode": "HSI",
@@ -65,7 +65,7 @@
     },
     {
       "hold_ms": 0,
-      "fade_ms": 250,
+      "fade_ms": 320,
       "lights": {
         "*": {
           "mode": "HSI",
@@ -77,7 +77,7 @@
     },
     {
       "hold_ms": 0,
-      "fade_ms": 180,
+      "fade_ms": 230,
       "lights": {
         "*": {
           "mode": "HSI",
@@ -89,7 +89,7 @@
     },
     {
       "hold_ms": 0,
-      "fade_ms": 350,
+      "fade_ms": 440,
       "lights": {
         "*": {
           "mode": "HSI",

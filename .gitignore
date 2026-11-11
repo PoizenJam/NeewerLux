@@ -31,10 +31,11 @@ dist/
 light_prefs/*
 !light_prefs/animations/
 !light_prefs/customLights.prefs.default
-# Sequences you make stay untracked; only the shipped example is re-included
+# Sequences you make stay untracked; only the shipped example and starters are re-included
 !light_prefs/sequences/
 light_prefs/sequences/*
 !light_prefs/sequences/Example - Four Light Demo.json
+!light_prefs/sequences/Starter - *.json
 
 # OS noise
 .DS_Store

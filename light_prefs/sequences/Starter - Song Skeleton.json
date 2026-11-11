@@ -1,0 +1,219 @@
+{
+  "format": 1,
+  "name": "Starter - Song Skeleton",
+  "description": "A song laid out in sections at 120 BPM (intro, verses, choruses, bridge, final chorus, outro). Open it in the editor, set the tempo and drag each section to where it falls in your song.",
+  "duration_ms": 184000,
+  "tempo": {
+    "bpm": 120,
+    "offset_ms": 0
+  },
+  "end": "revert",
+  "cues": [
+    {
+      "at_ms": 0,
+      "target": "@key",
+      "state": {
+        "mode": "CCT",
+        "temp": 45,
+        "bri": 35,
+        "fade_ms": 2000
+      },
+      "label": "INTRO"
+    },
+    {
+      "at_ms": 0,
+      "target": "@fill;@ambient;@practical",
+      "state": {
+        "mode": "HSI",
+        "hue": 250,
+        "sat": 80,
+        "bri": 20,
+        "fade_ms": 4000
+      }
+    },
+    {
+      "at_ms": 0,
+      "target": "@rim",
+      "state": {
+        "mode": "HSI",
+        "hue": 280,
+        "sat": 90,
+        "bri": 25,
+        "fade_ms": 4000
+      }
+    },
+    {
+      "at_ms": 16000,
+      "target": "@key",
+      "state": {
+        "mode": "CCT",
+        "temp": 50,
+        "bri": 55,
+        "fade_ms": 1000
+      },
+      "label": "VERSE 1"
+    },
+    {
+      "at_ms": 16000,
+      "target": "@fill;@ambient;@practical",
+      "state": {
+        "mode": "HSI",
+        "hue": 210,
+        "sat": 70,
+        "bri": 35,
+        "fade_ms": 1500
+      }
+    },
+    {
+      "at_ms": 16000,
+      "target": "@rim",
+      "state": {
+        "mode": "HSI",
+        "hue": 30,
+        "sat": 90,
+        "bri": 45,
+        "fade_ms": 1500
+      }
+    },
+    {
+      "at_ms": 48000,
+      "target": "@key",
+      "state": {
+        "mode": "CCT",
+        "temp": 54,
+        "bri": 75,
+        "fade_ms": 500
+      },
+      "label": "CHORUS 1"
+    },
+    {
+      "at_ms": 48000,
+      "duration_ms": 32000,
+      "target": "@fill;@ambient;@rim",
+      "clip": {
+        "name": "Color Chase",
+        "fit": "loop",
+        "brightness": 70
+      }
+    },
+    {
+      "at_ms": 80000,
+      "target": "@key",
+      "state": {
+        "mode": "CCT",
+        "temp": 50,
+        "bri": 55,
+        "fade_ms": 1000
+      },
+      "label": "VERSE 2"
+    },
+    {
+      "at_ms": 80000,
+      "target": "@fill;@ambient;@practical",
+      "state": {
+        "mode": "HSI",
+        "hue": 170,
+        "sat": 70,
+        "bri": 35,
+        "fade_ms": 1500
+      }
+    },
+    {
+      "at_ms": 80000,
+      "target": "@rim",
+      "state": {
+        "mode": "HSI",
+        "hue": 320,
+        "sat": 90,
+        "bri": 45,
+        "fade_ms": 1500
+      }
+    },
+    {
+      "at_ms": 112000,
+      "target": "@key",
+      "state": {
+        "mode": "CCT",
+        "temp": 54,
+        "bri": 75,
+        "fade_ms": 500
+      },
+      "label": "CHORUS 2"
+    },
+    {
+      "at_ms": 112000,
+      "duration_ms": 32000,
+      "target": "@fill;@ambient;@rim",
+      "clip": {
+        "name": "Color Chase",
+        "fit": "loop",
+        "brightness": 75
+      }
+    },
+    {
+      "at_ms": 144000,
+      "target": "@key",
+      "state": {
+        "mode": "CCT",
+        "temp": 42,
+        "bri": 40,
+        "fade_ms": 2000
+      },
+      "label": "BRIDGE"
+    },
+    {
+      "at_ms": 144000,
+      "target": "@fill;@ambient;@rim;@practical",
+      "state": {
+        "mode": "HSI",
+        "hue": 270,
+        "sat": 90,
+        "bri": 30,
+        "fade_ms": 3000
+      }
+    },
+    {
+      "at_ms": 160000,
+      "target": "@key",
+      "state": {
+        "mode": "CCT",
+        "temp": 56,
+        "bri": 80,
+        "fade_ms": 500
+      },
+      "label": "FINAL CHORUS"
+    },
+    {
+      "at_ms": 160000,
+      "duration_ms": 16000,
+      "target": "@fill;@ambient;@rim",
+      "clip": {
+        "name": "Rainbow Chase",
+        "fit": "loop",
+        "brightness": 75
+      }
+    },
+    {
+      "at_ms": 176000,
+      "target": "@key",
+      "state": {
+        "mode": "CCT",
+        "temp": 40,
+        "bri": 30,
+        "fade_ms": 4000
+      },
+      "label": "OUTRO"
+    },
+    {
+      "at_ms": 176000,
+      "target": "@fill;@ambient;@rim;@practical",
+      "state": {
+        "mode": "HSI",
+        "hue": 250,
+        "sat": 80,
+        "bri": 15,
+        "fade_ms": 4000
+      }
+    }
+  ]
+}

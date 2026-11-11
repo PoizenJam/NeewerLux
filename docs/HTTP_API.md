@@ -23,6 +23,10 @@ Wherever a light is named (`light=`, the `light` field of a batch command, anima
 | Role or side | `@key`, `@fill`, `@rim`, `@ambient`, `@practical`, `@left`, `@centre`, `@right`, `@eyeline`, `@all` | From each light's show settings; `@rim.left` means both |
 | A list | `1;3;@rim` | Any mix, separated by `;` |
 
+### The flash guard
+
+On by default, every light is kept to at most 3 flashes a second (the WCAG limit for photosensitive seizures): a change that would flash faster is held back until it's allowed. This applies to everything sent over HTTP, so a fast animation or a burst of commands plays slower than asked; `status_json` reports how many changes were held. It can be turned off in Global Preferences or with `set_global` `{"flashGuardEnabled": false}`.
+
 ### Units
 
 | Value | Range | Notes |
@@ -147,9 +151,12 @@ Per light:
   "layers": {"override": null, "effect": null, "show": null},
   "sequence": {"type": "sequence", "name": "Example - Four Light Demo", "state": "playing", "position_ms": 12034, "duration_ms": 40000},
   "lights": [{"id": 1, "name": "Key", "role": "key", "side": "right", "locked": false, "layer": "show",
-              "linked": true, "simulated": false, "mode": "HSI", "bri": 45, "color": "#b04ce0"}]
+              "linked": true, "simulated": false, "mode": "HSI", "bri": 45, "color": "#b04ce0"}],
+  "flashGuard": {"enabled": true, "held": 0}
 }
 ```
+
+`flashGuard` is `{"enabled": true, "held": 12}`: whether the flash guard is on, and how many changes it has held back since NeewerLux started.
 
 `layers` holds whatever is playing on each layer (`null` when nothing is); the override entry includes `name`, `keyframe` and `keyframes`. `sequence` is `null` when no sequence is loaded; `state` is `playing` or `paused`.
 
@@ -241,7 +248,7 @@ The desktop's preset menu and editor. Preset numbers are 1-based. Every reply th
 |---|---|
 | `{"action": "get"}` | `{"apiVersion", "global": {...}, "lights": [...], "roles", "sides", "simulatedRigs"}` |
 | `{"action": "set_light", "light": 0, "settings": {"role": "key", "maxBri": 60}}` | Change one light's preferences. `light` is the 0-based `index` from `get` (an ID, name or MAC also works). Settings: `customName`, `preferredID` (0 to 99, 0 = automatic), `tempRange` (`[min, max]` Kelvin), `cctOnly`, `role`, `side`, `order` (0 to 99, 0 = automatic), `eyeline`, `maxBri` and `minBri` (-1 = use the global limit, else 0 to 100), `locked`. Saved to the light's preferences file, as the desktop does. |
-| `{"action": "set_global", "settings": {"envMaxBri": 80}}` | Change global preferences: `envMaxBri` (1 to 100), `envMinBri` (0 to 100), `seqFrameRate` (1 to 30), `effectMaxSeconds` (1 to 600), `globalCCTMin` and `globalCCTMax` (2700 to 8500), `cctFallbackMode` (`convert` or `ignore`), `simulatedLights` (0 to 4, next start), `simulatedCCTOnly` (next start). |
+| `{"action": "set_global", "settings": {"envMaxBri": 80}}` | Change global preferences: `envMaxBri` (1 to 100), `envMinBri` (0 to 100), `seqFrameRate` (1 to 30), `effectMaxSeconds` (1 to 600), `globalCCTMin` and `globalCCTMax` (2700 to 8500), `cctFallbackMode` (`convert` or `ignore`), `simulatedLights` (0 to 4, next start), `simulatedCCTOnly` (next start), `flashGuardEnabled` (true or false). |
 
 Every value in a request is checked before any is applied; a request with an invalid value changes nothing and lists the problems in `errors`. Network access, keyboard shortcuts and startup options can't be changed over HTTP. Changes show up in the desktop window straight away.
 

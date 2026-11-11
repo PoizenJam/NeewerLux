@@ -214,6 +214,19 @@ def main():
         view.grab().save(os.path.join(rig.workdir, "webui.png"))
         print("    screenshots: " + os.path.join(rig.workdir, "webui.png") + ", webui_render.png, webui_settings.png, webui_timeline.png")
 
+    def flashGuardSetting():
+        check(js(page, "document.getElementById('gpFlashGuard').checked") is True, "the guard shows as on")
+        page.runJavaScript("window.confirm = () => false")
+        js(page, "const b = document.getElementById('gpFlashGuard'); b.checked = false; gpFlashGuardChanged(b);")
+        check(js(page, "document.getElementById('gpFlashGuard').checked") is True, "cancelling the warning keeps it on")
+        page.runJavaScript("window.confirm = () => true")
+        js(page, "const b = document.getElementById('gpFlashGuard'); b.checked = false; gpFlashGuardChanged(b); saveGlobalPrefs();")
+        spin(600)
+        check(nl.flashGuardEnabled is False, "turned off from the web")
+        js(page, "document.getElementById('gpFlashGuard').checked = true; saveGlobalPrefs();")
+        spin(600)
+        check(nl.flashGuardEnabled is True, "and back on")
+
     def securityPrefsRefused():
         r = rig.post("/NeewerLux/settings", {"action": "set_global", "settings": {"acceptable_HTTP_IPs": "0."}})
         check(not r["success"] and "can't be changed" in r["errors"][0], "network settings must stay desktop-only: " + str(r))
@@ -362,6 +375,11 @@ def main():
         spin(400)
         check(nl.showEngine.status()["sequence"] is None, "pausing stops the lights")
         js(page, "document.getElementById('tlSend').checked = false; tlSendToggled(); tlClose()")
+        # +New from a starter
+        js(page, "tlOpen(null, 'Starter - Countdown')")
+        waitFor(page, "!!(tl && tl.original === null && tl.seq.name === 'Countdown' && tl.render)", "editor on a copy of a starter")
+        check(js(page, "tl.seq.cues.length") == 21, "starter copied")
+        js(page, "tl.dirty = false; tlClose()")
         # New, Duplicate, Delete from the panel
         js(page, "tlOpen(null)")
         waitFor(page, "!!(tl && tl.original === null && tl.render)", "new sequence")
@@ -377,7 +395,7 @@ def main():
 
     for name, fn in [("stage tiles and swatches", stage), ("sequence list", sequenceList),
                      ("play, pause, resume, seek, stop", playPauseSeekStop), ("render", render),
-                     ("reload", reload), ("light preferences", lightPrefs), ("global preferences", globalPrefs),
+                     ("reload", reload), ("light preferences", lightPrefs), ("global preferences", globalPrefs), ("flash guard setting", flashGuardSetting),
                      ("network settings stay desktop-only", securityPrefsRefused), ("preset editor and menu", presetEditor),
                      ("animation editor, import, duplicate, delete", animationEditor), ("timeline editor", timelineEditor)]:
         step(name, fn)

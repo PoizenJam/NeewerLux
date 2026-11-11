@@ -247,11 +247,16 @@ def main():
                 win.seqList.setCurrentRow(i)
         win.seqDelete(confirm=False)
         check("Editor Test Copy (copy)" not in nl.savedSequences and not nl._sequenceFilesNamed("Editor Test Copy (copy)"), "Delete")
-        ed2 = win.seqNew()
+        ed2 = win.seqNew(template="")
         pump(200)
         check(ed2.originalName is None and ed2.seq["name"].startswith("New Sequence") and len(ed2.seq["cues"]) == 1, "+New opens a blank sequence")
         check(ed2.save(), "a new sequence saves: " + ed2.statusLabel.text())
         ed2.close()
+        ed3 = win.seqNew(template="Starter - Countdown")
+        pump(200)
+        check(ed3.originalName is None and ed3.seq["name"] == "Countdown" and len(ed3.seq["cues"]) == 21, "+New from a starter copies it under a new name: " + ed3.seq["name"])
+        ed3.dirty = False
+        ed3.close()
 
     def unmatchedTrack():
         ed = win.seqOpenEditor("Editor Test Copy")

@@ -1122,7 +1122,11 @@ class SequenceEditor(QWidget):
             self.lastRender = result
             self.renderChanges = result["changes"]
             self.renderEnd = result["end_ms"]
-            warn = result.get("warnings") or []
+            warn = list(result.get("warnings") or [])
+            fl = result.get("flashes") or {}
+            rate = max(fl.get("worst", 0), fl.get("worstRed", 0))
+            if rate > fl.get("limit", 3):
+                warn.insert(0, "flashes up to %.1f times a second; the flash guard (if on) will hold some back" % rate)
             self._setStatus(("Warnings: " + "; ".join(warn)) if warn else "", "warn" if warn else "")
         else:
             self._setStatus("Won't play yet: " + "; ".join(result.get("errors", [])[:3]), "error")

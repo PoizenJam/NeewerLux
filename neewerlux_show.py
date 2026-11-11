@@ -130,6 +130,167 @@ def rgbHex(rgb):
     return "#%02x%02x%02x" % tuple(rgb) if rgb is not None else None
 
 
+# ============================================================================
+# FLASH SAFETY (photosensitivity)
+# ============================================================================
+# Thresholds follow WCAG 2.x "three flashes": a flash is a pair of opposing changes in
+# relative luminance of at least 10% of full, where the darker state is below 0.80, and a
+# red flash is a pair of opposing transitions involving a saturated red. No more than three
+# of either in any one-second period. WCAG was written for screens; a light fills more of
+# the view, so these are a floor, not a guarantee. Luminance here is the colour's relative
+# luminance times the brightness percentage (assumes output follows brightness).
+FLASH_LIMIT_PER_SECOND = 3
+FLASH_LUMINANCE_STEP = 0.10
+FLASH_DARK_CEILING = 0.80
+# The guard counts over a slightly longer window than a second: Bluetooth delivery jitters
+# by a few tens of milliseconds, and the limit has to hold for what the light shows.
+GUARD_WINDOW_S = 1.15
+
+
+def _linear(c):
+    c = c / 255.0
+    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+
+def flashLevel(cmd):
+    """(relative luminance 0-1, is saturated red) for a light command, or None if unknown.
+    Scenes run inside the light's firmware and can't be measured, so they read as None."""
+    if not cmd:
+        return None
+    mode = str(cmd.get("mode", "")).upper()
+    if mode == "OFF":
+        return (0.0, False)
+    bri = max(0, min(100, cmd.get("bri", 100))) / 100.0
+    if mode == "HSI":
+        h = (cmd.get("hue", 0) % 360) / 60.0
+        sat = max(0, min(100, cmd.get("sat", 100))) / 100.0
+        x = sat * (1 - abs(h % 2 - 1))
+        r, g, b = [(sat, x, 0), (x, sat, 0), (0, sat, x), (0, x, sat), (x, 0, sat), (sat, 0, x)][int(h) % 6]
+        m = 1 - sat
+        rgb = ((r + m) * 255, (g + m) * 255, (b + m) * 255)
+        hue = cmd.get("hue", 0) % 360
+        red = (hue <= 20 or hue >= 340) and sat >= 0.8 and bri >= 0.2
+    elif mode == "CCT":
+        rgb = kelvinToRGB(cmd.get("temp", 56) * 100)
+        red = False
+    else:
+        return None
+    lum = 0.2126 * _linear(rgb[0]) + 0.7152 * _linear(rgb[1]) + 0.0722 * _linear(rgb[2])
+    return (lum * bri, red)
+
+
+class FlashCounter:
+    """Counts flashes for one light from a stream of (time, level) samples, the way the
+    guard and the content checks both see them: luminance transitions are tracked as
+    swings from the last turning point, so a slow fade counts once when it completes."""
+
+    def __init__(self):
+        self.lastLum = None
+        self.anchor = None       # luminance at the last turning point
+        self.direction = 0       # +1 rising, -1 falling, 0 unknown
+        self.transitions = []    # times of counted luminance transitions
+        self.lastRed = None
+        self.redTransitions = []
+
+    def _wouldTransition(self, lum):
+        """The transition direction lum would complete from the current anchor, or 0."""
+        if self.anchor is None:
+            return 0
+        delta = lum - self.anchor
+        if abs(delta) >= FLASH_LUMINANCE_STEP and min(lum, self.anchor) < FLASH_DARK_CEILING:
+            return 1 if delta > 0 else -1
+        return 0
+
+    def check(self, t, level, limit=FLASH_LIMIT_PER_SECOND, window=1.0):
+        """True if moving to level at time t would exceed the limit in the last window."""
+        if level is None:
+            return False
+        lum, red = level
+        d = self._wouldTransition(lum)
+        if d and d != self.direction:
+            recent = [x for x in self.transitions if t - x < window]
+            if (len(recent) + 1) / 2.0 > limit:
+                return True
+        if self.lastRed is not None and red != self.lastRed:
+            recent = [x for x in self.redTransitions if t - x < window]
+            if (len(recent) + 1) / 2.0 > limit:
+                return True
+        return False
+
+    def add(self, t, level):
+        if level is None:
+            return
+        lum, red = level
+        if self.anchor is None:
+            self.anchor, self.lastLum, self.lastRed = lum, lum, red
+            return
+        d = self._wouldTransition(lum)
+        if d:
+            if d != self.direction:
+                self.transitions.append(t)
+                self.direction = d
+            self.anchor = lum
+        elif self.direction and (lum - self.anchor) * self.direction > 0:
+            self.anchor = lum  # still moving the same way: extend the swing
+        if self.lastRed is not None and red != self.lastRed:
+            self.redTransitions.append(t)
+        self.lastLum, self.lastRed = lum, red
+        cutoff = t - 2.0
+        self.transitions = [x for x in self.transitions if x >= cutoff]
+        self.redTransitions = [x for x in self.redTransitions if x >= cutoff]
+
+    @staticmethod
+    def worstRate(times):
+        """Most flashes (transition pairs) in any one-second window of a list of times."""
+        times = sorted(times)
+        best, j = 0, 0
+        for i in range(len(times)):
+            while times[i] - times[j] >= 1.0:
+                j += 1
+            best = max(best, i - j + 1)
+        return best / 2.0
+
+
+def analyzeFlashes(samples):
+    """samples: list of (time_s, cmd) for one light, in time order. Returns
+    {"flashes": worst flashes in any second, "red": worst red flashes in any second}."""
+    counter = FlashCounter()
+    allLum, allRed = [], []
+    for t, cmd in samples:
+        level = flashLevel(cmd)
+        before, beforeRed = len(counter.transitions), len(counter.redTransitions)
+        counter.add(t, level)
+        allLum += counter.transitions[before:] if len(counter.transitions) > before else []
+        allRed += counter.redTransitions[beforeRed:] if len(counter.redTransitions) > beforeRed else []
+    return {"flashes": FlashCounter.worstRate(allLum), "red": FlashCounter.worstRate(allRed)}
+
+
+class FlashGuard:
+    """Runtime limit applied to what is actually sent to each light. A frame that would
+    push a light past the limit is held back (the light keeps its last value until a frame
+    is allowed), so a fast strobe becomes a slower one rather than a different picture."""
+
+    def __init__(self, limit=FLASH_LIMIT_PER_SECOND, clock=None):
+        import time as _time
+        self.limit = limit
+        self.clock = clock or _time.monotonic
+        self.counters = {}
+        self.held = 0
+
+    def allow(self, key, cmd):
+        level = flashLevel(cmd)
+        counter = self.counters.setdefault(key, FlashCounter())
+        t = self.clock()
+        if counter.check(t, level, self.limit, GUARD_WINDOW_S):
+            self.held += 1
+            return False
+        counter.add(t, level)
+        return True
+
+    def forget(self, key):
+        self.counters.pop(key, None)
+
+
 def buildKeyMap(keys, resolver, targetIdx=None):
     """Map animation light keys to light indices.
 

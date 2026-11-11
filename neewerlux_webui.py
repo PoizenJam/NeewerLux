@@ -579,7 +579,7 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
                 <button class="btn" onclick="seqReload()" title="Reload sequence files from light_prefs/sequences">Reload</button>
             </div>
             <div class="btn-row" style="margin-top:6px">
-                <button class="btn small" onclick="tlOpen(null)" title="Open the timeline editor on a new sequence">+ New</button>
+                <button class="btn small" onclick="tlNewMenu(event)" title="Open the timeline editor on a new sequence, blank or from a starter">+ New</button>
                 <button class="btn small" onclick="tlOpenSelected()" title="Open the selected sequence in the timeline editor">Edit</button>
                 <button class="btn small" onclick="seqDuplicate()">Duplicate</button>
                 <button class="btn small" onclick="seqDelete()">Delete</button>
@@ -614,6 +614,7 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
                 <div>
                     <h3 style="margin-top:0;color:var(--accent)">Global Preferences</h3>
                     <div class="form-grid">
+                        <label>Flash guard</label><label style="text-transform:none"><input type="checkbox" id="gpFlashGuard" onchange="gpFlashGuardChanged(this)"> At most 3 flashes a second per light (recommended)</label><div class="hint">The WCAG limit for photosensitive seizures. Applies to everything except the desktop's sliders.</div>
                         <label>Max brightness</label><input type="number" id="gpEnvMax" min="1" max="100"><div class="hint">Presets, URLs, animations and sequences. Sliders are exempt.</div>
                         <label>Min brightness</label><input type="number" id="gpEnvMin" min="0" max="100">
                         <label>Sequence frame rate</label><input type="number" id="gpSeqFps" min="1" max="30"><div class="hint">Updates per second for sequences without their own.</div>
@@ -1419,6 +1420,7 @@ function applySettings(d) {
     fillSelect('lpLight', d.lights.map(l => l.index), d.lights.map(l => l.id + ' - ' + (l.customName || l.model) + (l.simulated ? ' (simulated)' : '')));
     fillLightPrefs();
     const g = d.global;
+    document.getElementById('gpFlashGuard').checked = g.flashGuardEnabled !== false;
     document.getElementById('gpEnvMax').value = g.envMaxBri;
     document.getElementById('gpEnvMin').value = g.envMinBri;
     document.getElementById('gpSeqFps').value = g.seqFrameRate;
@@ -1428,6 +1430,9 @@ function applySettings(d) {
     document.getElementById('gpFallback').value = g.cctFallbackMode;
     document.getElementById('gpSim').value = g.simulatedLights;
     document.getElementById('gpSimCCT').checked = !!g.simulatedCCTOnly;
+}
+function gpFlashGuardChanged(box) {
+    if (!box.checked && !confirm('The flash guard keeps every light to at most 3 flashes a second, the WCAG limit for photosensitive seizures. Without it, fast animations, speeds and effects can flash much faster, in the room and on stream.\n\nTurn it off anyway? (It takes effect when you save.)')) box.checked = true;
 }
 function currentLightPrefs() {
     if (!settingsData) return null;
@@ -1478,7 +1483,7 @@ async function saveGlobalPrefs() {
     const settings = {envMaxBri: num('gpEnvMax'), envMinBri: num('gpEnvMin'), seqFrameRate: num('gpSeqFps'),
         effectMaxSeconds: num('gpEffectMax'), globalCCTMin: num('gpCCTMin'), globalCCTMax: num('gpCCTMax'),
         cctFallbackMode: document.getElementById('gpFallback').value, simulatedLights: num('gpSim'),
-        simulatedCCTOnly: document.getElementById('gpSimCCT').checked};
+        simulatedCCTOnly: document.getElementById('gpSimCCT').checked, flashGuardEnabled: document.getElementById('gpFlashGuard').checked};
     try {
         const d = await settingsPost({action:'set_global', settings:settings});
         if (!d.success) { logMsg('Global preferences not saved: ' + (d.errors || []).join('; '), 'err'); return; }
@@ -1967,9 +1972,21 @@ async function tlOpenSelected() {
     if (!selectedSeq) { logMsg('No sequence selected', 'err'); return; }
     tlOpen(selectedSeq);
 }
-async function tlOpen(name) {
+function tlNewMenu(ev) {
+    const starters = seqNames.filter(n => n.startsWith('Starter - ')).sort();
+    showMenu(ev, [{label: 'Blank sequence', fn: () => tlOpen(null)}].concat(starters.map(n => ({label: 'From ' + n, fn: () => tlOpen(null, n)}))));
+}
+async function tlOpen(name, template) {
     let seq, original = null;
-    if (name) {
+    if (!name && template) {
+        const g = await seqPost({action: 'get', name: template});
+        if (!g.success) { logMsg('Can\'t open: ' + errText(g), 'err'); return; }
+        const names = seqNames.map(n => n.toLowerCase()), base = template.replace(/^Starter - /, '');
+        let nm = base, n = 2;
+        while (names.includes(nm.toLowerCase())) nm = base + ' ' + (n++);
+        seq = g.sequence;
+        seq.name = nm;
+    } else if (name) {
         const g = await seqPost({action: 'get', name: name});
         if (!g.success) { logMsg('Can\'t open: ' + errText(g), 'err'); return; }
         seq = g.sequence;
@@ -2206,7 +2223,9 @@ async function tlRerender() {
     const d = await seqPost({action: 'render', sequence: tl.seq});
     if (d.success) {
         tl.render = d;
-        const w = d.warnings || [];
+        const w = (d.warnings || []).slice();
+        const fl = d.flashes || {}, rate = Math.max(fl.worst || 0, fl.worstRed || 0);
+        if (rate > (fl.limit || 3)) w.unshift('flashes up to ' + rate.toFixed(1) + ' times a second; the flash guard (if on) will hold some back');
         tlStatus(w.length ? 'Warnings: ' + w.join('; ') : '', w.length ? 'warn' : '');
     } else {
         tlStatus('Won\'t play yet: ' + errText(d), 'error');
