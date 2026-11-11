@@ -30,6 +30,7 @@ a = Analysis(
         'neewerlux_show',
         'neewerlux_sim',
         'neewerlux_stage',
+        'neewerlux_timeline',
         'PySide6',
         'PySide6.QtWidgets',
         'PySide6.QtCore',

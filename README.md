@@ -100,7 +100,15 @@ A sequence is a timed light show for a song: cues that start at set times and ei
 
 When a sequence ends, the lights go back to how they were before it started (usually a preset), unless the sequence says to hold its last frame or recall a particular preset. Pausing puts the lights back the same way, and resuming picks the show up exactly where it stopped.
 
-The format is documented in full in [docs/SEQUENCE_FORMAT.md](docs/SEQUENCE_FORMAT.md), written so that a program or an AI model can generate sequences per song. A timeline editor is planned.
+The format is documented in full in [docs/SEQUENCE_FORMAT.md](docs/SEQUENCE_FORMAT.md), written so that a program or an AI model can generate sequences per song.
+
+### The timeline editor
+
+**+New** or **Edit** under the Sequences list opens the timeline editor: one track per light, in sweep order, with each cue drawn on the tracks of the lights it drives (a cue aimed at several lights shows on each, with a dashed outline, and moves as one). A thin band under each track shows what that light will really do, with its limits and the CCT-only conversion applied.
+
+Double-click a track to add a cue there (it starts from the colour the light already has). Drag a cue to move it, its right edge to change its length, and the notch at its top to change its fade; Ctrl or Shift selects several. Snap to a time grid or, with a tempo set, to beats, half beats or bars. The panel on the right edits the selected cue: start, which lights, colour or clip, fade, length and label. Undo and redo, copy and paste at the playhead, and duplicate all have the usual shortcuts, and Space plays.
+
+Play previews the edit on screen, in a Stage view under the timeline, without touching the lights. Tick **Send to lights** to play it through the real lights from the playhead; edits made while it plays are sent within a moment. Check validates the sequence, Save writes it (saving under a new name renames it), and Settings holds the frame rate, what happens at the end, while paused and during effects, and the artist, song and description. Cues whose lights aren't connected show on a "No matching light" track so they don't vanish. The web dashboard has the same editor.
 
 ### Effects on top of a sequence
 
@@ -118,7 +126,7 @@ The **Render** button on the Sequences panel draws a whole sequence as a strip, 
 
 ## Remote control
 
-Turn on the HTTP server from the toolbar, or have it start with the app in Global Preferences. The dashboard is at `http://localhost:8080/` (the port is configurable), and the toolbar's WebUI button opens it. The dashboard covers what the desktop window does, apart from the editors for animations and presets: lights with colour swatches, roles and layers, presets, manual control, animations, a Sequences panel (play, pause, resume, seek by clicking the progress bar, stop, render, reload), a live Stage view, and Settings for each light's preferences and the show-related global preferences. Network access, keyboard shortcuts and startup options can only be changed in the desktop app.
+Turn on the HTTP server from the toolbar, or have it start with the app in Global Preferences. The dashboard is at `http://localhost:8080/` (the port is configurable), and the toolbar's WebUI button opens it. The dashboard covers what the desktop window does: lights with colour swatches, roles and layers, manual control, presets (with the right-click menu: save the current lights, edit, rename, move, duplicate, delete), animations (play with the same options, plus new, edit, duplicate, delete, export to a file, import from a file and reload, with the same keyframe editor and a JSON view), sequences (play, pause, resume, seek by clicking the progress bar, stop, render, reload, and the timeline editor), a live Stage view, and Settings for each light's preferences and the show-related global preferences. Network access, keyboard shortcuts and startup options can only be changed in the desktop app.
 
 Every action is also a plain URL, which is how a Stream Deck or a script drives NeewerLux:
 

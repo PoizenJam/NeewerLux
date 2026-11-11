@@ -2,7 +2,7 @@
 
 A sequence is a timed light show: a list of cues, each starting at a fixed time and
 driving some of the lights. Sequences are meant to be written by hand, by the timeline
-editor (coming), or generated per song by a program or an AI model. This document is the
+editor (on the desktop and in the web dashboard), or generated per song by a program or an AI model. This document is the
 complete contract: anything that follows it plays, and anything that breaks it is
 rejected with an error message naming the cue and field.
 
@@ -31,7 +31,8 @@ rejected with an error message naming the cue and field.
 | `pause_mode` | no | `"revert"` or `"freeze"` | While paused: `revert` (default) puts the lights back to their pre-sequence state and resumes the show exactly where it stopped; `freeze` holds the current frame. |
 | `on_interrupt` | no | `"continue"` or `"pause"` | While an effect or override animation is playing: `continue` (default) keeps the sequence clock running underneath, so lights rejoin in sync with the song; `pause` stops the clock until the interruption ends. |
 | `description`, `artist`, `song`, `notes` | no | string | Shown in lists or ignored. |
-| `tempo`, `palette`, `sections` | no | any | Reserved for later versions (tempo-relative timing, palette slots, song sections). Accepted and ignored now. Don't rely on them doing anything. |
+| `tempo` | no | `{"bpm": number, "offset_ms": integer}` | Written by the timeline editor so it can draw beat lines and snap cues to beats (`offset_ms` is when the first beat falls). Playback ignores it: cue times are always plain milliseconds. |
+| `palette`, `sections` | no | any | Reserved for later versions (palette slots, song sections). Accepted and ignored now. Don't rely on them doing anything. |
 
 ## Cues
 

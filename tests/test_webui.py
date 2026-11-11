@@ -6,6 +6,7 @@ light preferences and global preferences. Any JavaScript error fails the test.
 Run: python tests/test_webui.py
 """
 
+import json
 import os
 import sys
 import time
@@ -56,6 +57,8 @@ def js(page, code, timeout=5000):
         box["r"] = result
         loop.quit()
 
+    if "const " in code or "let " in code:
+        code = "{" + code + "}"  # each snippet gets its own scope, so names can repeat
     page.runJavaScript(code, 0, done)
     QTimer.singleShot(timeout, loop.quit)
     loop.exec()
@@ -209,16 +212,174 @@ def main():
         js(page, "window.scrollTo(0, 0)")
         spin(300)
         view.grab().save(os.path.join(rig.workdir, "webui.png"))
-        print("    screenshots: " + os.path.join(rig.workdir, "webui.png") + ", webui_render.png, webui_settings.png")
+        print("    screenshots: " + os.path.join(rig.workdir, "webui.png") + ", webui_render.png, webui_settings.png, webui_timeline.png")
 
     def securityPrefsRefused():
         r = rig.post("/NeewerLux/settings", {"action": "set_global", "settings": {"acceptable_HTTP_IPs": "0."}})
         check(not r["success"] and "can't be changed" in r["errors"][0], "network settings must stay desktop-only: " + str(r))
 
+    def presetEditor():
+        P = "/NeewerLux/presets"
+        # right-click menu has the desktop's entries
+        js(page, "presetMenu({preventDefault(){}, clientX: 200, clientY: 200}, 2)")
+        items = json.loads(js(page, "JSON.stringify([...document.querySelectorAll('#popupMenu div')].map(d => d.textContent))"))
+        check(items == ["Recall", "Save current lights here", "Edit preset...", "Rename...", "Move left", "Move right", "Duplicate", "Delete"], "preset menu: " + str(items))
+        js(page, "hideMenu(); peOpen(2)")
+        waitFor(page, "document.getElementById('presetModal').classList.contains('open') && document.querySelectorAll('#peRows tr').length >= 1", "preset editor")
+        js(page, """peAdd(); peRender();
+                    const rows = document.querySelectorAll('#peRows tr'); const last = rows[rows.length - 1];
+                    last.querySelector('.pe-target').value = '2'; last.querySelector('.pe-mode').value = 'HSI';
+                    last.querySelector('.pe-mode').onchange();""")
+        js(page, """const rows = document.querySelectorAll('#peRows tr'); const last = rows[rows.length - 1];
+                    last.querySelector('.pe-hue').value = '275'; last.querySelector('.pe-bri').value = '35';
+                    document.querySelectorAll('#peRows tr')[0].querySelector('.pe-target').value = '1';
+                    document.getElementById('peName').value = 'Web Preset'; peSave();""")
+        spin(700)
+        got = rig.post(P, {"action": "get", "index": 2})["preset"]
+        check(got["name"] == "Web Preset" and {"target": "2", "mode": "HSI", "bri": 35, "hue": 275, "sat": 100} in got["entries"], "saved from the web editor: " + str(got))
+        check(not js(page, "document.getElementById('presetModal').classList.contains('open')"), "editor closes after saving")
+        waitFor(page, "[...document.querySelectorAll('#presetGrid .preset-btn')].some(b => b.textContent.includes('Web Preset'))", "preset button shows the name")
+        count = len(nl.customLightPresets)
+        js(page, "presetAction('duplicate', 2, 'dup')")
+        spin(500)
+        check(len(nl.customLightPresets) == count + 1 and nl.presetNames.get(2) == "Web Preset (copy)", "duplicate from the web")
+        js(page, "presetAction('move', 3, 'moved', {direction: 'left'})")
+        spin(500)
+        check(nl.presetNames.get(1) == "Web Preset (copy)", "move from the web")
+        js(page, "presetAction('delete', 2, 'deleted')")
+        spin(500)
+        check(len(nl.customLightPresets) == count, "delete from the web")
+
+    def animationEditor():
+        A = "/NeewerLux/animate"
+        js(page, "animNew()")
+        waitFor(page, "document.getElementById('animModal').classList.contains('open')", "animation editor")
+        js(page, """document.getElementById('aeName').value = 'Web Built';
+                    aeAddFrame();
+                    document.getElementById('aeHold').value = '750'; aeFrameField();
+                    aeAddLight();""")
+        js(page, """const rows = document.querySelectorAll('#aeLights tr'); const r = rows[rows.length - 1];
+                    r.querySelector('.ae-mode').value = 'CCT'; r.querySelector('.ae-mode').onchange();""")
+        js(page, """const rows = document.querySelectorAll('#aeLights tr'); const r = rows[rows.length - 1];
+                    r.querySelector('.ae-temp').value = '4100'; r.querySelector('.ae-bri').value = '60'; r.querySelector('.ae-bri').onchange();""")
+        js(page, "aeSave()")
+        spin(700)
+        anim = nl.savedAnimations.get("Web Built")
+        check(anim is not None and len(anim["keyframes"]) == 2, "saved from the web editor: " + str(anim))
+        kf = anim["keyframes"][1]
+        check(kf["hold_ms"] == 750 and "*" not in kf["lights"] and kf["lights"]["1"] == {"mode": "CCT", "temp": 41, "bri": 60}, "frame 2: " + str(kf))
+        # edit through the JSON tab, rename
+        js(page, "selectedAnim = 'Web Built'; animEdit()")
+        waitFor(page, "document.getElementById('animModal').classList.contains('open') && document.getElementById('aeName').value === 'Web Built'", "edit opens")
+        js(page, """aeTab('json'); const kf = JSON.parse(document.getElementById('aeJsonText').value);
+                    kf[0].fade_ms = 333; document.getElementById('aeJsonText').value = JSON.stringify(kf);
+                    aeTab('visual'); document.getElementById('aeName').value = 'Web Built 2'; aeSave();""")
+        spin(700)
+        check("Web Built" not in nl.savedAnimations and nl.savedAnimations["Web Built 2"]["keyframes"][0]["fade_ms"] == 333, "JSON edit and rename")
+        js(page, "selectedAnim = 'Web Built 2'; animDuplicate()")
+        spin(600)
+        check("Web Built 2 (copy)" in nl.savedAnimations, "duplicate")
+        imported = {"name": "Web Imported", "loop": False, "keyframes": [{"hold_ms": 100, "fade_ms": 0, "lights": {"*": {"mode": "ON"}}}]}
+        js(page, "animImport({files: [new File([%r], 'x.json')], value: ''})" % json.dumps(imported))
+        spin(700)
+        check("Web Imported" in nl.savedAnimations, "import from a file")
+        page.runJavaScript("window.confirm = () => true")
+        for n in ("Web Built 2", "Web Built 2 (copy)", "Web Imported"):
+            js(page, "selectedAnim = %r; animDelete()" % n)
+            spin(400)
+        check(not any(n.startswith("Web ") for n in nl.savedAnimations), "delete")
+        js(page, "document.getElementById('animParallel').checked = false; selectedAnim = 'Strobe'; playAnimation()")
+        spin(500)
+        check(nl.animParallelWrites is False, "the Parallel box reaches the player")
+        js(page, "stopAnimation(); document.getElementById('animParallel').checked = true")
+        nl.animParallelWrites = True
+        spin(300)
+
+    def timelineEditor():
+        page.runJavaScript("window.confirm = () => true")
+        js(page, "selectedSeq = %r; tlOpenSelected()" % EXAMPLE)
+        waitFor(page, "!!(tl && tl.render && document.getElementById('tlModal').classList.contains('open'))", "timeline editor with a render")
+        tracks = json.loads(js(page, "JSON.stringify(tl.tracks.map(t => t.id))"))
+        check(len([t for t in tracks if t is not None]) == 4, "one track per light: " + str(tracks))
+        check(js(page, "document.querySelectorAll('#tlStage .stage-tile').length") == 4, "preview tiles")
+        spin(300)
+        view.grab().save(os.path.join(rig.workdir, "webui_timeline.png"))
+        # double-click a hold tail on the first track at 25.3 s (snap 1 s)
+        n0 = js(page, "tl.seq.cues.length")
+        js(page, """document.getElementById('tlSnap').value = '1000';
+                    const cv = document.getElementById('tlCanvas'), r = cv.getBoundingClientRect(), m = tlMetrics();
+                    cv.dispatchEvent(new MouseEvent('dblclick', {bubbles: true, clientX: r.left + tlX(25300), clientY: r.top + m.rulerH + m.rowH * 0.4}));""")
+        spin(300)
+        check(js(page, "tl.seq.cues.length") == n0 + 1, "double-click adds a cue")
+        cue = json.loads(js(page, "JSON.stringify(tl.seq.cues[tl.seq.cues.length - 1])"))
+        check(cue["at_ms"] == 25000 and "state" in cue, "snapped new cue: " + str(cue))
+        # drag it 2 s right
+        js(page, """const cv = document.getElementById('tlCanvas'), r = cv.getBoundingClientRect(), m = tlMetrics();
+                    const y = r.top + m.rulerH + m.rowH * 0.4, x0 = r.left + tlX(25000) + 3, x1 = r.left + tlX(27000) + 3;
+                    cv.dispatchEvent(new MouseEvent('mousedown', {bubbles: true, button: 0, clientX: x0, clientY: y}));
+                    for (let k = 1; k <= 6; k++) window.dispatchEvent(new MouseEvent('mousemove', {bubbles: true, clientX: x0 + (x1 - x0) * k / 6, clientY: y}));
+                    window.dispatchEvent(new MouseEvent('mouseup', {bubbles: true, clientX: x1, clientY: y}));""")
+        spin(300)
+        check(js(page, "tl.seq.cues[tl.seq.cues.length - 1].at_ms") == 27000, "drag moves the cue")
+        js(page, "tlUndo()")
+        check(js(page, "tl.seq.cues[tl.seq.cues.length - 1].at_ms") == 25000, "undo")
+        js(page, "tlRedo()")
+        # properties: colour, then switch to a clip
+        js(page, """document.getElementById('tpHue').value = '200'; document.getElementById('tpBri').value = '55';
+                    document.getElementById('tpFade').value = '1200'; tlPropChanged();""")
+        st = json.loads(js(page, "JSON.stringify(tl.seq.cues[tl.seq.cues.length - 1].state)"))
+        check(st.get("hue") == 200 and st.get("bri") == 55 and st.get("fade_ms") == 1200, "colour properties: " + str(st))
+        js(page, "document.getElementById('tpTarget').value = '@rim'; tlPropChanged();")
+        spin(400)
+        check(js(page, "tl.seq.cues[tl.seq.cues.length - 1].target") == "@rim", "target")
+        js(page, "document.getElementById('tpKind').value = 'clip'; tlPropChanged();")
+        js(page, "document.getElementById('tpClip').value = 'Heartbeat'; document.getElementById('tpFit').value = 'loop'; document.getElementById('tpDur').value = '3000'; tlPropChanged();")
+        cue = json.loads(js(page, "JSON.stringify(tl.seq.cues[tl.seq.cues.length - 1])"))
+        check(cue.get("clip") == {"name": "Heartbeat", "fit": "loop"} and cue.get("duration_ms") == 3000, "clip properties: " + str(cue))
+        # copy, paste at the playhead, delete
+        js(page, "tlCopy(); tlSetPlayhead(33000); tlPaste(tlSnapMs(tl.playhead));")
+        check(js(page, "tl.seq.cues[tl.seq.cues.length - 1].at_ms") == 33000, "paste at the playhead")
+        js(page, "tlDelete()")
+        check(js(page, "tl.seq.cues.length") == n0 + 1, "delete")
+        # settings, save under a new name (renames)
+        js(page, "tlSettingsToggle(); document.getElementById('tlEnd').value = 'hold'; tlSettingsApply();")
+        check(js(page, "tl.seq.end") == "hold", "settings")
+        js(page, "document.getElementById('tlName').value = 'Web Timeline'; tlNameEdited(); tlSave(false)")
+        spin(800)
+        check("Web Timeline" in nl.savedSequences and EXAMPLE not in nl.savedSequences, "save renames: " + str(list(nl.savedSequences)))
+        saved = nl.savedSequences["Web Timeline"]
+        check(saved.get("end") == "hold" and any(isinstance(c.get("clip"), dict) and c["clip"]["name"] == "Heartbeat" and c["at_ms"] == 27000 for c in saved["cues"]), "edits saved")
+        # screen-only preview leaves the lights alone; Send to lights plays from the playhead
+        js(page, "tlSetPlayhead(0); tlPlay()")
+        spin(500)
+        js(page, "tlPause()")
+        check(js(page, "tl.playhead") >= 300 and nl.showEngine.status()["sequence"] is None, "screen-only preview")
+        js(page, "document.getElementById('tlSend').checked = true; tlSendToggled(); tlSetPlayhead(4000); tlPlay()")
+        spin(800)
+        st = nl.showEngine.status()["sequence"]
+        check(st is not None and st["name"] == "Web Timeline" and 4300 <= st["position_ms"] <= 5800, "Send to lights: " + str(st))
+        js(page, "tlPause()")
+        spin(400)
+        check(nl.showEngine.status()["sequence"] is None, "pausing stops the lights")
+        js(page, "document.getElementById('tlSend').checked = false; tlSendToggled(); tlClose()")
+        # New, Duplicate, Delete from the panel
+        js(page, "tlOpen(null)")
+        waitFor(page, "!!(tl && tl.original === null && tl.render)", "new sequence")
+        js(page, "tlSave(false)")
+        spin(700)
+        check(any(n.startswith("New Sequence") for n in nl.savedSequences), "a new sequence saves")
+        js(page, "tlClose(); selectedSeq = 'Web Timeline'; seqDuplicate()")
+        spin(800)
+        check("Web Timeline (copy)" in nl.savedSequences, "duplicate")
+        js(page, "selectedSeq = 'Web Timeline (copy)'; seqDelete()")
+        spin(600)
+        check("Web Timeline (copy)" not in nl.savedSequences, "delete")
+
     for name, fn in [("stage tiles and swatches", stage), ("sequence list", sequenceList),
                      ("play, pause, resume, seek, stop", playPauseSeekStop), ("render", render),
                      ("reload", reload), ("light preferences", lightPrefs), ("global preferences", globalPrefs),
-                     ("network settings stay desktop-only", securityPrefsRefused)]:
+                     ("network settings stay desktop-only", securityPrefsRefused), ("preset editor and menu", presetEditor),
+                     ("animation editor, import, duplicate, delete", animationEditor), ("timeline editor", timelineEditor)]:
         step(name, fn)
     if page.errors:
         results.append(("FAIL", "no JavaScript errors", "; ".join(page.errors[:5])))

@@ -779,6 +779,92 @@ def t_listJsonStructured(rig):
     check(rig.getJSON("status_json")["apiVersion"] == 2, "status_json carries apiVersion")
 
 
+# ----------------------------------------------------------------- 1.3.3: editors over HTTP
+
+def t_presetEditAPI(rig):
+    nl = rig.nl
+    P = "/NeewerLux/presets"
+    n0 = rig.post(P, {"action": "list"})["presets"]
+    count = len(n0)
+    entries = [{"target": "1", "mode": "HSI", "hue": 120, "sat": 80, "bri": 40},
+               {"target": "@rim", "mode": "CCT", "temp": 4300, "bri": 60},
+               {"target": "3", "mode": "Scene", "scene": 4, "bri": 30}]
+    r = rig.post(P, {"action": "save", "index": 2, "name": "Web Edit", "entries": entries})
+    check(r["success"], str(r))
+    got = rig.post(P, {"action": "get", "index": 2})["preset"]
+    check(got["name"] == "Web Edit" and got["custom"] and not got["global"], "saved preset: " + str(got))
+    check(got["entries"][1] == {"target": "@rim", "mode": "CCT", "bri": 60, "temp": 43}, "Kelvin stored as hundreds: " + str(got["entries"][1]))
+    check(nl.customLightPresets[1][0] == ["1", [4, 40, 120, 80]], "storage format: " + str(nl.customLightPresets[1][0]))
+    text = open(nl.customLightPresetsFile, encoding="utf-8").read()
+    check("presetName1=Web Edit" in text and "customPreset1=1|4|40|120|80" in text, "presets file: " + text)
+    rig.post(P, {"action": "rename", "index": 2, "name": "Renamed"})
+    check(nl.presetNames.get(1) == "Renamed", "rename")
+    rig.post(P, {"action": "move", "index": 2, "direction": "left"})
+    check(nl.presetNames.get(0) == "Renamed" and nl.customLightPresets[0][0][0] == "1", "move left")
+    r = rig.post(P, {"action": "duplicate", "index": 1})
+    check(r["preset"]["index"] == 2 and r["preset"]["name"] == "Renamed (copy)" and len(nl.customLightPresets) == count + 1, "duplicate: " + str(r))
+    rig.post(P, {"action": "delete", "index": 2})
+    check(len(nl.customLightPresets) == count and nl.presetNames.get(0) == "Renamed", "delete")
+    r = rig.post(P, {"action": "add"})
+    check(r["preset"]["index"] == count + 1 and len(nl.customLightPresets) == count + 1, "add")
+    rig.get("light=*&mode=HSI&hue=33&sat=100&bri=44", 0.4)
+    r = rig.post(P, {"action": "snapshot", "index": count + 1})
+    check(not r["preset"]["global"] and all(e["hue"] == 33 for e in r["preset"]["entries"]), "snapshot: " + str(r["preset"]["entries"][:1]))
+    rig.get("light=*&mode=CCT&temp=5600&bri=10", 0.4)
+    rig.post(P, {"action": "recall", "index": count + 1}, 1.0)
+    check(hueOf(rig.rec.last(rig.mac(RIM))) == 33, "recall over POST")
+    rig.post(P, {"action": "delete", "index": count + 1})
+    bad = rig.post(P, {"action": "save", "index": 999, "entries": entries})
+    check(not bad["success"], "unknown preset refused")
+    off = [{"target": "2", "mode": "HSI", "hue": 10, "sat": 100, "bri": 50, "off": True}]
+    rig.post(P, {"action": "save", "index": 1, "entries": off})
+    check(nl.customLightPresets[0][0][1][0] == 7 and rig.post(P, {"action": "get", "index": 1})["preset"]["entries"][0].get("off"), "an off light survives an edit")
+
+
+def t_animationEditAPI(rig):
+    nl = rig.nl
+    A = "/NeewerLux/animate"
+    anim = {"name": "Web Anim", "loop": True, "keyframes": [
+        {"hold_ms": 200, "fade_ms": 0, "lights": {"*": {"mode": "HSI", "hue": 10, "sat": 100, "bri": 50}}},
+        {"hold_ms": 200, "fade_ms": 100, "lights": {"*": {"mode": "HSI", "hue": 200, "sat": 100, "bri": 50}}}]}
+    r = rig.post(A, {"action": "save", "animation": anim})
+    check(r["success"] and "Web Anim" in nl.savedAnimations, str(r))
+    check(not rig.post(A, {"action": "save", "animation": anim})["success"], "saving over an existing name needs overwrite")
+    anim["keyframes"][0]["hold_ms"] = 300
+    check(rig.post(A, {"action": "save", "animation": anim, "original": "Web Anim"})["success"], "editing in place")
+    got = rig.post(A, {"action": "get", "name": "web anim"})["animation"]
+    check(got["keyframes"][0]["hold_ms"] == 300, "get returns the saved version")
+    anim["name"] = "Web Anim Renamed"
+    check(rig.post(A, {"action": "save", "animation": anim, "original": "Web Anim"})["success"], "rename")
+    check("Web Anim" not in nl.savedAnimations and not os.path.exists(os.path.join(nl.animationsDir, "Web Anim.json")), "old name removed")
+    r = rig.post(A, {"action": "duplicate", "name": "Web Anim Renamed"})
+    check(r["animation"] == "Web Anim Renamed (copy)" and r["animation"] in nl.savedAnimations, "duplicate")
+    for n in ("Web Anim Renamed", "Web Anim Renamed (copy)"):
+        check(rig.post(A, {"action": "delete", "name": n})["success"], "delete " + n)
+    check("Web Anim Renamed" not in nl.savedAnimations, "deleted")
+    check(not rig.post(A, {"action": "save", "animation": {"name": "x", "keyframes": []}})["success"], "empty animation refused")
+    check(rig.post(A, {"action": "reload"})["count"] == len(nl.savedAnimations), "reload")
+
+
+def t_sequenceEditAPI(rig):
+    nl = rig.nl
+    S = "/NeewerLux/sequence"
+    seq = stepSequence("Web Seq", [10, 20], 300)
+    check(rig.post(S, {"action": "save", "sequence": seq})["success"], "save new")
+    got = rig.post(S, {"action": "get", "name": "web seq"})
+    check(got["success"] and got["sequence"]["name"] == "Web Seq", "get")
+    seq["name"] = "Web Seq 2"
+    r = rig.post(S, {"action": "save", "sequence": seq, "original": "Web Seq"})
+    check(r["success"] and "Web Seq" not in nl.savedSequences and "Web Seq 2" in nl.savedSequences, "rename: " + str(r))
+    check(len(nl._sequenceFilesNamed("Web Seq")) == 0 and len(nl._sequenceFilesNamed("Web Seq 2")) == 1, "files follow the rename")
+    nl.loadAllSequences()
+    check("Web Seq" not in nl.savedSequences, "the old name doesn't come back on reload")
+    rig.post(S, {"action": "play", "name": "Web Seq 2"}, 0.2)
+    check(rig.post(S, {"action": "delete", "name": "Web Seq 2"})["success"], "delete")
+    check(nl.showEngine.status()["sequence"] is None, "deleting the playing sequence stops it")
+    check("Web Seq 2" not in nl.savedSequences and not nl._sequenceFilesNamed("Web Seq 2"), "deleted")
+
+
 TESTS = [t_maxBrightnessHTTP, t_maxBrightnessAnimationAndSequence, t_minBrightness, t_globalDefaultLimit,
          t_slidersExempt, t_lockedLight, t_roleTargets, t_effectOverPartOfRigRejoinsInSync, t_revertToPresetAtEnd,
          t_endPreset, t_holdAtEnd, t_pauseRevertsAndResumes, t_seekAndSetPosition, t_effectQueueReplaceFull,
@@ -790,6 +876,7 @@ TESTS = [t_maxBrightnessHTTP, t_maxBrightnessAnimationAndSequence, t_minBrightne
          t_stageTilesAndStatusColours, t_renderMatchesPlayback, t_renderRespectsLimitsAndLocks, t_renderPNG,
          t_batchKelvin, t_batchCoalescesUnderLoad, t_getDuringBusyWorkerNotDropped, t_batchStopsOverrideAnimation,
          t_batchDuringSequenceBecomesRevertTarget, t_listJsonStructured,
+         t_presetEditAPI, t_animationEditAPI, t_sequenceEditAPI,
          t_addSimulatedRig]
 
 

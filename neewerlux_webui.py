@@ -128,6 +128,37 @@ a:hover { text-decoration: underline; }
 .modal-bg { position:fixed; inset:0; background:rgba(0,0,0,.7); display:none; align-items:center; justify-content:center; z-index:50; }
 .modal-bg.open { display:flex; }
 .modal { background:var(--bg2); border:1px solid var(--border); border-radius:8px; padding:14px; max-width:95vw; max-height:90vh; overflow:auto; }
+.modal.wide { width:min(1100px, 95vw); }
+.modal.full { width:97vw; height:94vh; max-height:94vh; display:flex; flex-direction:column; overflow:hidden; }
+.modal h3 { margin:0 0 10px; color:var(--accent); }
+.modal-title { display:flex; align-items:center; gap:8px; margin-bottom:10px; flex-wrap:wrap; }
+.modal-title b { font-size:15px; }
+.toolbar { display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-bottom:6px; font-size:12px; }
+.toolbar input[type=number], .toolbar select { width:auto; }
+.toolbar input[type=text] { width:220px; }
+.btn.small { padding:3px 9px; font-size:11px; }
+.popup-menu { position:fixed; z-index:80; background:var(--bg2); border:1px solid var(--border); border-radius:6px; padding:4px 0; min-width:200px; box-shadow:0 6px 20px rgba(0,0,0,.5); }
+.popup-menu div { padding:6px 14px; cursor:pointer; font-size:13px; }
+.popup-menu div:hover { background:var(--accent); color:white; }
+.popup-menu div.disabled { color:var(--muted); pointer-events:none; }
+.popup-menu hr { border:0; border-top:1px solid var(--border); margin:4px 0; }
+.edit-table { width:100%; border-collapse:collapse; font-size:12px; }
+.edit-table th { text-align:left; color:var(--muted); font-weight:600; padding:4px; border-bottom:1px solid var(--border); }
+.edit-table td { padding:3px 4px; border-bottom:1px solid var(--border); }
+.edit-table tr.selected td { background:rgba(91,141,239,.18); }
+.edit-table input[type=number] { width:70px; }
+.edit-table select { width:auto; min-width:90px; }
+.tabs { display:flex; gap:2px; border-bottom:1px solid var(--border); margin-bottom:8px; }
+.tabs div { padding:6px 14px; cursor:pointer; color:var(--muted); border-bottom:2px solid transparent; }
+.tabs div.active { color:var(--accent); border-bottom-color:var(--accent); }
+textarea.json { width:100%; min-height:320px; background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:4px; font-family:monospace; font-size:12px; padding:8px; box-sizing:border-box; }
+.tl-wrap { display:flex; gap:10px; flex:1; min-height:0; }
+.tl-main { flex:1; display:flex; flex-direction:column; min-width:0; overflow:auto; }
+.tl-props { width:290px; flex-shrink:0; overflow:auto; border-left:1px solid var(--border); padding-left:10px; font-size:12px; }
+.tl-props .form-grid { grid-template-columns: 95px 1fr; }
+#tlCanvas { display:block; width:100%; cursor:default; outline:none; }
+.tl-status { font-size:12px; min-height:16px; margin-top:4px; }
+.tl-hint { color:var(--muted); font-size:11px; margin:4px 0 8px; }
 
 /* LIGHT TABLE */
 .light-table {
@@ -508,10 +539,25 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
                 <label style="display:flex;align-items:center;gap:6px;text-transform:none;color:var(--text);margin-top:4px">
                     <input type="checkbox" id="animRevert" checked> Revert lights on finish
                 </label>
+                <label style="display:flex;align-items:center;gap:6px;text-transform:none;color:var(--text);margin-top:4px" title="Send to all lights at once (synchronized). Off: one light at a time, as before 1.3.1.">
+                    <input type="checkbox" id="animParallel" checked> Parallel (synchronized send)
+                </label>
             </div>
             <div class="btn-row">
                 <button class="btn success" onclick="playAnimation()">&#x25B6; Play</button>
                 <button class="btn danger" onclick="stopAnimation()">&#x25A0; Stop</button>
+            </div>
+            <div class="btn-row" style="margin-top:6px">
+                <button class="btn small" onclick="animNew()">+ New</button>
+                <button class="btn small" onclick="animEdit()">Edit</button>
+                <button class="btn small" onclick="animDuplicate()">Duplicate</button>
+                <button class="btn small" onclick="animDelete()">Delete</button>
+            </div>
+            <div class="btn-row" style="margin-top:6px">
+                <button class="btn small" onclick="animExport()" title="Download the selected animation as a JSON file">Export</button>
+                <button class="btn small" onclick="document.getElementById('animImportFile').click()" title="Add an animation from a JSON file">Import</button>
+                <button class="btn small" onclick="animReload()" title="Reload animation files from light_prefs/animations">Reload</button>
+                <input type="file" id="animImportFile" accept=".json,application/json" style="display:none" onchange="animImport(this)">
             </div>
         </div>
     </div>
@@ -531,6 +577,12 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
             <div class="btn-row" style="margin-top:6px">
                 <button class="btn" onclick="seqRender()" title="Show what the selected sequence does to each light, without playing it">Render</button>
                 <button class="btn" onclick="seqReload()" title="Reload sequence files from light_prefs/sequences">Reload</button>
+            </div>
+            <div class="btn-row" style="margin-top:6px">
+                <button class="btn small" onclick="tlOpen(null)" title="Open the timeline editor on a new sequence">+ New</button>
+                <button class="btn small" onclick="tlOpenSelected()" title="Open the selected sequence in the timeline editor">Edit</button>
+                <button class="btn small" onclick="seqDuplicate()">Duplicate</button>
+                <button class="btn small" onclick="seqDelete()">Delete</button>
             </div>
             <div style="color:var(--muted);font-size:11px;margin-top:8px">Sliders and presets don't interrupt a playing sequence: they become what the lights return to when it ends.</div>
         </div>
@@ -598,8 +650,9 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
             <p>This dashboard controls the same lights as the desktop app, over HTTP.
             Anything here can also be driven by a plain URL, which is how hardware like a
             Stream Deck talks to it. See the API Reference below for the full list.</p>
-            <p style="color:var(--muted)">Presets and animations are managed in the desktop
-            app. Its Info tab documents them in full.</p>
+            <p style="color:var(--muted)">Presets (right-click one), animations and sequences can be
+            edited here as on the desktop. Network access, keyboard shortcuts and startup options
+            are only changed in the desktop app.</p>
             <hr style="border-color:var(--border)">
             <div id="updateCheckArea">
                 <button class="btn" onclick="checkForUpdates()">Check for Updates</button>
@@ -662,6 +715,14 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
                 <div class="api-code">GET /NeewerLux/doAction?status_json</div>
             </div>
             <div class="api-section">
+                <h3>Editing</h3>
+                <div class="api-desc">Presets: list, get, save, rename, move, duplicate, delete, add, snapshot, recall</div>
+                <div class="api-code">POST /NeewerLux/presets {"action":"rename","index":3,"name":"Stream"}</div>
+                <div class="api-desc">Animations and sequences: get, save (with "original" to rename), duplicate, delete</div>
+                <div class="api-code">POST /NeewerLux/animate {"action":"save","animation":{...},"original":"Old Name"}</div>
+                <div class="api-code">POST /NeewerLux/sequence {"action":"get","name":"Example - Four Light Demo"}</div>
+            </div>
+            <div class="api-section">
                 <h3>Settings</h3>
                 <div class="api-desc">Light and show preferences, as on this page's Settings panel</div>
                 <div class="api-code">POST /NeewerLux/settings {"action":"get"}</div>
@@ -690,6 +751,118 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
         <div id="renderCues" style="font-size:11px;color:var(--muted);max-height:160px;overflow:auto;margin-top:6px;font-family:monospace"></div>
     </div>
 </div>
+
+<!-- PRESET EDITOR -->
+<div class="modal-bg" id="presetModal">
+    <div class="modal wide">
+        <div class="modal-title"><b id="peTitle">Edit preset</b><span style="flex:1"></span>
+            <button class="btn primary" onclick="peSave()">Save</button><button class="btn" onclick="peClose()">Cancel</button></div>
+        <div class="form-grid" style="grid-template-columns:80px 1fr;margin-bottom:10px">
+            <label>Name</label><input type="text" id="peName" maxlength="20" placeholder="Preset name (optional)">
+        </div>
+        <div class="tl-hint">One entry for all lights makes a global preset (it applies to whichever lights you recall it on). Entries for individual lights make a snapshot.</div>
+        <table class="edit-table"><thead><tr><th>#</th><th>Light</th><th>Mode</th><th>Values</th><th></th></tr></thead><tbody id="peRows"></tbody></table>
+        <div class="toolbar" style="margin-top:8px">
+            <button class="btn small" onclick="peAdd()">+ Entry</button>
+            <button class="btn small" onclick="peDup()">Duplicate</button>
+            <button class="btn small" onclick="peDel()">Delete</button>
+            <button class="btn small" onclick="peMove(-1)">Up</button>
+            <button class="btn small" onclick="peMove(1)">Down</button>
+        </div>
+    </div>
+</div>
+
+<!-- ANIMATION EDITOR -->
+<div class="modal-bg" id="animModal">
+    <div class="modal wide">
+        <div class="modal-title"><b id="aeTitle">Edit animation</b><span style="flex:1"></span>
+            <button class="btn primary" onclick="aeSave()">Save</button><button class="btn" onclick="aeClose()">Cancel</button></div>
+        <div class="form-grid" style="grid-template-columns:90px 1fr;margin-bottom:8px">
+            <label>Name</label><input type="text" id="aeName">
+            <label>Description</label><input type="text" id="aeDesc">
+            <label>Loop</label><label style="text-transform:none"><input type="checkbox" id="aeLoop"> Loop animation</label>
+        </div>
+        <div class="tabs"><div id="aeTabVisual" class="active" onclick="aeTab('visual')">Visual editor</div><div id="aeTabJson" onclick="aeTab('json')">JSON editor</div></div>
+        <div id="aeVisual">
+            <table class="edit-table"><thead><tr><th>#</th><th>Lights</th><th>Hold (ms)</th><th>Fade (ms)</th></tr></thead><tbody id="aeFrames"></tbody></table>
+            <div class="toolbar" style="margin-top:6px">
+                <button class="btn small" onclick="aeAddFrame()">+ Frame</button>
+                <button class="btn small" onclick="aeDupFrame()">Duplicate</button>
+                <button class="btn small" onclick="aeDelFrame()">Delete</button>
+                <button class="btn small" onclick="aeMoveFrame(-1)">Up</button>
+                <button class="btn small" onclick="aeMoveFrame(1)">Down</button>
+                <button class="btn small" onclick="aeCopyFrame()">Copy</button>
+                <button class="btn small" onclick="aePasteFrame()">Paste</button>
+            </div>
+            <h3 style="margin-top:12px;font-size:13px" id="aeFrameTitle">Frame</h3>
+            <div class="toolbar">Hold <input type="number" id="aeHold" min="0" step="50" style="width:90px" onchange="aeFrameField()"> ms
+                &nbsp; Fade <input type="number" id="aeFade" min="0" step="50" style="width:90px" onchange="aeFrameField()"> ms</div>
+            <table class="edit-table"><thead><tr><th>Light</th><th>Mode</th><th>Values</th><th></th></tr></thead><tbody id="aeLights"></tbody></table>
+            <div class="toolbar" style="margin-top:6px"><button class="btn small" onclick="aeAddLight()">+ Light</button>
+                <span class="tl-hint" style="margin:0">Lights are * (every light), or 1, 2, 3... (positions; your light IDs when played on their own), or a light name.</span></div>
+        </div>
+        <div id="aeJson" style="display:none">
+            <div class="tl-hint">The keyframes as JSON (the format of the files in light_prefs/animations).</div>
+            <textarea class="json" id="aeJsonText" spellcheck="false"></textarea>
+        </div>
+    </div>
+</div>
+
+<!-- SEQUENCE TIMELINE EDITOR -->
+<div class="modal-bg" id="tlModal">
+    <div class="modal full">
+        <div class="toolbar">
+            Name <input type="text" id="tlName" oninput="tlNameEdited()">
+            Length <input type="number" id="tlDuration" min="1" step="0.5" style="width:80px" onchange="tlDurationEdited()"> s
+            Tempo <input type="number" id="tlBpm" min="0" max="300" step="0.5" style="width:70px" title="BPM, 0 = off. Beat lines and beat snapping." onchange="tlTempoEdited()">
+            Beat 1 at <input type="number" id="tlBeatOffset" min="0" step="10" style="width:80px" onchange="tlTempoEdited()"> ms
+            Snap <select id="tlSnap"></select>
+            <button class="btn small" onclick="tlZoom(0.8)">Zoom -</button><button class="btn small" onclick="tlZoom(1.25)">Zoom +</button><button class="btn small" onclick="tlFit()">Fit</button>
+            <span style="flex:1"></span>
+            <button class="btn small" onclick="tlSettingsToggle()">Settings</button>
+            <button class="btn small" onclick="tlValidate()">Check</button>
+            <button class="btn small primary" onclick="tlSave(false)">Save</button>
+            <button class="btn small" onclick="tlSave(true)">Save As</button>
+            <button class="btn small" onclick="tlClose()">Close</button>
+        </div>
+        <div class="toolbar">
+            <button class="btn small" onclick="tlSetPlayhead(0)" title="Playhead to the start (Home)">|&lt;</button>
+            <button class="btn small" id="tlPlayBtn" onclick="tlTogglePlay()" title="Play or pause from the playhead (Space)">Play</button>
+            <button class="btn small" onclick="tlStop()">Stop</button>
+            <b id="tlTime" style="font-family:monospace">0:00.000</b>
+            <label style="text-transform:none;margin-left:12px" title="Play the edit through the real lights from the playhead. Off: preview on screen only."><input type="checkbox" id="tlSend" onchange="tlSendToggled()"> Send to lights</label>
+            <span style="flex:1"></span>
+            <button class="btn small" onclick="tlAddCue('state')">+ Colour cue</button>
+            <button class="btn small" onclick="tlAddCue('clip')">+ Clip cue</button>
+            <button class="btn small" onclick="tlUndo()">Undo</button>
+            <button class="btn small" onclick="tlRedo()">Redo</button>
+        </div>
+        <div id="tlSettings" style="display:none;border:1px solid var(--border);border-radius:6px;padding:8px;margin-bottom:6px">
+            <div class="form-grid" style="grid-template-columns:150px 1fr 150px 1fr">
+                <label>Frame rate</label><input type="number" id="tlFps" min="0" max="30" title="0 = the global default">
+                <label>At the end</label><select id="tlEnd"></select>
+                <label>While paused</label><select id="tlPause"><option value="revert">Return lights to their earlier state</option><option value="freeze">Freeze the current frame</option></select>
+                <label>During effects</label><select id="tlInterrupt"><option value="continue">Keep running underneath (stay in sync)</option><option value="pause">Pause until the interruption ends</option></select>
+                <label>Artist</label><input type="text" id="tlArtist">
+                <label>Song</label><input type="text" id="tlSong">
+                <label>Description</label><input type="text" id="tlDesc" style="grid-column: span 3">
+            </div>
+            <div class="toolbar" style="margin-top:6px"><button class="btn small primary" onclick="tlSettingsApply()">Apply</button></div>
+        </div>
+        <div class="tl-wrap">
+            <div class="tl-main">
+                <canvas id="tlCanvas" tabindex="0"></canvas>
+                <div class="tl-hint">Double-click a track to add a cue. Drag a cue to move it, its right edge to change its length, the notch at its top to change the fade. Right-click for more. Ctrl+wheel zooms. Dashed outlines are cues shared by several lights.</div>
+                <div style="color:var(--muted);font-size:12px;margin-bottom:4px">Preview at the playhead</div>
+                <div class="stage-grid" id="tlStage"></div>
+            </div>
+            <div class="tl-props" id="tlProps"></div>
+        </div>
+        <div class="tl-status" id="tlStatus"></div>
+    </div>
+</div>
+
+<div class="popup-menu" id="popupMenu" style="display:none"></div>
 
 <script>
 const BASE = '/NeewerLux/doAction?';
@@ -785,11 +958,12 @@ function playAnimation() {
     const loop = document.getElementById('animLoop').checked;
     const maxLoops = parseInt(document.getElementById('animLoopCount').value) || 0;
     const revert = document.getElementById('animRevert').checked;
+    const parallel = document.getElementById('animParallel').checked;
 
     fetch('/NeewerLux/animate', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({action:'play', name:selectedAnim, speed:parseFloat(speed), rate:parseInt(rate), brightness:parseInt(bri), loop:loop, maxLoops:maxLoops, revert:revert})
+        body: JSON.stringify({action:'play', name:selectedAnim, speed:parseFloat(speed), rate:parseInt(rate), brightness:parseInt(bri), loop:loop, maxLoops:maxLoops, revert:revert, parallel:parallel})
     }).then(r => r.json()).then(d => {
         let msg = '▶ Playing: ' + selectedAnim;
         if (loop) msg += maxLoops > 0 ? ' (' + maxLoops + ' loops)' : ' (looping)';
@@ -834,7 +1008,6 @@ function stopAutoRefresh() {
 // REFRESH / LOAD
 async function refreshAll() {
     loadLights();
-    loadSequences();
     if (!settingsData) loadSettings();
 }
 
@@ -846,6 +1019,7 @@ async function loadLights() {
         renderLightsJSON(data);
         renderPresetsJSON(data);
         loadAnimationsJSON(data);
+        if (data.sequences) renderSeqList(data.sequences);  // no separate request per refresh
     } catch(e) {
         document.getElementById('lightTableBody').innerHTML =
             '<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--muted)">Could not load light data. <a href="#" onclick="refreshAll();return false;">Retry</a></td></tr>';
@@ -855,6 +1029,7 @@ async function loadLights() {
 
 function renderLightsJSON(data) {
     const lights = data.lights || [];
+    window._lastLights = lights;
     const select = document.getElementById('targetLight');
     select.innerHTML = '<option value="*">All Lights</option>';
 
@@ -896,6 +1071,7 @@ function renderLightsJSON(data) {
 
 function renderPresetsJSON(data) {
     const presets = data.presets || [];
+    window._lastPresets = presets;
     const grid = document.getElementById('presetGrid');
     if (presets.length === 0) {
         grid.innerHTML = '<div style="color:#888;grid-column:1/-1;text-align:center;padding:10px;">No presets configured</div>';
@@ -905,7 +1081,7 @@ function renderPresetsJSON(data) {
     presets.forEach(p => {
         const cls = p.custom ? 'preset-btn custom-global' : (p.name ? 'preset-btn custom-snap' : 'preset-btn');
         const label = p.name || (p.custom ? 'CUSTOM' : 'PRESET');
-        html += '<button class="' + cls + '" onclick="usePreset(' + p.index + ')" oncontextmenu="presetMenu(event,' + p.index + ')" title="Click: recall | Right-click: options">'
+        html += '<button class="' + cls + '" onclick="usePreset(' + p.index + ')" oncontextmenu="presetMenu(event,' + p.index + ')" title="Click: recall | Right-click: edit, rename, move, duplicate, delete">'
             + '<span class="preset-num">' + p.index + '</span>'
             + '<span>' + label + '</span></button>';
     });
@@ -913,22 +1089,6 @@ function renderPresetsJSON(data) {
     html += '<button class="preset-btn" onclick="addPreset()" title="Add a new preset" style="opacity:0.6"><span class="preset-num">+</span><span>NEW</span></button>';
     html += '<div style="grid-column:1/-1;font-size:11px;color:var(--muted);text-align:center;padding:4px 0;">Click to recall &bull; Right-click for options</div>';
     grid.innerHTML = html;
-}
-
-function presetMenu(e, idx) {
-    e.preventDefault();
-    const action = prompt('Preset ' + idx + ':\\n1 = Save snapshot here\\n2 = Delete this preset\\n\\nEnter 1 or 2:', '1');
-    if (action === '1') {
-        if (confirm('Save a snapshot of all lights to Preset ' + idx + '?')) {
-            apiCall(BASE + 'save_preset=' + idx + '&nopage', 'Saved preset ' + idx);
-            setTimeout(refreshAll, 500);
-        }
-    } else if (action === '2') {
-        if (confirm('Delete Preset ' + idx + '? Remaining presets will be renumbered.')) {
-            apiCall(BASE + 'delete_preset=' + idx + '&nopage', 'Deleted preset ' + idx);
-            setTimeout(refreshAll, 500);
-        }
-    }
 }
 
 function addPreset() {
@@ -1120,7 +1280,7 @@ function renderSeqList(list) {
     list.forEach(s => {
         const item = document.createElement('div');
         item.className = 'anim-item' + (s.name === selectedSeq ? ' selected' : '');
-        item.innerHTML = '<strong>' + esc(s.name) + '</strong> <span style="float:right;color:var(--muted);font-size:11px">' + fmtMs(s.duration_ms) + ', ' + s.cues + ' cues</span>'
+        item.innerHTML = '<strong>' + esc(s.name) + '</strong> <span style="float:right;color:var(--muted);font-size:11px">' + fmtMs(s.duration_ms) + (s.cues != null ? ', ' + s.cues + ' cues' : '') + '</span>'
             + (s.description ? '<br><span style="color:var(--muted);font-size:11px">' + esc(s.description) + '</span>' : '');
         item.onclick = () => {
             div.querySelectorAll('.anim-item').forEach(i => i.classList.remove('selected'));
@@ -1129,9 +1289,6 @@ function renderSeqList(list) {
         };
         div.appendChild(item);
     });
-}
-async function loadSequences() {
-    try { const d = await seqPost({action:'list'}); if (d.success) renderSeqList(d.sequences); } catch(e) {}
 }
 async function seqReload() {
     try {
@@ -1328,6 +1485,1154 @@ async function saveGlobalPrefs() {
         applySettings(d);
         logMsg('Saved global preferences' + (d.note ? ' (' + d.note + ')' : ''), 'ok');
     } catch(e) { logMsg('Save failed: ' + e.message, 'err'); }
+}
+
+// ---------------------------------------------------------------------------
+// SHARED HELPERS FOR THE EDITORS
+async function postJSON(path, body) {
+    const r = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    return r.json();
+}
+function errText(d) { return ((d && (d.errors || [])).join('; ')) || (d && d.error) || 'unknown error'; }
+function showMenu(ev, items) {
+    ev.preventDefault();
+    const m = document.getElementById('popupMenu');
+    m.innerHTML = '';
+    items.forEach(it => {
+        if (it === '-') { m.appendChild(document.createElement('hr')); return; }
+        const d = document.createElement('div');
+        d.textContent = it.label;
+        if (it.disabled) d.className = 'disabled';
+        d.onclick = () => { hideMenu(); it.fn(); };
+        m.appendChild(d);
+    });
+    m.style.display = 'block';
+    const w = m.offsetWidth, h = m.offsetHeight;
+    m.style.left = Math.min(ev.clientX, window.innerWidth - w - 8) + 'px';
+    m.style.top = Math.min(ev.clientY, window.innerHeight - h - 8) + 'px';
+}
+function hideMenu() { document.getElementById('popupMenu').style.display = 'none'; }
+document.addEventListener('mousedown', e => { if (!e.target.closest('#popupMenu')) hideMenu(); });
+function lightOptions(current, includeAll) {
+    // targets the editors offer: all lights, each light's ID, and anything already stored
+    const opts = [];
+    if (includeAll) opts.push(['-1', 'All lights (global)']);
+    (window._lastLights || []).forEach(l => opts.push([String(l.id), l.id + ' - ' + (l.name || l.model)]));
+    if (current != null && !opts.some(o => o[0] === String(current))) opts.push([String(current), String(current)]);
+    return opts.map(o => '<option value="' + esc(o[0]) + '"' + (String(current) === o[0] ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join('');
+}
+const SCENES = ['1: Police', '2: Ambulance', '3: Fire Truck', '4: Fireworks', '5: Party', '6: Candlelight', '7: Lightning', '8: Paparazzi', '9: TV Screen'];
+function numInput(cls, val, min, max, step) {
+    return '<input type="number" class="' + cls + '" value="' + esc(val) + '" min="' + min + '" max="' + max + '"' + (step ? ' step="' + step + '"' : '') + '>';
+}
+
+// ---------------------------------------------------------------------------
+// PRESETS: right-click menu and editor (the desktop's preset menu and editor)
+function presetMenu(e, idx) {
+    const n = (window._lastPresets || []).length;
+    showMenu(e, [
+        {label: 'Recall', fn: () => usePreset(idx)},
+        {label: 'Save current lights here', fn: () => presetAction('snapshot', idx, 'Saved the current lights to preset ' + idx)},
+        {label: 'Edit preset...', fn: () => peOpen(idx)},
+        {label: 'Rename...', fn: () => presetRename(idx)},
+        '-',
+        {label: 'Move left', disabled: idx <= 1, fn: () => presetAction('move', idx, 'Moved preset ' + idx, {direction: 'left'})},
+        {label: 'Move right', disabled: idx >= n, fn: () => presetAction('move', idx, 'Moved preset ' + idx, {direction: 'right'})},
+        '-',
+        {label: 'Duplicate', fn: () => presetAction('duplicate', idx, 'Duplicated preset ' + idx)},
+        {label: 'Delete', disabled: n <= 1, fn: () => { if (confirm('Delete preset ' + idx + '? Presets after it are renumbered.')) presetAction('delete', idx, 'Deleted preset ' + idx); }},
+    ]);
+}
+async function presetAction(action, idx, okMsg, extra) {
+    const d = await postJSON('/NeewerLux/presets', Object.assign({action: action, index: idx}, extra || {}));
+    if (!d.success) { logMsg('Preset ' + action + ' failed: ' + errText(d), 'err'); return d; }
+    logMsg(okMsg, 'ok');
+    refreshAll();
+    return d;
+}
+function presetRename(idx) {
+    const p = (window._lastPresets || []).find(x => x.index === idx) || {};
+    const name = prompt('Name for preset ' + idx + ' (up to 20 characters, empty to clear):', p.name || '');
+    if (name !== null) presetAction('rename', idx, 'Renamed preset ' + idx, {name: name});
+}
+let pe = null;
+async function peOpen(idx) {
+    const d = await postJSON('/NeewerLux/presets', {action: 'get', index: idx});
+    if (!d.success) { logMsg('Can\'t open preset ' + idx + ': ' + errText(d), 'err'); return; }
+    pe = {index: idx, entries: JSON.parse(JSON.stringify(d.preset.entries)), sel: 0};
+    document.getElementById('peTitle').textContent = 'Edit preset ' + idx;
+    document.getElementById('peName').value = d.preset.name || '';
+    peRender();
+    document.getElementById('presetModal').classList.add('open');
+}
+function peClose() { document.getElementById('presetModal').classList.remove('open'); pe = null; }
+function peValues(e) {
+    const m = (e.mode || 'CCT').toUpperCase();
+    if (m === 'HSI') return 'Hue ' + numInput('pe-hue', e.hue != null ? e.hue : 240, 0, 360) + ' Sat ' + numInput('pe-sat', e.sat != null ? e.sat : 100, 0, 100) + ' Bri ' + numInput('pe-bri', e.bri != null ? e.bri : 100, 0, 100);
+    if (m === 'SCENE') return '<select class="pe-scene">' + SCENES.map((s, i) => '<option value="' + (i + 1) + '"' + ((e.scene || 1) === i + 1 ? ' selected' : '') + '>' + s + '</option>').join('') + '</select> Bri ' + numInput('pe-bri', e.bri != null ? e.bri : 100, 0, 100);
+    return 'Temp ' + numInput('pe-temp', (e.temp || 56) * 100, 2700, 8500, 100) + ' K Bri ' + numInput('pe-bri', e.bri != null ? e.bri : 100, 0, 100);
+}
+function peRender() {
+    const rows = document.getElementById('peRows');
+    rows.innerHTML = pe.entries.map((e, i) => '<tr data-i="' + i + '"' + (i === pe.sel ? ' class="selected"' : '') + '>'
+        + '<td>' + (i + 1) + '</td><td><select class="pe-target">' + lightOptions(e.target, true) + '</select></td>'
+        + '<td><select class="pe-mode">' + ['CCT', 'HSI', 'Scene'].map(m => '<option' + ((e.mode || 'CCT') === m ? ' selected' : '') + '>' + m + '</option>').join('') + '</select></td>'
+        + '<td>' + peValues(e) + '</td><td>' + (e.off ? '<span title="This light was off when the snapshot was taken" style="color:var(--muted)">off</span>' : '') + '</td></tr>').join('');
+    rows.querySelectorAll('tr').forEach(tr => {
+        const i = +tr.dataset.i;
+        tr.onclick = () => { if (pe.sel !== i) { peRead(); pe.sel = i; rows.querySelectorAll('tr').forEach(r => r.classList.toggle('selected', +r.dataset.i === i)); } };
+        tr.querySelectorAll('input,select').forEach(el => el.onchange = () => { peRead(); if (el.classList.contains('pe-mode')) peRender(); });
+    });
+}
+function peRead() {
+    // table to entries
+    document.querySelectorAll('#peRows tr').forEach(tr => {
+        const i = +tr.dataset.i, e = pe.entries[i], q = c => tr.querySelector('.' + c);
+        const n = {target: q('pe-target').value, mode: q('pe-mode').value};
+        if (e.mode === n.mode || !q('pe-bri')) {
+            if (q('pe-bri')) n.bri = +q('pe-bri').value;
+            if (n.mode === 'HSI' && q('pe-hue')) { n.hue = +q('pe-hue').value; n.sat = +q('pe-sat').value; }
+            if (n.mode === 'CCT' && q('pe-temp')) n.temp = Math.round(+q('pe-temp').value / 100);
+            if (n.mode === 'Scene' && q('pe-scene')) n.scene = +q('pe-scene').value;
+        } else {
+            n.bri = e.bri != null ? e.bri : 100;
+        }
+        if (e.off) n.off = true;
+        pe.entries[i] = n;
+    });
+}
+function peAdd() { peRead(); pe.entries.push({target: '-1', mode: 'CCT', temp: 56, bri: 100}); pe.sel = pe.entries.length - 1; peRender(); }
+function peDup() { peRead(); if (!pe.entries.length) return; pe.entries.splice(pe.sel + 1, 0, JSON.parse(JSON.stringify(pe.entries[pe.sel]))); pe.sel++; peRender(); }
+function peDel() { peRead(); if (pe.entries.length <= 1) return; pe.entries.splice(pe.sel, 1); pe.sel = Math.max(0, pe.sel - 1); peRender(); }
+function peMove(d) {
+    peRead();
+    const j = pe.sel + d;
+    if (j < 0 || j >= pe.entries.length) return;
+    [pe.entries[pe.sel], pe.entries[j]] = [pe.entries[j], pe.entries[pe.sel]];
+    pe.sel = j;
+    peRender();
+}
+async function peSave() {
+    peRead();
+    const idx = pe.index;
+    const d = await postJSON('/NeewerLux/presets', {action: 'save', index: idx, name: document.getElementById('peName').value, entries: pe.entries});
+    if (!d.success) { logMsg('Preset not saved: ' + errText(d), 'err'); return; }
+    logMsg('Saved preset ' + idx, 'ok');
+    peClose();
+    refreshAll();
+}
+
+// ---------------------------------------------------------------------------
+// ANIMATIONS: New, Edit, Duplicate, Delete, Export, Import, Reload, and the editor
+async function animPost(body) { return postJSON('/NeewerLux/animate', body); }
+function animNeedSelection() { if (!selectedAnim) { logMsg('No animation selected', 'err'); return true; } return false; }
+async function animDuplicate() {
+    if (animNeedSelection()) return;
+    const d = await animPost({action: 'duplicate', name: selectedAnim});
+    if (!d.success) { logMsg('Duplicate failed: ' + errText(d), 'err'); return; }
+    selectedAnim = d.animation;
+    logMsg('Duplicated as ' + d.animation, 'ok');
+    loadAnimations();
+}
+async function animDelete() {
+    if (animNeedSelection()) return;
+    if (!confirm('Delete animation "' + selectedAnim + '"?')) return;
+    const d = await animPost({action: 'delete', name: selectedAnim});
+    if (!d.success) { logMsg('Delete failed: ' + errText(d), 'err'); return; }
+    logMsg('Deleted animation ' + selectedAnim, 'ok');
+    selectedAnim = '';
+    loadAnimations();
+}
+async function animReload() {
+    const d = await animPost({action: 'reload'});
+    logMsg('Reloaded ' + d.count + ' animation(s)', 'ok');
+    loadAnimations();
+}
+async function animExport() {
+    if (animNeedSelection()) return;
+    const d = await animPost({action: 'get', name: selectedAnim});
+    if (!d.success) { logMsg('Export failed: ' + errText(d), 'err'); return; }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(d.animation, null, 2)], {type: 'application/json'}));
+    a.download = d.animation.name + '.json';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+async function animImport(input) {
+    const file = input.files && input.files[0];
+    input.value = '';
+    if (!file) return;
+    let data;
+    try { data = JSON.parse(await file.text()); } catch (e) { logMsg('Import failed: not valid JSON (' + e.message + ')', 'err'); return; }
+    let d = await animPost({action: 'save', animation: data});
+    if (!d.success && /exists/.test(errText(d)) && confirm('An animation named "' + data.name + '" already exists. Replace it?')) {
+        d = await animPost({action: 'save', animation: data, overwrite: true});
+    }
+    if (!d.success) { logMsg('Import failed: ' + errText(d), 'err'); return; }
+    logMsg('Imported animation ' + d.animation, 'ok');
+    selectedAnim = d.animation;
+    loadAnimations();
+}
+
+let ae = null;
+function animNew() {
+    aeOpen({name: 'New Animation', description: '', loop: true,
+            keyframes: [{hold_ms: 500, fade_ms: 0, lights: {'*': {mode: 'HSI', hue: 240, sat: 100, bri: 100}}}]}, null);
+}
+async function animEdit() {
+    if (animNeedSelection()) return;
+    const d = await animPost({action: 'get', name: selectedAnim});
+    if (!d.success) { logMsg('Can\'t open: ' + errText(d), 'err'); return; }
+    aeOpen(d.animation, d.animation.name);
+}
+function aeOpen(anim, original) {
+    ae = {anim: JSON.parse(JSON.stringify(anim)), original: original, sel: 0, tab: 'visual', clipboard: ae ? ae.clipboard : null};
+    ae.anim.keyframes = ae.anim.keyframes || [];
+    document.getElementById('aeTitle').textContent = original ? 'Edit animation' : 'New animation';
+    document.getElementById('aeName').value = ae.anim.name || '';
+    document.getElementById('aeDesc').value = ae.anim.description || '';
+    document.getElementById('aeLoop').checked = !!ae.anim.loop;
+    aeTab('visual');
+    aeRender();
+    document.getElementById('animModal').classList.add('open');
+}
+function aeClose() { document.getElementById('animModal').classList.remove('open'); }
+function aeTab(which) {
+    if (!ae) return;
+    if (which === ae.tab) { document.getElementById('aeVisual').style.display = which === 'visual' ? '' : 'none'; return; }
+    if (which === 'json') {
+        aeReadLights();
+        document.getElementById('aeJsonText').value = JSON.stringify(ae.anim.keyframes, null, 2);
+    } else if (!aeReadJson()) {
+        return;
+    }
+    ae.tab = which;
+    document.getElementById('aeTabVisual').classList.toggle('active', which === 'visual');
+    document.getElementById('aeTabJson').classList.toggle('active', which === 'json');
+    document.getElementById('aeVisual').style.display = which === 'visual' ? '' : 'none';
+    document.getElementById('aeJson').style.display = which === 'json' ? '' : 'none';
+    if (which === 'visual') aeRender();
+}
+function aeReadJson() {
+    try {
+        const kf = JSON.parse(document.getElementById('aeJsonText').value);
+        if (!Array.isArray(kf)) throw new Error('must be a JSON array of keyframes');
+        ae.anim.keyframes = kf;
+        ae.sel = Math.min(ae.sel, Math.max(0, kf.length - 1));
+        return true;
+    } catch (e) { alert('Fix the JSON first: ' + e.message); return false; }
+}
+function aeLightSummary(lights) {
+    return Object.entries(lights || {}).map(([k, p]) => {
+        const m = (p.mode || 'HSI').toUpperCase();
+        const v = m === 'HSI' ? 'H' + p.hue + ' S' + p.sat + ' ' + p.bri + '%' : m === 'CCT' ? (p.temp || 56) * 100 + 'K ' + p.bri + '%' : (m === 'ANM' || m === 'SCENE') ? 'scene ' + p.scene + ' ' + p.bri + '%' : m;
+        return k + ': ' + v;
+    }).join(', ');
+}
+function aeRender() {
+    const kfs = ae.anim.keyframes;
+    const body = document.getElementById('aeFrames');
+    body.innerHTML = kfs.map((k, i) => '<tr data-i="' + i + '"' + (i === ae.sel ? ' class="selected"' : '') + '><td>' + (i + 1) + '</td><td>' + esc(aeLightSummary(k.lights)) + '</td><td>' + (k.hold_ms || 0) + '</td><td>' + (k.fade_ms || 0) + '</td></tr>').join('')
+        || '<tr><td colspan="4" style="color:var(--muted)">No frames yet</td></tr>';
+    body.querySelectorAll('tr[data-i]').forEach(tr => tr.onclick = () => { aeReadLights(); ae.sel = +tr.dataset.i; aeRender(); });
+    const k = kfs[ae.sel];
+    document.getElementById('aeFrameTitle').textContent = k ? 'Frame ' + (ae.sel + 1) : 'No frame selected';
+    document.getElementById('aeHold').value = k ? (k.hold_ms || 0) : '';
+    document.getElementById('aeFade').value = k ? (k.fade_ms || 0) : '';
+    const lb = document.getElementById('aeLights');
+    lb.innerHTML = k ? Object.entries(k.lights || {}).map(([key, p]) => {
+        const m = (p.mode || 'HSI').toUpperCase() === 'SCENE' ? 'ANM' : (p.mode || 'HSI').toUpperCase();
+        let vals = '';
+        if (m === 'HSI') vals = 'Hue ' + numInput('ae-hue', p.hue != null ? p.hue : 0, 0, 360) + ' Sat ' + numInput('ae-sat', p.sat != null ? p.sat : 100, 0, 100) + ' Bri ' + numInput('ae-bri', p.bri != null ? p.bri : 100, 0, 100);
+        else if (m === 'CCT') vals = 'Temp ' + numInput('ae-temp', (p.temp || 56) * 100, 2700, 8500, 100) + ' K Bri ' + numInput('ae-bri', p.bri != null ? p.bri : 100, 0, 100);
+        else if (m === 'ANM') vals = '<select class="ae-scene">' + SCENES.map((s, i) => '<option value="' + (i + 1) + '"' + ((p.scene || 1) === i + 1 ? ' selected' : '') + '>' + s + '</option>').join('') + '</select> Bri ' + numInput('ae-bri', p.bri != null ? p.bri : 100, 0, 100);
+        return '<tr data-key="' + esc(key) + '"><td><input type="text" class="ae-key" value="' + esc(key) + '" style="width:110px"></td><td><select class="ae-mode">'
+            + [['HSI', 'HSI'], ['CCT', 'CCT'], ['ANM', 'Scene'], ['ON', 'On'], ['OFF', 'Off']].map(o => '<option value="' + o[0] + '"' + (m === o[0] ? ' selected' : '') + '>' + o[1] + '</option>').join('')
+            + '</select></td><td>' + vals + '</td><td><button class="btn small danger" onclick="aeRemoveLight(this)">Remove</button></td></tr>';
+    }).join('') : '';
+    lb.querySelectorAll('input,select').forEach(el => el.onchange = () => { aeReadLights(); if (el.classList.contains('ae-mode') || el.classList.contains('ae-key')) aeRender(); else aeRenderFrames(); });
+}
+function aeRenderFrames() {
+    document.querySelectorAll('#aeFrames tr[data-i]').forEach(tr => {
+        const k = ae.anim.keyframes[+tr.dataset.i];
+        tr.children[1].textContent = aeLightSummary(k.lights);
+        tr.children[2].textContent = k.hold_ms || 0;
+        tr.children[3].textContent = k.fade_ms || 0;
+    });
+}
+function aeReadLights() {
+    // the selected frame's light rows back into the keyframe
+    if (!ae || ae.tab !== 'visual') return;
+    const k = ae.anim.keyframes[ae.sel];
+    if (!k) return;
+    const lights = {};
+    document.querySelectorAll('#aeLights tr').forEach(tr => {
+        const q = c => tr.querySelector('.' + c);
+        const key = (q('ae-key').value || '*').trim();
+        const mode = q('ae-mode').value;
+        const old = (k.lights || {})[tr.dataset.key] || {};
+        let p = {mode: mode};
+        const oldMode = (old.mode || 'HSI').toUpperCase() === 'SCENE' ? 'ANM' : (old.mode || 'HSI').toUpperCase();
+        if (mode === oldMode) {
+            if (mode === 'HSI') p = {mode: 'HSI', hue: +q('ae-hue').value, sat: +q('ae-sat').value, bri: +q('ae-bri').value};
+            else if (mode === 'CCT') p = {mode: 'CCT', temp: Math.round(+q('ae-temp').value / 100), bri: +q('ae-bri').value};
+            else if (mode === 'ANM') p = {mode: 'ANM', scene: +q('ae-scene').value, bri: +q('ae-bri').value};
+        } else {
+            const bri = old.bri != null ? old.bri : 100;
+            if (mode === 'HSI') p = {mode: 'HSI', hue: 240, sat: 100, bri: bri};
+            else if (mode === 'CCT') p = {mode: 'CCT', temp: 56, bri: bri};
+            else if (mode === 'ANM') p = {mode: 'ANM', scene: 1, bri: bri};
+        }
+        lights[key] = p;
+    });
+    k.lights = lights;
+}
+function aeFrameField() {
+    const k = ae.anim.keyframes[ae.sel];
+    if (!k) return;
+    k.hold_ms = Math.max(0, +document.getElementById('aeHold').value || 0);
+    k.fade_ms = Math.max(0, +document.getElementById('aeFade').value || 0);
+    aeRenderFrames();
+}
+function aeAddFrame() {
+    aeReadLights();
+    const prev = ae.anim.keyframes[ae.sel];
+    const k = prev ? JSON.parse(JSON.stringify(prev)) : {hold_ms: 500, fade_ms: 0, lights: {'*': {mode: 'HSI', hue: 240, sat: 100, bri: 100}}};
+    ae.anim.keyframes.splice(ae.sel + 1, 0, k);
+    ae.sel = Math.min(ae.sel + 1, ae.anim.keyframes.length - 1);
+    aeRender();
+}
+function aeDupFrame() { if (ae.anim.keyframes.length) aeAddFrame(); }
+function aeDelFrame() { aeReadLights(); if (ae.anim.keyframes.length <= 1) return; ae.anim.keyframes.splice(ae.sel, 1); ae.sel = Math.max(0, ae.sel - 1); aeRender(); }
+function aeMoveFrame(d) {
+    aeReadLights();
+    const k = ae.anim.keyframes, j = ae.sel + d;
+    if (j < 0 || j >= k.length) return;
+    [k[ae.sel], k[j]] = [k[j], k[ae.sel]];
+    ae.sel = j;
+    aeRender();
+}
+function aeCopyFrame() { aeReadLights(); const k = ae.anim.keyframes[ae.sel]; if (k) { ae.clipboard = JSON.parse(JSON.stringify(k)); logMsg('Copied frame ' + (ae.sel + 1), 'ok'); } }
+function aePasteFrame() {
+    // pastes the copied frame's lights and timing over the selected frame
+    if (!ae.clipboard || !ae.anim.keyframes[ae.sel]) return;
+    ae.anim.keyframes[ae.sel] = JSON.parse(JSON.stringify(ae.clipboard));
+    aeRender();
+}
+function aeAddLight() {
+    aeReadLights();
+    const k = ae.anim.keyframes[ae.sel];
+    if (!k) return;
+    k.lights = k.lights || {};
+    const keys = Object.keys(k.lights);
+    let key = '*';
+    if (keys.length) {
+        if (keys.includes('*')) delete k.lights['*'];  // a frame is either all lights or specific ones
+        for (let i = 1; i < 40; i++) if (!(String(i) in k.lights)) { key = String(i); break; }
+    }
+    k.lights[key] = {mode: 'HSI', hue: 240, sat: 100, bri: 100};
+    aeRender();
+}
+function aeRemoveLight(btn) {
+    aeReadLights();
+    const k = ae.anim.keyframes[ae.sel];
+    const key = btn.closest('tr').querySelector('.ae-key').value;
+    delete k.lights[key];
+    if (!Object.keys(k.lights).length) k.lights['*'] = {mode: 'HSI', hue: 240, sat: 100, bri: 100};
+    aeRender();
+}
+async function aeSave() {
+    if (ae.tab === 'json') { if (!aeReadJson()) return; } else aeReadLights();
+    const anim = ae.anim;
+    anim.name = document.getElementById('aeName').value.trim();
+    anim.description = document.getElementById('aeDesc').value.trim();
+    anim.loop = document.getElementById('aeLoop').checked;
+    anim.keyframes.forEach(k => {
+        // a frame mixing * with specific lights would be ambiguous: specific lights win, as on the desktop
+        if (k.lights && Object.keys(k.lights).length > 1 && '*' in k.lights) delete k.lights['*'];
+        if (!k.lights || !Object.keys(k.lights).length) k.lights = {'*': {mode: 'HSI', hue: 240, sat: 100, bri: 100}};
+    });
+    if (!anim.name) { alert('Give the animation a name.'); return; }
+    const body = {action: 'save', animation: anim};
+    if (ae.original) body.original = ae.original;
+    let d = await animPost(body);
+    if (!d.success && /exists/.test(errText(d)) && confirm('An animation named "' + anim.name + '" already exists. Replace it?')) {
+        body.overwrite = true;
+        d = await animPost(body);
+    }
+    if (!d.success) { logMsg('Animation not saved: ' + errText(d), 'err'); return; }
+    logMsg('Saved animation ' + d.animation, 'ok');
+    selectedAnim = d.animation;
+    aeClose();
+    loadAnimations();
+}
+
+// ---------------------------------------------------------------------------
+// SEQUENCES: Duplicate, Delete, and the timeline editor
+async function seqDuplicate() {
+    if (!selectedSeq) { logMsg('No sequence selected', 'err'); return; }
+    const g = await seqPost({action: 'get', name: selectedSeq});
+    if (!g.success) { logMsg('Duplicate failed: ' + errText(g), 'err'); return; }
+    const names = seqNames.map(n => n.toLowerCase());
+    let name = selectedSeq + ' (copy)', n = 2;
+    while (names.includes(name.toLowerCase())) name = selectedSeq + ' (copy ' + (n++) + ')';
+    g.sequence.name = name;
+    const d = await seqPost({action: 'save', sequence: g.sequence});
+    if (!d.success) { logMsg('Duplicate failed: ' + errText(d), 'err'); return; }
+    logMsg('Duplicated as ' + name, 'ok');
+    selectedSeq = name;
+    seqReload();
+}
+async function seqDelete() {
+    if (!selectedSeq) { logMsg('No sequence selected', 'err'); return; }
+    if (!confirm('Delete sequence "' + selectedSeq + '"?')) return;
+    const d = await seqPost({action: 'delete', name: selectedSeq});
+    if (!d.success) { logMsg('Delete failed: ' + errText(d), 'err'); return; }
+    logMsg('Deleted sequence ' + selectedSeq, 'ok');
+    selectedSeq = '';
+    seqReload();
+}
+
+const TL_SNAPS = [['No snap', 0], ['10 ms', 10], ['50 ms', 50], ['100 ms', 100], ['250 ms', 250], ['500 ms', 500], ['1 s', 1000], ['Beat', -1], ['Half beat', -2], ['Bar (4 beats)', -4]];
+let tl = null;
+
+function tlGridStep(snap, bpm) {
+    if (snap > 0) return snap;
+    if (snap < 0 && bpm > 0) { const beat = 60000 / bpm; return snap === -2 ? beat / 2 : beat * (-snap); }
+    return 0;
+}
+function tlSnapMs(ms) {
+    const snap = +document.getElementById('tlSnap').value, bpm = +document.getElementById('tlBpm').value || 0;
+    const step = tlGridStep(snap, bpm);
+    if (step <= 0) return Math.max(0, Math.round(ms));
+    const base = snap < 0 ? (+document.getElementById('tlBeatOffset').value || 0) : 0;
+    return Math.max(0, Math.round(base + Math.round((ms - base) / step) * step));
+}
+function tlKind(c) { return 'clip' in c ? 'clip' : 'state'; }
+function tlClipName(c) { return typeof c.clip === 'string' ? c.clip : (c.clip || {}).name || ''; }
+function tlFmt(ms, precise) {
+    ms = Math.max(0, Math.round(ms));
+    const s = Math.floor(ms / 1000);
+    return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0') + (precise ? '.' + String(ms % 1000).padStart(3, '0') : '');
+}
+function tlDescribe(c) {
+    if (tlKind(c) === 'clip') { const fit = typeof c.clip === 'object' && c.clip.fit ? c.clip.fit : 'stretch'; return tlClipName(c) + ' (' + fit + ')'; }
+    const st = c.state || {};
+    let t = st.mode === 'CCT' ? ((st.temp || 56) * 100) + 'K ' + (st.bri != null ? st.bri : 100) + '%' : 'H' + (st.hue || 0) + ' S' + (st.sat != null ? st.sat : 100) + ' ' + (st.bri != null ? st.bri : 100) + '%';
+    if (st.fade_ms) t += ', fade ' + (st.fade_ms / 1000).toFixed(1) + 's';
+    return t;
+}
+function tlKelvinRGB(k) {
+    const t = Math.max(1000, Math.min(40000, k)) / 100;
+    let r, g, b;
+    if (t <= 66) { r = 255; g = 99.47 * Math.log(t) - 161.12; b = t <= 19 ? 0 : 138.52 * Math.log(t - 10) - 305.04; }
+    else { r = 329.7 * Math.pow(t - 60, -0.1332); g = 288.12 * Math.pow(t - 60, -0.0755); b = 255; }
+    return [r, g, b].map(v => Math.max(0, Math.min(255, v)));
+}
+function tlCueColour(c) {
+    // the cue's colour at a readable brightness (as the desktop editor draws it)
+    if (tlKind(c) !== 'state') return null;
+    const st = c.state || {}, level = 0.4 + 0.6 * Math.sqrt(Math.max(60, st.bri != null ? st.bri : 100) / 100);
+    let rgb;
+    if (st.mode === 'CCT') rgb = tlKelvinRGB((st.temp || 56) * 100);
+    else {
+        const h = ((st.hue || 0) % 360) / 60, s = (st.sat != null ? st.sat : 100) / 100, x = 1 - Math.abs(h % 2 - 1);
+        const [r1, g1, b1] = h < 1 ? [1, x, 0] : h < 2 ? [x, 1, 0] : h < 3 ? [0, 1, x] : h < 4 ? [0, x, 1] : h < 5 ? [x, 0, 1] : [1, 0, x];
+        rgb = [r1, g1, b1].map(v => 255 * (1 - s + s * v));
+    }
+    return 'rgb(' + rgb.map(v => Math.round(v * level)).join(',') + ')';
+}
+function tlSpans(seq, idxs) {
+    const cues = seq.cues, dur = +seq.duration_ms || 0;
+    const order = idxs.slice().sort((a, b) => ((+cues[a].at_ms || 0) - (+cues[b].at_ms || 0)) || a - b);
+    const spans = {};
+    order.forEach((i, pos) => {
+        const c = cues[i], start = +c.at_ms || 0, d = +c.duration_ms || 0;
+        if (tlKind(c) === 'clip' || d > 0) spans[i] = [start, start + Math.max(1, d), false];
+        else {
+            let nxt = dur;
+            for (const j of order.slice(pos + 1)) { if ((+cues[j].at_ms || 0) > start) { nxt = +cues[j].at_ms || 0; break; } }
+            spans[i] = [start, Math.max(start + 1, nxt), true];
+        }
+    });
+    return spans;
+}
+function tlColourAt(changes, t) {
+    let lo = 0, hi = changes.length - 1, found = null;
+    while (lo <= hi) { const mid = (lo + hi) >> 1; if (changes[mid][0] <= t) { found = changes[mid]; lo = mid + 1; } else hi = mid - 1; }
+    return found;
+}
+
+async function tlOpenSelected() {
+    if (!selectedSeq) { logMsg('No sequence selected', 'err'); return; }
+    tlOpen(selectedSeq);
+}
+async function tlOpen(name) {
+    let seq, original = null;
+    if (name) {
+        const g = await seqPost({action: 'get', name: name});
+        if (!g.success) { logMsg('Can\'t open: ' + errText(g), 'err'); return; }
+        seq = g.sequence;
+        original = g.sequence.name;
+    } else {
+        const names = seqNames.map(n => n.toLowerCase());
+        let nm = 'New Sequence', n = 2;
+        while (names.includes(nm.toLowerCase())) nm = 'New Sequence ' + (n++);
+        seq = {format: 1, name: nm, duration_ms: 30000, cues: [{at_ms: 0, target: '*', state: {mode: 'CCT', temp: 45, bri: 50}}]};
+    }
+    tl = {seq: JSON.parse(JSON.stringify(seq)), original: original, dirty: false, sel: [], undo: [], redo: [], clipboard: (tl && tl.clipboard) || [],
+          playhead: 0, playing: false, playStart: [0, 0], send: false, pxPerSec: 40, offsetMs: 0, tracks: [], cueLights: {},
+          info: null, render: null, drag: null, hits: [], renderTimer: null, restartTimer: null};
+    tl.seq.cues = tl.seq.cues || [];
+    const snapSel = document.getElementById('tlSnap');
+    snapSel.innerHTML = TL_SNAPS.map(s => '<option value="' + s[1] + '">' + s[0] + '</option>').join('');
+    snapSel.value = '100';
+    document.getElementById('tlName').value = tl.seq.name || '';
+    document.getElementById('tlDuration').value = ((+tl.seq.duration_ms || 30000) / 1000);
+    const tempo = tl.seq.tempo || {};
+    document.getElementById('tlBpm').value = tempo.bpm || 0;
+    document.getElementById('tlBeatOffset').value = tempo.offset_ms || 0;
+    document.getElementById('tlSend').checked = false;
+    document.getElementById('tlSettings').style.display = 'none';
+    document.getElementById('tlModal').classList.add('open');
+    await tlRefreshInfo();
+    tlFit();
+    tlRerender();
+    tlUpdateTitle();
+}
+async function tlRefreshInfo() {
+    const targets = [...new Set(tl.seq.cues.map(c => String(c.target == null ? '*' : c.target)))];
+    tl.info = await seqPost({action: 'editor', targets: targets});
+    tlRebuildTracks();
+}
+function tlRebuildTracks() {
+    const info = tl.info;
+    if (!info) return;
+    tl.tracks = info.lights.map(l => ({id: String(l.id), label: l.id + '  ' + l.name, sub: (l.role ? l.role.charAt(0).toUpperCase() + l.role.slice(1) : '') + (l.side ? ', ' + l.side : '') + (l.simulated ? ' (simulated)' : ''), cues: [], target: String(l.id), name: l.name, role: l.role, simulated: l.simulated}));
+    const byId = {};
+    tl.tracks.forEach(t => byId[t.id] = t);
+    const orphans = [];
+    tl.cueLights = {};
+    tl.seq.cues.forEach((c, i) => {
+        const ids = (info.targets[String(c.target == null ? '*' : c.target)] || []).filter(id => byId[id]);
+        tl.cueLights[i] = ids;
+        if (ids.length) ids.forEach(id => byId[id].cues.push(i)); else orphans.push(i);
+    });
+    if (orphans.length) tl.tracks.push({id: null, label: 'No matching light', sub: 'cues for lights that aren\'t here', cues: orphans, target: '*'});
+    tlResizeCanvas();
+}
+function tlMetrics() {
+    const cv = document.getElementById('tlCanvas');
+    const ctx = cv.getContext('2d');
+    ctx.font = '13px sans-serif';
+    const labelW = Math.min(220, Math.max(110, ...tl.tracks.map(t => ctx.measureText(t.label).width + 18), 80));
+    return {rowH: 36, rulerH: 24, labelW: labelW, W: cv.clientWidth};
+}
+function tlResizeCanvas() {
+    const cv = document.getElementById('tlCanvas');
+    const m = tlMetrics();
+    const h = m.rulerH + m.rowH * Math.max(1, tl.tracks.length) + 14;
+    const dpr = window.devicePixelRatio || 1;
+    cv.style.height = h + 'px';
+    cv.width = Math.max(300, cv.clientWidth) * dpr;
+    cv.height = h * dpr;
+    tlDraw();
+}
+window.addEventListener('resize', () => { if (tl && document.getElementById('tlModal').classList.contains('open')) tlResizeCanvas(); });
+function tlX(ms) { const m = tlMetrics(); return m.labelW + (ms - tl.offsetMs) * tl.pxPerSec / 1000; }
+function tlMs(x) { const m = tlMetrics(); return tl.offsetMs + (x - m.labelW) * 1000 / tl.pxPerSec; }
+function tlVisibleMs() { const m = tlMetrics(); return Math.max(1, (m.W - m.labelW) * 1000 / tl.pxPerSec); }
+function tlZoom(f, anchorMs) {
+    if (anchorMs == null) anchorMs = tl.offsetMs + tlVisibleMs() / 2;
+    const ax = tlX(anchorMs), m = tlMetrics();
+    tl.pxPerSec = Math.max(2, Math.min(2000, tl.pxPerSec * f));
+    tl.offsetMs = Math.max(0, anchorMs - (ax - m.labelW) * 1000 / tl.pxPerSec);
+    tlDraw();
+}
+function tlFit() {
+    const m = tlMetrics(), dur = Math.max(1000, +tl.seq.duration_ms || 1000);
+    tl.pxPerSec = Math.max(2, (Math.max(300, m.W) - m.labelW - 14) * 1000 / dur);
+    tl.offsetMs = 0;
+    tlDraw();
+}
+
+function tlDraw() {
+    if (!tl) return;
+    const cv = document.getElementById('tlCanvas');
+    const dpr = window.devicePixelRatio || 1;
+    const ctx = cv.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const m = tlMetrics(), W = cv.clientWidth, H = cv.height / dpr;
+    const {rowH, rulerH, labelW} = m;
+    const seq = tl.seq, dur = +seq.duration_ms || 0;
+    ctx.fillStyle = '#1a1a1e'; ctx.fillRect(0, 0, W, H);
+    ctx.font = '12px sans-serif'; ctx.textBaseline = 'middle';
+    tl.hits = [];
+    const t0 = tl.offsetMs, t1 = t0 + tlVisibleMs();
+    const tick = [100, 250, 500, 1000, 2000, 5000, 10000, 15000, 30000, 60000, 120000].find(s => s * tl.pxPerSec / 1000 >= 60) || 300000;
+    for (let t = Math.floor(t0 / tick) * tick; t <= t1; t += tick) {
+        const x = tlX(t);
+        if (x < labelW) continue;
+        ctx.fillStyle = '#303038'; ctx.fillRect(x, rulerH, 1, H - rulerH);
+        ctx.fillStyle = '#aaaab4'; ctx.fillRect(x, rulerH - 6, 1, 6);
+        ctx.fillText(tick >= 1000 ? tlFmt(t) : (t / 1000).toFixed(2) + 's', x + 3, rulerH / 2);
+    }
+    const bpm = +document.getElementById('tlBpm').value || 0;
+    if (bpm > 0) {
+        const beat = 60000 / bpm, off = +document.getElementById('tlBeatOffset').value || 0;
+        if (beat * tl.pxPerSec / 1000 >= 6) {
+            let k = Math.floor((t0 - off) / beat);
+            for (let bt = off + k * beat; bt <= t1; bt += beat, k++) {
+                const x = tlX(bt);
+                if (x < labelW) continue;
+                ctx.fillStyle = (k % 4 === 0) ? '#5a4682' : '#372d4b';
+                ctx.fillRect(x, rulerH, 1, H - rulerH);
+            }
+        }
+    }
+    const xEnd = tlX(dur);
+    if (xEnd < W) { ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(Math.max(labelW, xEnd), rulerH, W - Math.max(labelW, xEnd), H - rulerH); }
+    const changesById = (tl.render && tl.render.changes) || {};
+    const renderEnd = tl.render ? tl.render.end_ms : dur;
+    tl.tracks.forEach((track, row) => {
+        const y = rulerH + row * rowH;
+        ctx.fillStyle = '#37373e'; ctx.fillRect(0, y + rowH - 1, W, 1);
+        const bandH = 6;
+        const ch = track.id != null ? (changesById[track.id] || []) : [];
+        ch.forEach((c, k) => {
+            const end = k + 1 < ch.length ? ch[k + 1][0] : renderEnd;
+            const xa = Math.max(labelW, tlX(c[0])), xb = Math.min(W, tlX(end));
+            if (xb > xa && c[1]) { ctx.fillStyle = c[1]; ctx.fillRect(xa, y + rowH - bandH - 1, xb - xa, bandH); }
+        });
+        const spans = tlSpans(seq, track.cues);
+        Object.keys(spans).forEach(key => {
+            const i = +key, [start, end, hold] = spans[i], c = seq.cues[i];
+            const xa = tlX(start), xb = tlX(end);
+            if (xb < labelW || xa > W) return;
+            const top = y + 3, h = rowH - bandH - 8;
+            const base = tlCueColour(c) || 'rgb(70,95,140)';
+            const L = Math.max(labelW, xa), R = Math.min(W, xb);
+            const fade = tlKind(c) === 'state' ? (+(c.state || {}).fade_ms || 0) : 0;
+            const xh = Math.min(xb, Math.max(xa + 8, tlX(start + fade)));
+            if (hold) {
+                ctx.globalAlpha = 0.28; ctx.fillStyle = base; ctx.fillRect(L, top, Math.max(0, R - L), h); ctx.globalAlpha = 1;
+                ctx.fillStyle = base; ctx.fillRect(L, top, Math.max(2, Math.min(W, xh) - L), h);
+            } else {
+                ctx.fillStyle = base; ctx.fillRect(L, top, Math.max(2, R - L), h);
+            }
+            if (fade) {
+                const xf = tlX(start + fade);
+                if (xf > labelW) { ctx.fillStyle = 'rgba(0,0,0,.28)'; ctx.beginPath(); ctx.moveTo(L, top + h); ctx.lineTo(Math.min(W, xf), top); ctx.lineTo(L, top); ctx.fill(); }
+            }
+            const isSel = tl.sel.includes(i), shared = (tl.cueLights[i] || []).length > 1;
+            ctx.setLineDash(shared && !isSel ? [4, 3] : []);
+            ctx.lineWidth = isSel ? 2 : 1;
+            ctx.strokeStyle = isSel ? '#ffffff' : 'rgba(0,0,0,.65)';
+            ctx.strokeRect(L + 0.5, top + 0.5, Math.max(2, R - L) - 1, h - 1);
+            ctx.setLineDash([]);
+            const label = c.label || tlDescribe(c);
+            if (R - L > 30) {
+                ctx.save(); ctx.beginPath(); ctx.rect(L + 3, top, R - L - 6, h); ctx.clip();
+                const m2 = base.match(/\d+/g) || [0, 0, 0], lum = 0.3 * m2[0] + 0.59 * m2[1] + 0.11 * m2[2];
+                ctx.fillStyle = (lum > 140 && !hold) ? '#0a0a0a' : '#ebebeb';
+                ctx.fillText(label, L + 5, top + h / 2);
+                ctx.restore();
+            }
+            if (hold) { tl.hits.push([xa, top, Math.max(4, xh - xa), h, i, 'body', row]); tl.hits.push([xh, top, Math.max(0, xb - xh), h, i, 'tail', row]); }
+            else { tl.hits.push([xa, top, Math.max(4, xb - xa), h, i, 'body', row]); tl.hits.push([xb - 5, top, 10, h, i, 'end', row]); }
+            if (tlKind(c) === 'state') { const xf = tlX(start + fade); tl.hits.push([xf - 4, top, 8, h / 3, i, 'fade', row]); }
+        });
+        ctx.fillStyle = '#22222a'; ctx.fillRect(0, y, labelW, rowH);
+        ctx.save(); ctx.beginPath(); ctx.rect(0, y, labelW - 4, rowH); ctx.clip();
+        ctx.fillStyle = track.id != null ? '#e1e1e6' : '#dc9650';
+        ctx.font = '13px sans-serif'; ctx.fillText(track.label, 8, y + rowH * 0.36);
+        ctx.fillStyle = '#8c8c96'; ctx.font = '11px sans-serif'; ctx.fillText(track.sub, 8, y + rowH * 0.72);
+        ctx.restore();
+        ctx.font = '12px sans-serif';
+    });
+    ctx.fillStyle = '#22222a'; ctx.fillRect(0, 0, labelW, rulerH);
+    ctx.fillStyle = '#9696a0'; ctx.fillText(tlFmt(dur, true), 8, rulerH / 2);
+    const xp = tlX(tl.playhead);
+    if (xp >= labelW && xp <= W) {
+        ctx.fillStyle = '#ff5050'; ctx.fillRect(xp - 1, 0, 2, H);
+        ctx.beginPath(); ctx.moveTo(xp - 6, 0); ctx.lineTo(xp + 6, 0); ctx.lineTo(xp, 8); ctx.fill();
+    }
+}
+
+function tlHitAt(x, y) {
+    let best = null, tail = null;
+    for (let k = tl.hits.length - 1; k >= 0; k--) {
+        const [hx, hy, hw, hh, i, kind, row] = tl.hits[k];
+        if (x >= hx && x <= hx + hw && y >= hy && y <= hy + hh) {
+            if (kind === 'end' || kind === 'fade') return {i: i, kind: kind, row: row};
+            if (kind === 'body' && !best) best = {i: i, kind: kind, row: row};
+            if (kind === 'tail' && !tail) tail = {i: i, kind: kind, row: row};
+        }
+    }
+    return best || tail;
+}
+function tlTrackAt(y) {
+    const m = tlMetrics();
+    if (y < m.rulerH) return -1;
+    const r = Math.floor((y - m.rulerH) / m.rowH);
+    return r >= 0 && r < tl.tracks.length ? r : null;
+}
+function tlEventPos(ev) { const r = document.getElementById('tlCanvas').getBoundingClientRect(); return [ev.clientX - r.left, ev.clientY - r.top]; }
+
+function tlPushUndo() { tl.undo.push([JSON.stringify(tl.seq), tl.sel.slice()]); if (tl.undo.length > 200) tl.undo.shift(); tl.redo = []; }
+function tlUndo() { if (!tl || !tl.undo.length) return; tl.redo.push([JSON.stringify(tl.seq), tl.sel.slice()]); const [s, sel] = tl.undo.pop(); tl.seq = JSON.parse(s); tl.sel = sel.filter(i => i < tl.seq.cues.length); tlAfterReplace(); }
+function tlRedo() { if (!tl || !tl.redo.length) return; tl.undo.push([JSON.stringify(tl.seq), tl.sel.slice()]); const [s, sel] = tl.redo.pop(); tl.seq = JSON.parse(s); tl.sel = sel.filter(i => i < tl.seq.cues.length); tlAfterReplace(); }
+function tlAfterReplace() {
+    document.getElementById('tlName').value = tl.seq.name || '';
+    document.getElementById('tlDuration').value = (+tl.seq.duration_ms || 1000) / 1000;
+    tlChanged();
+    tlProps();
+}
+function tlChanged(live) {
+    tl.dirty = true;
+    tlUpdateTitle();
+    if (!live) {
+        const known = new Set(Object.keys((tl.info && tl.info.targets) || {}));
+        const missing = tl.seq.cues.some(c => !known.has(String(c.target == null ? '*' : c.target)));
+        if (missing) tlRefreshInfo(); else tlRebuildTracks();
+    }
+    tlDraw();
+    clearTimeout(tl.renderTimer);
+    tl.renderTimer = setTimeout(tlRerender, live ? 120 : 40);
+    if (tl.send && tl.playing) { clearTimeout(tl.restartTimer); tl.restartTimer = setTimeout(tlRestartOnLights, 300); }
+}
+async function tlRerender() {
+    if (!tl) return;
+    const d = await seqPost({action: 'render', sequence: tl.seq});
+    if (d.success) {
+        tl.render = d;
+        const w = d.warnings || [];
+        tlStatus(w.length ? 'Warnings: ' + w.join('; ') : '', w.length ? 'warn' : '');
+    } else {
+        tlStatus('Won\'t play yet: ' + errText(d), 'error');
+    }
+    tlDraw();
+    tlUpdateStage();
+}
+function tlStatus(text, level) {
+    const el = document.getElementById('tlStatus');
+    el.style.color = {error: '#e06060', warn: '#d8a040', ok: '#60c070'}[level] || 'var(--muted)';
+    el.textContent = text;
+}
+function tlUpdateTitle() {
+    document.querySelector('#tlModal .toolbar').title = (tl.dirty ? 'Unsaved changes' : '');
+    document.getElementById('tlName').style.borderColor = tl.dirty ? 'var(--accent)' : '';
+}
+function tlSetSel(sel) {
+    tl.sel = [...new Set(sel)].filter(i => i >= 0 && i < tl.seq.cues.length);
+    tlProps();
+    tlDraw();
+}
+
+// --- mouse and keys
+(function tlWire() {
+    const cv = document.getElementById('tlCanvas');
+    cv.addEventListener('mousedown', ev => {
+        if (!tl) return;
+        cv.focus();
+        const [x, y] = tlEventPos(ev), m = tlMetrics();
+        if (ev.button === 2) return;
+        const row = tlTrackAt(y);
+        if (row === -1 && x >= m.labelW) { tlSetPlayhead(tlMs(x)); tl.drag = {kind: 'scrub'}; return; }
+        const hit = tlHitAt(x, y);
+        const multi = ev.ctrlKey || ev.metaKey || ev.shiftKey;
+        if (!hit) {
+            if (!multi) tlSetSel([]);
+            if (x >= m.labelW && row != null) tlSetPlayhead(tlMs(x));
+            return;
+        }
+        if (multi) { const s = tl.sel.slice(), k = s.indexOf(hit.i); if (k >= 0) s.splice(k, 1); else s.push(hit.i); tlSetSel(s); }
+        else if (!tl.sel.includes(hit.i)) tlSetSel([hit.i]);
+        const orig = {};
+        tl.sel.forEach(j => { const c = tl.seq.cues[j]; orig[j] = [+c.at_ms || 0, +c.duration_ms || 0, tlKind(c) === 'state' ? (+(c.state || {}).fade_ms || 0) : 0]; });
+        tl.drag = {kind: hit.kind === 'tail' ? 'body' : hit.kind, cue: hit.i, x0: x, moved: false, orig: orig};
+    });
+    window.addEventListener('mousemove', ev => {
+        if (!tl || !document.getElementById('tlModal').classList.contains('open')) return;
+        const [x, y] = tlEventPos(ev);
+        const d = tl.drag;
+        if (!d) {
+            if (ev.target !== cv) return;
+            const hit = tlHitAt(x, y);
+            cv.style.cursor = hit ? (hit.kind === 'end' ? 'ew-resize' : hit.kind === 'fade' ? 'col-resize' : 'grab') : 'default';
+            cv.title = hit ? tlFmt(tl.seq.cues[hit.i].at_ms || 0, true) + '  ' + (tl.seq.cues[hit.i].target || '*') + '\n' + tlDescribe(tl.seq.cues[hit.i]) : '';
+            return;
+        }
+        if (d.kind === 'scrub') { tlSetPlayhead(tlMs(x)); return; }
+        const dms = (x - d.x0) * 1000 / tl.pxPerSec;
+        if (!d.moved) { if (Math.abs(x - d.x0) < 3) return; tlPushUndo(); d.moved = true; }
+        const cues = tl.seq.cues, [aAt, aDur, aFade] = d.orig[d.cue];
+        if (d.kind === 'body') {
+            let shift = tlSnapMs(aAt + dms) - aAt;
+            shift = Math.max(shift, -Math.min(...Object.values(d.orig).map(o => o[0])));
+            Object.entries(d.orig).forEach(([j, o]) => cues[+j].at_ms = o[0] + shift);
+        } else if (d.kind === 'end') {
+            cues[d.cue].duration_ms = Math.max(10, tlSnapMs(aAt + aDur + dms) - aAt);
+        } else if (d.kind === 'fade') {
+            (cues[d.cue].state = cues[d.cue].state || {}).fade_ms = Math.max(0, tlSnapMs(aAt + aFade + dms) - aAt);
+        }
+        tlChanged(true);
+    });
+    window.addEventListener('mouseup', () => {
+        if (!tl || !tl.drag) return;
+        const moved = tl.drag.moved;
+        tl.drag = null;
+        if (moved) { tlChanged(); tlProps(); }
+    });
+    cv.addEventListener('dblclick', ev => {
+        if (!tl) return;
+        const [x, y] = tlEventPos(ev), hit = tlHitAt(x, y);
+        if (hit && hit.kind !== 'tail') return;
+        const row = tlTrackAt(y);
+        if (row != null && row >= 0 && x >= tlMetrics().labelW) tlAddCueAt('state', row, tlSnapMs(tlMs(x)));
+    });
+    cv.addEventListener('wheel', ev => {
+        if (!tl) return;
+        ev.preventDefault();
+        const [x] = tlEventPos(ev);
+        if (ev.ctrlKey) tlZoom(ev.deltaY < 0 ? 1.25 : 0.8, tlMs(x));
+        else { tl.offsetMs = Math.max(0, tl.offsetMs + (Math.abs(ev.deltaX) > Math.abs(ev.deltaY) ? ev.deltaX : ev.deltaY) / 120 * tlVisibleMs() / 8); tlDraw(); }
+    }, {passive: false});
+    cv.addEventListener('contextmenu', ev => {
+        if (!tl) return;
+        const [x, y] = tlEventPos(ev), hit = tlHitAt(x, y), row = tlTrackAt(y), at = tlSnapMs(tlMs(x));
+        const items = [];
+        if (hit) {
+            if (!tl.sel.includes(hit.i)) tlSetSel([hit.i]);
+            items.push({label: 'Duplicate', fn: tlDuplicate}, {label: 'Copy', fn: tlCopy}, {label: 'Delete', fn: tlDelete}, '-');
+        }
+        if (row != null && row >= 0) {
+            items.push({label: 'Add colour cue here', fn: () => tlAddCueAt('state', row, at)}, {label: 'Add clip cue here', fn: () => tlAddCueAt('clip', row, at)});
+            if (tl.clipboard.length) items.push({label: 'Paste here', fn: () => tlPaste(at)});
+        }
+        if (items.length) showMenu(ev, items); else ev.preventDefault();
+    });
+    document.addEventListener('keydown', ev => {
+        if (!tl || !document.getElementById('tlModal').classList.contains('open')) return;
+        const typing = /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
+        const ctrl = ev.ctrlKey || ev.metaKey, k = ev.key.toLowerCase();
+        if (ctrl && k === 's') { ev.preventDefault(); tlSave(false); return; }
+        if (typing) return;
+        if (ctrl && k === 'z' && !ev.shiftKey) { ev.preventDefault(); tlUndo(); }
+        else if (ctrl && (k === 'y' || (k === 'z' && ev.shiftKey))) { ev.preventDefault(); tlRedo(); }
+        else if (ctrl && k === 'c') { ev.preventDefault(); tlCopy(); }
+        else if (ctrl && k === 'v') { ev.preventDefault(); tlPaste(tlSnapMs(tl.playhead)); }
+        else if (ctrl && k === 'd') { ev.preventDefault(); tlDuplicate(); }
+        else if (ctrl && k === 'a') { ev.preventDefault(); tlSetSel(tl.seq.cues.map((_, i) => i)); }
+        else if (k === 'delete' || k === 'backspace') { ev.preventDefault(); tlDelete(); }
+        else if (k === ' ') { ev.preventDefault(); tlTogglePlay(); }
+        else if (k === 'home') { ev.preventDefault(); tlSetPlayhead(0); }
+        else if (k === 'escape') { tlSetSel([]); }
+    });
+})();
+
+// --- editing actions
+function tlSelectedRow() {
+    const i = tl.sel[0];
+    if (i == null) return null;
+    const ids = tl.cueLights[i] || [];
+    const r = tl.tracks.findIndex(t => t.id != null && t.id === ids[0]);
+    return r >= 0 ? r : null;
+}
+function tlAddCue(kind) { tlAddCueAt(kind, tlSelectedRow(), tlSnapMs(tl.playhead)); }
+function tlAddCueAt(kind, row, at) {
+    const track = row != null && row >= 0 ? tl.tracks[row] : null;
+    const target = track ? track.target : '*';
+    at = Math.max(0, Math.min(Math.round(at), (+tl.seq.duration_ms || 1) - 1));
+    let cue;
+    if (kind === 'clip') {
+        const names = (tl.info && tl.info.animations) || [];
+        cue = {at_ms: at, duration_ms: 4000, target: target, clip: {name: names[0] || '', fit: 'stretch'}};
+    } else {
+        // start from the light's colour at that point, so a new cue is an easy tweak
+        let st = {mode: 'HSI', hue: 0, sat: 100, bri: 80};
+        if (track) {
+            const spans = tlSpans(tl.seq, track.cues);
+            const before = Object.keys(spans).map(Number).filter(i => spans[i][0] <= at && tlKind(tl.seq.cues[i]) === 'state');
+            if (before.length) {
+                const prev = before.reduce((a, b) => (+tl.seq.cues[b].at_ms || 0) >= (+tl.seq.cues[a].at_ms || 0) ? b : a);
+                st = JSON.parse(JSON.stringify(tl.seq.cues[prev].state || st));
+                delete st.fade_ms;
+            }
+        }
+        cue = {at_ms: at, target: target, state: st};
+    }
+    tlPushUndo();
+    tl.seq.cues.push(cue);
+    tl.sel = [tl.seq.cues.length - 1];
+    tlChanged();
+    tlProps();
+}
+function tlDelete() {
+    if (!tl.sel.length) return;
+    tlPushUndo();
+    tl.sel.slice().sort((a, b) => b - a).forEach(i => tl.seq.cues.splice(i, 1));
+    tl.sel = [];
+    tlChanged();
+    tlProps();
+}
+function tlCopy() {
+    const cues = tl.sel.slice().sort((a, b) => a - b).map(i => JSON.parse(JSON.stringify(tl.seq.cues[i])));
+    if (!cues.length) return;
+    const first = Math.min(...cues.map(c => +c.at_ms || 0));
+    cues.forEach(c => c.at_ms = (+c.at_ms || 0) - first);
+    tl.clipboard = cues;
+}
+function tlPaste(at) {
+    if (!tl.clipboard.length) return;
+    tlPushUndo();
+    const start = tl.seq.cues.length;
+    tl.clipboard.forEach(c => { const n = JSON.parse(JSON.stringify(c)); n.at_ms = Math.round(at) + (+n.at_ms || 0); tl.seq.cues.push(n); });
+    tl.sel = tl.seq.cues.map((_, i) => i).slice(start);
+    tlChanged();
+    tlProps();
+}
+function tlDuplicate() {
+    if (!tl.sel.length) return;
+    const cues = tl.sel.map(i => tl.seq.cues[i]);
+    const first = Math.min(...cues.map(c => +c.at_ms || 0));
+    const span = Math.max(...cues.map(c => (+c.at_ms || 0) + (+c.duration_ms || 0))) - first;
+    tlCopy();
+    tlPaste(first + Math.max(span, 500));
+}
+
+// --- properties panel
+function tlProps() {
+    const el = document.getElementById('tlProps');
+    if (!tl) return;
+    const sel = tl.sel.filter(i => i < tl.seq.cues.length);
+    if (!sel.length) { el.innerHTML = '<b>No cue selected</b><p style="color:var(--muted)">Select a cue to edit it, or double-click a track to add one.</p>'; return; }
+    if (sel.length > 1) {
+        el.innerHTML = '<b>' + sel.length + ' cues selected</b><p style="color:var(--muted)">Drag any of them to move them together.</p><div class="btn-row"><button class="btn small" onclick="tlDuplicate()">Duplicate selected</button><button class="btn small danger" onclick="tlDelete()">Delete selected</button></div>';
+        return;
+    }
+    const c = tl.seq.cues[sel[0]], kind = tlKind(c), st = c.state || {};
+    const clip = typeof c.clip === 'string' ? {name: c.clip} : (c.clip || {});
+    const choices = ((tl.info && tl.info.choices) || []).map(o => '<option value="' + esc(o.target) + '">' + esc(o.label) + '</option>').join('');
+    const ids = tl.cueLights[sel[0]] || [];
+    const names = ids.map(id => (tl.tracks.find(t => t.id === id) || {}).name || id);
+    let html = '<b>Cue at ' + tlFmt(c.at_ms || 0, true) + '</b><div class="form-grid" style="margin-top:8px">'
+        + '<label>Start (s)</label><input type="number" id="tpStart" step="0.1" min="0" value="' + ((+c.at_ms || 0) / 1000) + '">'
+        + '<label>Lights</label><input type="text" id="tpTarget" list="tpTargets" value="' + esc(c.target == null ? '*' : c.target) + '" title="An ID, a name, @key/@fill/@rim/@ambient/@practical, @left/@right, @all or *, several joined with ;"><datalist id="tpTargets">' + choices + '</datalist>'
+        + '<span></span><span style="color:var(--muted)">' + (ids.length ? 'Drives: ' + esc(names.join(', ')) : 'Matches no light right now') + '</span>'
+        + '<label>Type</label><select id="tpKind"><option value="state"' + (kind === 'state' ? ' selected' : '') + '>Colour</option><option value="clip"' + (kind === 'clip' ? ' selected' : '') + '>Clip (animation)</option></select>';
+    if (kind === 'state') {
+        const mode = st.mode || 'HSI';
+        html += '<label>Mode</label><select id="tpMode"><option' + (mode === 'HSI' ? ' selected' : '') + '>HSI</option><option' + (mode === 'CCT' ? ' selected' : '') + '>CCT</option></select>';
+        if (mode === 'HSI') html += '<label>Hue</label><input type="number" id="tpHue" min="0" max="360" value="' + (st.hue || 0) + '"><label>Saturation</label><input type="number" id="tpSat" min="0" max="100" value="' + (st.sat != null ? st.sat : 100) + '">';
+        else html += '<label>Colour temp (K)</label><input type="number" id="tpTemp" min="3200" max="8500" step="100" value="' + ((st.temp || 56) * 100) + '">';
+        html += '<label>Brightness</label><input type="number" id="tpBri" min="0" max="100" value="' + (st.bri != null ? st.bri : 100) + '">'
+            + '<label>Fade in (ms)</label><input type="number" id="tpFade" min="0" step="100" value="' + (st.fade_ms || 0) + '">'
+            + '<span></span><span style="display:block;height:16px;border:1px solid #555;background:' + tlCueColour(c) + '"></span>'
+            + '<label>Length (ms)</label><input type="number" id="tpDur" min="0" step="100" value="' + (+c.duration_ms || 0) + '" title="0 holds until a later cue changes the light; a length ends it and the light goes back">'
+            + '<span></span><span style="color:var(--muted)">0 = hold until the next cue</span>';
+    } else {
+        const anims = (tl.info && tl.info.animations) || [];
+        html += '<label>Animation</label><select id="tpClip">' + anims.map(n => '<option' + (n.toLowerCase() === (clip.name || '').toLowerCase() ? ' selected' : '') + '>' + esc(n) + '</option>').join('') + '</select>'
+            + '<label>Fit</label><select id="tpFit"><option value="stretch"' + ((clip.fit || 'stretch') === 'stretch' ? ' selected' : '') + '>Stretch to fit</option><option value="loop"' + (clip.fit === 'loop' ? ' selected' : '') + '>Loop</option></select>'
+            + '<label>Speed</label><input type="number" id="tpSpeed" min="0.05" max="20" step="0.1" value="' + (clip.speed || 1) + '">'
+            + '<label>Brightness</label><input type="number" id="tpClipBri" min="0" max="100" value="' + (clip.brightness != null ? clip.brightness : 100) + '">'
+            + '<label>Length (ms)</label><input type="number" id="tpDur" min="1" step="100" value="' + (+c.duration_ms || 4000) + '">';
+    }
+    html += '<label>Label</label><input type="text" id="tpLabel" placeholder="(optional)" value="' + esc(c.label || '') + '"></div>';
+    el.innerHTML = html;
+    el.querySelectorAll('input,select').forEach(inp => inp.onchange = tlPropChanged);
+}
+function tlPropChanged(ev) {
+    const i = tl.sel[0];
+    if (tl.sel.length !== 1 || i == null) return;
+    const g = id => document.getElementById(id);
+    const old = JSON.stringify(tl.seq.cues[i]);
+    const prev = tl.seq.cues[i];
+    const c = {at_ms: Math.max(0, Math.round((+g('tpStart').value || 0) * 1000)), target: (g('tpTarget').value || '*').trim() || '*'};
+    const kind = g('tpKind').value;
+    const dur = +g('tpDur').value || 0;
+    if (kind === 'state') {
+        const wasState = tlKind(prev) === 'state';
+        const mode = g('tpMode') ? g('tpMode').value : 'HSI';
+        const st = {mode: mode, bri: g('tpBri') ? +g('tpBri').value : 100};
+        if (mode === 'HSI') { st.hue = g('tpHue') ? +g('tpHue').value : (wasState && prev.state.hue) || 0; st.sat = g('tpSat') ? +g('tpSat').value : 100; }
+        else st.temp = g('tpTemp') ? Math.round(+g('tpTemp').value / 100) : 56;
+        const fade = g('tpFade') ? +g('tpFade').value : 0;
+        if (fade) st.fade_ms = fade;
+        c.state = st;
+        if (dur && wasState) c.duration_ms = dur;
+    } else {
+        const anims = (tl.info && tl.info.animations) || [];
+        const clip = {name: g('tpClip') ? g('tpClip').value : (anims[0] || ''), fit: g('tpFit') ? g('tpFit').value : 'stretch'};
+        const speed = g('tpSpeed') ? +g('tpSpeed').value : 1;
+        const bri = g('tpClipBri') ? +g('tpClipBri').value : 100;
+        if (speed !== 1) clip.speed = speed;
+        if (bri !== 100) clip.brightness = bri;
+        c.clip = clip;
+        c.duration_ms = Math.max(1, tlKind(prev) === 'clip' ? (dur || 4000) : 4000);
+    }
+    const label = (g('tpLabel').value || '').trim();
+    if (label) c.label = label;
+    if (JSON.stringify(c) === old) return;
+    tlPushUndo();
+    tl.seq.cues[i] = c;
+    tlChanged();
+    tlProps();
+}
+
+// --- top bar fields, settings
+function tlNameEdited() { tl.seq.name = document.getElementById('tlName').value.trim(); tl.dirty = true; tlUpdateTitle(); }
+function tlDurationEdited() {
+    const ms = Math.max(1000, Math.round((+document.getElementById('tlDuration').value || 1) * 1000));
+    if (ms === +tl.seq.duration_ms) return;
+    tlPushUndo();
+    tl.seq.duration_ms = ms;
+    tlChanged();
+}
+function tlTempoEdited() {
+    const bpm = +document.getElementById('tlBpm').value || 0;
+    if (bpm > 0) tl.seq.tempo = {bpm: bpm, offset_ms: +document.getElementById('tlBeatOffset').value || 0};
+    else delete tl.seq.tempo;
+    tl.dirty = true;
+    tlDraw();
+}
+function tlSettingsToggle() {
+    const box = document.getElementById('tlSettings');
+    const open = box.style.display === 'none';
+    box.style.display = open ? '' : 'none';
+    if (!open) return;
+    const s = tl.seq, n = (tl.info && tl.info.presets) || 0;
+    document.getElementById('tlEnd').innerHTML = '<option value="revert">Return to the state before the sequence</option><option value="hold">Hold the last frame</option>'
+        + Array.from({length: n}, (_, i) => '<option value="preset:' + (i + 1) + '">Recall preset ' + (i + 1) + '</option>').join('');
+    document.getElementById('tlFps').value = s.fps || 0;
+    document.getElementById('tlEnd').value = s.end || 'revert';
+    document.getElementById('tlPause').value = s.pause_mode || 'revert';
+    document.getElementById('tlInterrupt').value = s.on_interrupt || 'continue';
+    document.getElementById('tlArtist').value = s.artist || '';
+    document.getElementById('tlSong').value = s.song || '';
+    document.getElementById('tlDesc').value = s.description || '';
+}
+function tlSettingsApply() {
+    tlPushUndo();
+    const s = tl.seq, g = id => document.getElementById(id);
+    const fps = +g('tlFps').value || 0;
+    if (fps) s.fps = Math.min(30, fps); else delete s.fps;
+    [['end', 'tlEnd', 'revert'], ['pause_mode', 'tlPause', 'revert'], ['on_interrupt', 'tlInterrupt', 'continue']].forEach(([k, id, def]) => { if (g(id).value === def) delete s[k]; else s[k] = g(id).value; });
+    [['artist', 'tlArtist'], ['song', 'tlSong'], ['description', 'tlDesc']].forEach(([k, id]) => { const v = g(id).value.trim(); if (v) s[k] = v; else delete s[k]; });
+    document.getElementById('tlSettings').style.display = 'none';
+    tlChanged();
+}
+
+// --- check, save, close
+async function tlValidate() {
+    const d = await seqPost({action: 'validate', sequence: tl.seq});
+    if (!d.success) { tlStatus('Problems: ' + errText(d), 'error'); return false; }
+    const w = d.warnings || [];
+    tlStatus(w.length ? 'OK, with warnings: ' + w.join('; ') : 'OK: the sequence is valid.', w.length ? 'warn' : 'ok');
+    return true;
+}
+async function tlSave(saveAs) {
+    let original = tl.original;
+    if (saveAs) {
+        const name = prompt('Save sequence as:', tl.seq.name || '');
+        if (name === null || !name.trim()) return false;
+        tl.seq.name = name.trim();
+        document.getElementById('tlName').value = tl.seq.name;
+        original = null;
+    }
+    const name = (tl.seq.name || '').trim();
+    if (!name) { tlStatus('Give the sequence a name first.', 'error'); return false; }
+    const body = {action: 'save', sequence: tl.seq};
+    if (original) body.original = original;
+    let d = await seqPost(body);
+    if (!d.success && /exists/.test(errText(d))) {
+        if (!confirm('A sequence named "' + name + '" already exists. Replace it?')) return false;
+        body.overwrite = true;
+        d = await seqPost(body);
+    }
+    if (!d.success) { tlStatus('Not saved: ' + errText(d), 'error'); return false; }
+    tl.original = d.sequence;
+    tl.dirty = false;
+    tlUpdateTitle();
+    const w = d.warnings || [];
+    tlStatus('Saved' + (w.length ? ', with warnings: ' + w.join('; ') : '.'), w.length ? 'warn' : 'ok');
+    selectedSeq = d.sequence;
+    seqReload();
+    return true;
+}
+function tlClose() {
+    if (tl && tl.dirty && !confirm('Close without saving your changes?')) return;
+    tlPause();
+    document.getElementById('tlModal').classList.remove('open');
+}
+
+// --- playback and preview
+function tlSetPlayhead(ms) {
+    const dur = +tl.seq.duration_ms || 0;
+    tl.playhead = Math.max(0, Math.min(dur, Math.round(ms)));
+    if (tl.playing) { tl.playStart = [performance.now(), tl.playhead]; if (tl.send) { clearTimeout(tl.restartTimer); tl.restartTimer = setTimeout(tlRestartOnLights, 150); } }
+    tlUpdateTime();
+    tlUpdateStage();
+    tlDraw();
+}
+function tlTogglePlay() { if (tl.playing) tlPause(); else tlPlay(); }
+function tlPlay() {
+    if (tl.playhead >= (+tl.seq.duration_ms || 0)) tl.playhead = 0;
+    tl.playing = true;
+    tl.playStart = [performance.now(), tl.playhead];
+    document.getElementById('tlPlayBtn').textContent = 'Pause';
+    if (tl.send) tlRestartOnLights();
+    requestAnimationFrame(tlTick);
+}
+function tlPause() {
+    if (!tl) return;
+    const was = tl.playing;
+    tl.playing = false;
+    document.getElementById('tlPlayBtn').textContent = 'Play';
+    if (tl.send && was) seqPost({action: 'stop'});
+}
+function tlStop() { tlPause(); tlSetPlayhead(0); }
+function tlSendToggled() {
+    tl.send = document.getElementById('tlSend').checked;
+    if (tl.send && tl.playing) tlRestartOnLights();
+    else if (!tl.send) seqPost({action: 'stop'});
+}
+async function tlRestartOnLights() {
+    if (!(tl && tl.send && tl.playing)) return;
+    const d = await seqPost({action: 'play', sequence: tl.seq, start_ms: tl.playhead});
+    if (!d.success) { tlStatus('Can\'t send to lights: ' + errText(d), 'error'); document.getElementById('tlSend').checked = false; tl.send = false; }
+    else tl.playStart = [performance.now(), tl.playhead];
+}
+function tlTick() {
+    if (!tl || !tl.playing) return;
+    let pos = tl.playStart[1] + (performance.now() - tl.playStart[0]);
+    const dur = +tl.seq.duration_ms || 0;
+    if (pos >= dur) { tl.playhead = dur; tlPause(); }
+    else tl.playhead = Math.round(pos);
+    if (tlX(tl.playhead) > tlMetrics().W - 40) tl.offsetMs = Math.max(0, tl.playhead - tlVisibleMs() * 0.2);
+    tlUpdateTime();
+    tlUpdateStage();
+    tlDraw();
+    if (tl.playing) requestAnimationFrame(tlTick);
+}
+function tlUpdateTime() { document.getElementById('tlTime').textContent = tlFmt(tl.playhead, true) + ' / ' + tlFmt(+tl.seq.duration_ms || 0, true); }
+function tlUpdateStage() {
+    if (!tl || !tl.render) return;
+    const meta = {};
+    tl.render.lights.forEach(l => meta[l.id] = l);
+    const html = tl.tracks.filter(t => t.id != null).map(t => {
+        const ch = tlColourAt(tl.render.changes[t.id] || [], tl.playhead);
+        const mt = meta[t.id] || {};
+        const colour = ch && ch[1] ? ch[1] : null;
+        const layer = ch && ch[4] === 'sequence' ? 'show' : 'base';
+        const detail = cap(mt.role || '') + (ch ? '  ' + ch[3] + ' ' + ch[2] + '%' : '');
+        return '<div class="stage-tile" title="' + esc(t.name) + '"><div class="stage-box layer-' + layer + '" style="background:' + (colour || '#373737') + '">'
+            + (mt.simulated ? '<span class="sim">SIM</span>' : '') + (colour ? '' : '<span class="unknown">?</span>') + '</div>'
+            + '<div class="stage-name">' + esc(t.name) + '</div><div class="stage-detail">' + esc(detail) + '</div><div class="stage-detail">' + layer + '</div></div>';
+    }).join('');
+    const box = document.getElementById('tlStage');
+    if (box._last !== html) { box.innerHTML = html; box._last = html; }
 }
 
 // INIT

@@ -626,7 +626,7 @@ class Ui_MainWindow(object):
         animLeft = QVBoxLayout(); animLeft.setSpacing(4)
         animLeft.addWidget(self.animList, 3)
 
-        # Sequences: list, transport, position readout (the timeline editor comes later)
+        # Sequences: list, transport, position readout, and the timeline editor's buttons
         seqHeader = QLabel("<strong>Sequences</strong>")
         animLeft.addWidget(seqHeader)
         self.seqList = QListWidget()
@@ -643,6 +643,16 @@ class Ui_MainWindow(object):
         for b in [self.seqPlayButton, self.seqPauseButton, self.seqStopButton, self.seqRenderButton, self.seqReloadButton]:
             seqRow.addWidget(b)
         animLeft.addLayout(seqRow)
+        seqEditRow = QHBoxLayout()
+        self.seqNewButton = QPushButton("+New")
+        self.seqNewButton.setToolTip("Open the timeline editor on a new sequence")
+        self.seqEditButton = QPushButton("Edit")
+        self.seqEditButton.setToolTip("Open the selected sequence in the timeline editor")
+        self.seqDuplicateButton = QPushButton("Duplicate")
+        self.seqDeleteButton = QPushButton("Delete")
+        for b in [self.seqNewButton, self.seqEditButton, self.seqDuplicateButton, self.seqDeleteButton]:
+            seqEditRow.addWidget(b)
+        animLeft.addLayout(seqEditRow)
         self.seqStatusLabel = QLabel("No sequence playing")
         self.seqStatusLabel.setAlignment(Qt.AlignCenter)
         animLeft.addWidget(self.seqStatusLabel)
@@ -1070,8 +1080,8 @@ copied between installations.</p>
 <p>POST to <code>/NeewerLux/batch</code> for multi-light JSON commands, to
 <code>/NeewerLux/animate</code> for JSON animation control, to <code>/NeewerLux/sequence</code>
 for sequences (list, reload, play, pause, resume, stop, seek, set_position, status, validate,
-save, render), or to <code>/NeewerLux/settings</code> for light and show preferences (get,
-set_light, set_global). The web dashboard has the same Sequences, Stage and Settings panels
+save, get, delete, render), to <code>/NeewerLux/presets</code> to edit presets, or to
+<code>/NeewerLux/settings</code> for light and show preferences (get, set_light, set_global). The web dashboard has the same Sequences, Stage and Settings panels
 as this window. The full contract, including the structured light state in <code>list_json</code>,
 is in <code>docs/HTTP_API.md</code>.</p>
 

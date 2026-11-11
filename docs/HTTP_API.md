@@ -118,7 +118,7 @@ Example, a five-loop strobe on the rim lights as an effect: `animate=Strobe|1|10
   "animations": [{"name": "Heartbeat", "description": "...", "frames": 4, "loop": true, "modes": ["HSI"]}],
   "animationPlaying": false, "currentAnimation": "",
   "presets": [{"index": 1, "name": "Stream", "custom": true}], "numPresets": 8,
-  "sequences": [{"name": "Example - Four Light Demo", "duration_ms": 40000, "description": "..."}]
+  "sequences": [{"name": "Example - Four Light Demo", "duration_ms": 40000, "cues": 12, "description": "..."}]
 }
 ```
 
@@ -189,7 +189,12 @@ Response:
 | `{"action": "stop"}` | Stop the override layer; `"layer": "effect"` (with `"clear_queue": true` to empty the queue), `"show"` or `"all"` |
 | `{"action": "list"}` | `{"animations": [{"name", "description", "keyframes", "loop"}], "currently_playing"}` |
 | `{"action": "status"}` | `{"running", "animation", "show"}` where `show` is the `status_json` body |
-| `{"action": "create", "animation": {...}}` | Save an animation (same format as the files in `light_prefs/animations`) |
+| `{"action": "create", "animation": {...}}` | Save an animation (same format as the files in `light_prefs/animations`), replacing any of the same name |
+| `{"action": "get", "name": "Heartbeat"}` | The whole animation: `{"animation": {...}}` |
+| `{"action": "save", "animation": {...}, "original": "Old Name", "overwrite": false}` | Save from an editor. Needs a name and at least one keyframe. `original` is the name it was opened under: a different name renames it. Saving over another animation needs `"overwrite": true`. |
+| `{"action": "duplicate", "name": "Heartbeat"}` | Copy as "Heartbeat (copy)"; the reply's `animation` is the new name |
+| `{"action": "delete", "name": "Heartbeat"}` | Delete it (stops it first if it's playing) |
+| `{"action": "reload"}` | Re-read `light_prefs/animations`; the reply has `count` |
 
 ### POST /NeewerLux/sequence
 
@@ -204,11 +209,31 @@ Response:
 | `{"action": "list"}` | `{"sequences": [{"name", "duration_ms", "cues", "description"}]}` |
 | `{"action": "reload"}` | Re-read `light_prefs/sequences`, then list |
 | `{"action": "validate", "sequence": {...}}` | Check a sequence: `errors` and `warnings` |
-| `{"action": "save", "sequence": {...}, "overwrite": false}` | Validate and save |
+| `{"action": "save", "sequence": {...}, "original": "Old Name", "overwrite": false}` | Validate and save. `original` is the name it was opened under: a different name renames it (the old file goes). Saving over another sequence needs `"overwrite": true`. |
+| `{"action": "get", "name": "..."}` | The whole sequence: `{"sequence": {...}}` |
+| `{"action": "delete", "name": "..."}` | Delete it (stops it first if it's playing) |
+| `{"action": "editor", "targets": ["@rim", "1;2"]}` | What a timeline editor needs: `lights` in sweep order (`index`, `id`, `name`, `role`, `side`, `simulated`), `targets` (the light IDs each given target drives now), `choices` (target suggestions with labels), `animations` and `presets` (count) |
 | `{"action": "render", "name": "...", "step_ms": 50, "start_ms": 0, "end_ms": 60000}` | What each light would do, without playing: per-light colour changes and the cue list |
 | `{"action": "render", "name": "...", "format": "png", "width": 1600}` | The same as an image strip (`image/png`). Needs the desktop window; without it the reply is an error and the JSON render still works. |
 
 The sequence format, targets, render output and timing rules are in [SEQUENCE_FORMAT.md](SEQUENCE_FORMAT.md).
+
+### POST /NeewerLux/presets
+
+The desktop's preset menu and editor. Preset numbers are 1-based. Every reply that changes something includes the preset as `preset` (or the whole list as `presets` after a delete), and the change is saved to `customLights.prefs` (when Remember presets on exit is on, as on the desktop).
+
+| Body | Effect |
+|---|---|
+| `{"action": "list"}` | `{"presets": [preset, ...]}` |
+| `{"action": "get", "index": 3}` | One preset: `{"index", "name", "custom", "global", "entries"}`. `custom` is false while it's still the factory default; `global` is true when it applies to whichever lights it's recalled on rather than to specific lights. |
+| `{"action": "save", "index": 3, "name": "Stream", "entries": [...]}` | Replace its contents (and name, if given). Each entry: `{"target": "-1" or a light, "mode": "CCT"/"HSI"/"Scene", "bri", "temp" (Kelvin or hundreds), "hue", "sat", "scene"}`. One entry with target `"-1"` makes a global preset; entries per light make a snapshot. An entry read with `"off": true` (the light was off in the snapshot) keeps that when sent back. |
+| `{"action": "rename", "index": 3, "name": "Stream"}` | Rename (empty clears; up to 20 characters) |
+| `{"action": "move", "index": 3, "direction": "left"}` | Swap with its neighbour (`left` or `right`) |
+| `{"action": "duplicate", "index": 3}` | Insert a copy after it, named "... (copy)" |
+| `{"action": "delete", "index": 3}` | Delete; later presets move up. The last preset can't be deleted. |
+| `{"action": "add"}` | Add an empty preset at the end |
+| `{"action": "snapshot", "index": 3}` | Save every light's current state into it |
+| `{"action": "recall", "index": 3}` | Recall it, as `use_preset=3` |
 
 ### POST /NeewerLux/settings
 
@@ -222,6 +247,6 @@ Every value in a request is checked before any is applied; a request with an inv
 
 ## Changes by API version
 
-**2** (NeewerLux 1.3.3): `apiVersion` and `version` fields; structured per-light state and `sequences` in `list_json`; JSON batch `temp` accepts Kelvin; light commands are coalesced per light instead of answered with "Server is busy"; POST batch stops an override animation like GET commands do. Also part of this version, from 1.3.1 and 1.3.2: layers, sequences, `status_json`, `stop_layer`, `/NeewerLux/sequence` and `/NeewerLux/settings`.
+**2** (NeewerLux 1.3.3): `apiVersion` and `version` fields; structured per-light state and `sequences` in `list_json`; JSON batch `temp` accepts Kelvin; light commands are coalesced per light instead of answered with "Server is busy"; POST batch stops an override animation like GET commands do; editing over HTTP: `/NeewerLux/presets`, animation `get`/`save`/`duplicate`/`delete`/`reload`, sequence `get`/`delete`/`editor` and renaming on save. Also part of this version, from 1.3.1 and 1.3.2: layers, sequences, `status_json`, `stop_layer`, `/NeewerLux/sequence` and `/NeewerLux/settings`.
 
 **1** (NeewerLux 1.3.0 and earlier): GET commands, `list_json` without state, POST batch with `temp` in hundreds of Kelvin only, POST animate.

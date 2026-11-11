@@ -76,6 +76,7 @@ jobs:
             neewerlux_show.py \
             neewerlux_sim.py \
             neewerlux_stage.py \
+            neewerlux_timeline.py \
             NeewerLux.bat \
             NeewerLux-HTTP.bat \
             pyproject.toml \

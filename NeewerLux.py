@@ -40,6 +40,7 @@ faulthandler.enable() # print traceback on segfault/C++ crashes
 warnings.filterwarnings("ignore", category=FutureWarning, message=".*BLEDevice.rssi.*")  # suppress Bleak deprecation noise
 
 import argparse
+import copy
 import platform # used to determine which OS we're using for MAC address/GUID listing
 
 import asyncio
@@ -429,6 +430,9 @@ try: # try to load the GUI
         _sequenceListSignal = QtSignal()
         # Thread-safe signal after the web dashboard changes settings (-1 = global, else a light index)
         _settingsChangedSignal = QtSignal(int)
+        # Thread-safe signals after presets or animations change over HTTP
+        _presetsChangedSignal = QtSignal()
+        _animationListSignal = QtSignal()
 
         def __init__(self):
             QMainWindow.__init__(self)
@@ -444,8 +448,11 @@ try: # try to load the GUI
             # Sequences panel, and a GUI-thread timer that mirrors show engine state into the labels
             self._sequenceListSignal.connect(self.seqRefreshList)
             self._settingsChangedSignal.connect(self._settingsChangedRemotely)
+            self._presetsChangedSignal.connect(self.createPresetButtons)
+            self._animationListSignal.connect(self.animRefreshList)
             self._lastShowLabels = None
             self._stageWindow = None
+            self._seqEditors = []
             self._swatches = {}
             self._showStatusTimer = QTimer(self)
             self._showStatusTimer.timeout.connect(self._updateShowStatus)
@@ -725,43 +732,12 @@ try: # try to load the GUI
             selectedRow = [-1]
             clipboard = [None]
 
+            # Conversions are shared with the web dashboard's preset editor
             def _presetToEntries(presetData, defaultData):
-                """Convert preset storage format to editor entries."""
-                result = []
-                if presetData == defaultData:
-                    return [{"target": "-1", "mode": "CCT", "temp": globalCCTMax // 100, "bri": 100}]
-                for item in presetData:
-                    t = item[0]; p = item[1] if len(item) > 1 else [5, 100, 56]
-                    e = {"target": str(t)}
-                    m = p[0]
-                    if m in (5, 8):
-                        e["mode"] = "CCT"; e["bri"] = p[1]; e["temp"] = p[2]
-                    elif m in (4, 7):
-                        e["mode"] = "HSI"; e["bri"] = p[1]; e["hue"] = p[2]
-                        e["sat"] = p[3] if len(p) > 3 else 100
-                    elif m in (6, 9):
-                        e["mode"] = "Scene"; e["bri"] = p[1]; e["scene"] = p[2]
-                    else:
-                        e["mode"] = "CCT"; e["bri"] = 100; e["temp"] = 56
-                    result.append(e)
-                return result or [{"target": "-1", "mode": "CCT", "temp": globalCCTMax // 100, "bri": 100}]
+                return presetToEntries(idx)
 
             def _entriesToPreset():
-                """Convert editor entries to preset storage format."""
-                result = []
-                for e in entries:
-                    t = -1 if e["target"] == "-1" else e["target"]
-                    m = e.get("mode", "CCT")
-                    if m == "CCT":
-                        params = [5, e.get("bri", 100), e.get("temp", 56)]
-                    elif m == "HSI":
-                        params = [4, e.get("bri", 100), e.get("hue", 240), e.get("sat", 100)]
-                    elif m == "Scene":
-                        params = [6, e.get("bri", 100), e.get("scene", 1)]
-                    else:
-                        params = [5, 100, 56]
-                    result.append([t, params])
-                return result
+                return entriesToPreset(entries)
 
             # === DIALOG ===
             dlg = QDialog(self)
@@ -943,6 +919,9 @@ try: # try to load the GUI
                     e["hue"] = p1Slider.value(); e["sat"] = p2Slider.value(); e["bri"] = p3Slider.value()
                 elif mode == "Scene":
                     e["scene"] = sceneCombo.currentIndex() + 1; e["bri"] = p2Slider.value()
+                r = selectedRow[0]
+                if 0 <= r < len(entries) and entries[r].get("off"):
+                    e["off"] = True  # a snapshot of a light that was off stays off
                 return e
 
             def _loadEditor(entry):
@@ -1364,6 +1343,73 @@ try: # try to load the GUI
 
         def seqReload(self):
             loadAllSequences()
+            self.seqRefreshList()
+
+        def _seqSelectedName(self):
+            items = self.seqList.selectedItems()
+            return items[0].data(Qt.UserRole) if items else None
+
+        def seqOpenEditor(self, name=None):
+            """Open the timeline editor on a saved sequence, or on a new one."""
+            from neewerlux_timeline import SequenceEditor, newSequence
+            if name is not None:
+                for ed in list(self._seqEditors):
+                    if ed.isVisible() and (ed.originalName or "").lower() == name.lower():
+                        ed.raise_()
+                        ed.activateWindow()
+                        return ed
+            if name is None:
+                base, n = "New Sequence", 2
+                newName = base
+                while resolveSequenceName(newName) is not None:
+                    newName = base + " " + str(n)
+                    n += 1
+                seq, original = newSequence(newName), None
+            else:
+                seq, original = savedSequences.get(name), name
+                if seq is None:
+                    return None
+            ed = SequenceEditor(SequenceEditorHost(), seq, original, self)
+            self._seqEditors = [e for e in self._seqEditors if e.isVisible()] + [ed]
+            ed.show()
+            return ed
+
+        def seqNew(self):
+            return self.seqOpenEditor(None)
+
+        def seqEdit(self):
+            name = self._seqSelectedName()
+            if not name:
+                self.seqStatusLabel.setText("Select a sequence first")
+                return None
+            return self.seqOpenEditor(name)
+
+        def seqDuplicate(self):
+            name = self._seqSelectedName()
+            if not name or name not in savedSequences:
+                return
+            dup = copy.deepcopy(savedSequences[name])
+            newName, n = name + " (copy)", 2
+            while resolveSequenceName(newName) is not None:
+                newName = name + " (copy " + str(n) + ")"
+                n += 1
+            dup["name"] = newName
+            saveSequenceToFile(dup)
+            self.seqRefreshList()
+
+        def seqDelete(self, confirm=True):
+            name = self._seqSelectedName()
+            if not name:
+                return
+            if confirm:
+                answer = QMessageBox.question(self, "Delete Sequence", "Delete sequence '" + name + "'?",
+                                              QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+                if answer != QMessageBox.Yes:
+                    return
+            active = getShowStatus()["sequence"]
+            if active is not None and active["name"].lower() == name.lower():
+                sequenceControl("stop")
+            deleteSequence(name)
             self.seqRefreshList()
 
         def seqPlay(self):
@@ -1792,6 +1838,10 @@ try: # try to load the GUI
             self.seqReloadButton.clicked.connect(self.seqReload)
             self.seqRenderButton.clicked.connect(self.seqRender)
             self.seqList.itemDoubleClicked.connect(lambda item: self.seqPlay())
+            self.seqNewButton.clicked.connect(self.seqNew)
+            self.seqEditButton.clicked.connect(self.seqEdit)
+            self.seqDuplicateButton.clicked.connect(self.seqDuplicate)
+            self.seqDeleteButton.clicked.connect(self.seqDelete)
 
             # ANIMATION TAB CONNECTIONS
             self.animPlayButton.clicked.connect(self.animPlay)
@@ -3482,27 +3532,7 @@ try: # try to load the GUI
         def _savePresetsQuick(self):
             """Save custom presets and names to disk without shutting down.
             Called when minimizing to tray so presets persist even if the process is killed later."""
-            if not rememberPresetsOnExit:
-                return
-            try:
-                customPresetsToWrite = ["numOfPresets=" + str(numOfPresets)]
-                for i in range(numOfPresets):
-                    if customLightPresets[i] != defaultLightPresets[i]:
-                        customPresetsToWrite.append(customPresetToString(i))
-                for idx, name in presetNames.items():
-                    if name:
-                        customPresetsToWrite.append("presetName" + str(idx) + "=" + name)
-
-                hasNonDefaultContent = len(customPresetsToWrite) > 1 or numOfPresets != 8
-                if hasNonDefaultContent:
-                    createLightPrefsFolder()
-                    with open(customLightPresetsFile, mode="w", encoding="utf-8") as f:
-                        f.write("\n".join(customPresetsToWrite))
-                    printDebugString("Quick-saved presets to " + customLightPresetsFile)
-                elif os.path.exists(customLightPresetsFile):
-                    os.remove(customLightPresetsFile)
-            except Exception as e:
-                printDebugString("Error quick-saving presets: " + str(e))
+            savePresetsToFile()
 
         # THE FINAL FUNCTION TO UNLINK ALL LIGHTS WHEN QUITTING THE PROGRAM
         def closeEvent(self, event):
@@ -4048,6 +4078,245 @@ def recallCustomPreset(numOfPreset, updateGUI=True, loop=None):
 
         # Always use the threadAction approach, this is safe from both GUI and HTTP threads
         threadAction = "send|" + "|".join(map(str, changedLights))
+
+def savePresetsToFile():
+    """Save custom presets and their names to customLights.prefs, as the desktop's quick save
+    does (nothing when Remember presets on exit is off). Safe from any thread."""
+    if not rememberPresetsOnExit:
+        return
+    try:
+        customPresetsToWrite = ["numOfPresets=" + str(numOfPresets)]
+        for i in range(numOfPresets):
+            if customLightPresets[i] != defaultLightPresets[i]:
+                customPresetsToWrite.append(customPresetToString(i))
+        for idx, name in presetNames.items():
+            if name:
+                customPresetsToWrite.append("presetName" + str(idx) + "=" + name)
+
+        hasNonDefaultContent = len(customPresetsToWrite) > 1 or numOfPresets != 8
+        if hasNonDefaultContent:
+            createLightPrefsFolder()
+            with open(customLightPresetsFile, mode="w", encoding="utf-8") as f:
+                f.write("\n".join(customPresetsToWrite))
+            printDebugString("Quick-saved presets to " + customLightPresetsFile)
+        elif os.path.exists(customLightPresetsFile):
+            os.remove(customLightPresetsFile)
+    except Exception as e:
+        printDebugString("Error quick-saving presets: " + str(e))
+
+
+# Preset storage keeps a mode code per entry (CCT 5, HSI 4, scene 6; +3 when the light was off).
+# The editors work on plain entries instead: {"target", "mode", "bri", ...}.
+def presetToEntries(presetIdx):
+    """A preset as editor entries. A preset still at its factory default reads as one global
+    CCT entry, as the desktop editor shows it."""
+    presetData = customLightPresets[presetIdx]
+    if presetData == defaultLightPresets[presetIdx]:
+        return [{"target": "-1", "mode": "CCT", "temp": globalCCTMax // 100, "bri": 100}]
+    result = []
+    for item in presetData:
+        p = item[1] if len(item) > 1 else [5, 100, 56]
+        e = {"target": str(item[0])}
+        m = p[0]
+        if m in (5, 8):
+            e.update(mode="CCT", bri=p[1], temp=p[2])
+        elif m in (4, 7):
+            e.update(mode="HSI", bri=p[1], hue=p[2], sat=p[3] if len(p) > 3 else 100)
+        elif m in (6, 9):
+            e.update(mode="Scene", bri=p[1], scene=p[2])
+        else:
+            e.update(mode="CCT", bri=100, temp=56)
+        if m in (7, 8, 9):
+            e["off"] = True  # snapshot of a light that was off; kept through edits
+        result.append(e)
+    return result or [{"target": "-1", "mode": "CCT", "temp": globalCCTMax // 100, "bri": 100}]
+
+
+def entriesToPreset(entries):
+    """Editor entries back to preset storage. Values are clamped to their ranges."""
+    clamp = lambda v, lo, hi, d: max(lo, min(hi, int(v if v is not None else d)))
+    result = []
+    for e in entries:
+        t = -1 if str(e.get("target", "-1")) == "-1" else str(e["target"])
+        m = str(e.get("mode", "CCT")).upper()
+        bri = clamp(e.get("bri"), 0, 100, 100)
+        if m == "HSI":
+            params = [4, bri, clamp(e.get("hue"), 0, 360, 240), clamp(e.get("sat"), 0, 100, 100)]
+        elif m in ("SCENE", "ANM"):
+            params = [6, bri, clamp(e.get("scene"), 1, 9, 1)]
+        else:
+            temp = float(e.get("temp", 56) or 56)
+            params = [5, bri, clamp(round(temp / 100) if temp > 100 else temp, 27, 85, 56)]
+        if e.get("off") and t != -1:
+            params[0] += 3
+        result.append([t, params])
+    return result
+
+
+def _presetsChanged():
+    savePresetsToFile()
+    if mainWindow is not None:
+        mainWindow._presetsChangedSignal.emit()
+
+
+def presetEditAction(action, body):
+    """The desktop preset menu and editor over HTTP: list, get, save, rename, move, duplicate,
+    delete, add, snapshot and recall. Preset numbers are 1-based, as in URLs."""
+    global numOfPresets, customLightPresets, defaultLightPresets
+    import copy as _copy
+
+    def info(i):
+        isCustom = customLightPresets[i] != defaultLightPresets[i]
+        return {"index": i + 1, "name": presetNames.get(i, ""), "custom": isCustom,
+                "global": bool(customLightPresets[i]) and customLightPresets[i][0][0] == -1,
+                "entries": presetToEntries(i)}
+
+    if action == "list":
+        return {"success": True, "presets": [info(i) for i in range(numOfPresets)]}
+    if action == "add":
+        numOfPresets += 1
+        defaultLightPresets.append(getDefaultPreset(numOfPresets - 1))
+        customLightPresets.append(getDefaultPreset(numOfPresets - 1))
+        _presetsChanged()
+        return {"success": True, "preset": info(numOfPresets - 1)}
+    try:
+        idx = int(body.get("index", 0)) - 1
+    except (TypeError, ValueError):
+        idx = -1
+    if not 0 <= idx < numOfPresets:
+        return {"success": False, "errors": ["no preset " + str(body.get("index"))]}
+
+    if action == "get":
+        return {"success": True, "preset": info(idx)}
+    if action == "save":
+        entries = body.get("entries")
+        if not isinstance(entries, list) or not entries:
+            return {"success": False, "errors": ["entries must be a non-empty list"]}
+        try:
+            data = entriesToPreset(entries)
+        except (TypeError, ValueError) as e:
+            return {"success": False, "errors": ["bad entry: " + str(e)]}
+        customLightPresets[idx] = data
+        if "name" in body:
+            name = str(body.get("name") or "").strip()[:20].replace("=", "")
+            if name:
+                presetNames[idx] = name
+            else:
+                presetNames.pop(idx, None)
+    elif action == "rename":
+        name = str(body.get("name") or "").strip()[:20].replace("=", "")
+        if name:
+            presetNames[idx] = name
+        else:
+            presetNames.pop(idx, None)
+    elif action == "move":
+        other = idx + (1 if str(body.get("direction", "right")).lower() in ("right", "1", "+1") else -1)
+        if not 0 <= other < numOfPresets:
+            return {"success": False, "errors": ["can't move preset " + str(idx + 1) + " that way"]}
+        customLightPresets[idx], customLightPresets[other] = customLightPresets[other], customLightPresets[idx]
+        defaultLightPresets[idx], defaultLightPresets[other] = defaultLightPresets[other], defaultLightPresets[idx]
+        nameA, nameB = presetNames.pop(idx, ""), presetNames.pop(other, "")
+        if nameA:
+            presetNames[other] = nameA
+        if nameB:
+            presetNames[idx] = nameB
+        idx = other
+    elif action == "duplicate":
+        newIdx = idx + 1
+        customLightPresets.insert(newIdx, _copy.deepcopy(customLightPresets[idx]))
+        defaultLightPresets.insert(newIdx, _copy.deepcopy(defaultLightPresets[idx]))
+        shifted = {(k if k <= idx else k + 1): v for k, v in presetNames.items()}
+        if idx in presetNames:
+            orig = presetNames[idx]
+            shifted[newIdx] = ((orig[:14] + " (copy)") if len(orig) > 14 else (orig + " (copy)"))[:20]
+        presetNames.clear()
+        presetNames.update(shifted)
+        numOfPresets += 1
+        idx = newIdx
+    elif action == "delete":
+        if numOfPresets <= 1:
+            return {"success": False, "errors": ["the last preset can't be deleted"]}
+        customLightPresets.pop(idx)
+        defaultLightPresets.pop(idx)
+        shifted = {(k if k < idx else k - 1): v for k, v in presetNames.items() if k != idx}
+        presetNames.clear()
+        presetNames.update(shifted)
+        numOfPresets -= 1
+        _presetsChanged()
+        return {"success": True, "presets": [info(i) for i in range(numOfPresets)]}
+    elif action == "snapshot":
+        saveCustomPreset("snapshot", idx)
+    elif action == "recall":
+        processHTMLCommands([None, False, idx + 1, "use_preset"], asyncioEventLoop)
+        return {"success": True, "preset": info(idx)}
+    else:
+        return {"success": False, "errors": ["Unknown action: " + action]}
+    _presetsChanged()
+    return {"success": True, "preset": info(idx)}
+
+
+def animationEditAction(action, body):
+    """The desktop animation list's New/Edit/Delete/Duplicate and reload over HTTP."""
+    import copy as _copy
+    if action == "reload":
+        loadAllAnimations()
+        loadLightAliases()
+        if mainWindow is not None:
+            mainWindow._animationListSignal.emit()
+        return {"success": True, "action": "reload", "count": len(savedAnimations)}
+    if action == "save":
+        animData = body.get("animation")
+        if not isinstance(animData, dict) or not str(animData.get("name", "")).strip() \
+                or not isinstance(animData.get("keyframes"), list) or not animData["keyframes"]:
+            return {"success": False, "action": "save", "errors": ["an animation needs a name and at least one keyframe"]}
+        animData["name"] = str(animData["name"]).strip()
+        original = body.get("original")
+        existing = resolveAnimationName(animData["name"])
+        renaming = original is not None and str(original).lower() != animData["name"].lower()
+        if existing is not None and (renaming or original is None) and not body.get("overwrite", False):
+            return {"success": False, "action": "save", "errors": ["an animation named " + repr(existing) + " exists; send \"overwrite\": true to replace it"]}
+        if existing is not None and existing != animData["name"]:
+            savedAnimations.pop(existing, None)  # same name, different case
+            deleteAnimationFile(existing)
+        if renaming:
+            oldName = resolveAnimationName(original)
+            if oldName is not None:
+                if animationRunning and currentAnimationName == oldName:
+                    stopAnimation()
+                savedAnimations.pop(oldName, None)
+                deleteAnimationFile(oldName)
+        savedAnimations[animData["name"]] = animData
+        if not saveAnimationToFile(animData):
+            return {"success": False, "action": "save", "errors": ["couldn't write the animation file"]}
+        if mainWindow is not None:
+            mainWindow._animationListSignal.emit()
+        return {"success": True, "action": "save", "animation": animData["name"]}
+
+    name = resolveAnimationName(str(body.get("name", "")))
+    if name is None:
+        return {"success": False, "action": action, "errors": ["no animation named " + repr(body.get("name", ""))]}
+    if action == "get":
+        return {"success": True, "action": "get", "animation": savedAnimations[name]}
+    if action == "delete":
+        if animationRunning and currentAnimationName == name:
+            stopAnimation()
+        deleteAnimationFile(name)
+        savedAnimations.pop(name, None)
+        result = {"success": True, "action": "delete", "animation": name}
+    else:  # duplicate
+        newAnim = _copy.deepcopy(savedAnimations[name])
+        newName, counter = name + " (copy)", 2
+        while newName in savedAnimations:
+            newName = name + " (copy " + str(counter) + ")"
+            counter += 1
+        newAnim["name"] = newName
+        savedAnimations[newName] = newAnim
+        saveAnimationToFile(newAnim)
+        result = {"success": True, "action": "duplicate", "animation": newName}
+    if mainWindow is not None:
+        mainWindow._animationListSignal.emit()
+    return result
+
 
 def saveCustomPreset(presetType, numOfPreset, selectedLights = []):
     global customLightPresets
@@ -5542,21 +5811,18 @@ def processHTMLCommands(paramsList, loop):
         presetIdx = paramsList[2] - 1
         if 0 <= presetIdx < numOfPresets:
             saveCustomPreset("snapshot", presetIdx)
-            try:
-                if mainWindow is not None: mainWindow._savePresetsQuick()
-            except Exception:
-                pass
+            savePresetsToFile()
+            if mainWindow is not None:
+                mainWindow._presetsChangedSignal.emit()
             printDebugString("HTTP: Saved snapshot preset " + str(presetIdx + 1))
 
     elif paramsList[3] == "add_preset":
         numOfPresets += 1
         defaultLightPresets.append(getDefaultPreset(numOfPresets - 1))
         customLightPresets.append(getDefaultPreset(numOfPresets - 1))
-        try:
-            if mainWindow is not None: mainWindow.createPresetButtons()
-            if mainWindow is not None: mainWindow._savePresetsQuick()
-        except Exception:
-            pass
+        savePresetsToFile()
+        if mainWindow is not None:
+            mainWindow._presetsChangedSignal.emit()
         printDebugString("HTTP: Added preset #" + str(numOfPresets))
 
     elif paramsList[3] == "delete_preset":
@@ -5571,11 +5837,9 @@ def processHTMLCommands(paramsList, loop):
             presetNames.clear()
             presetNames.update(newNames)
             numOfPresets -= 1
-            try:
-                if mainWindow is not None: mainWindow.createPresetButtons()
-                if mainWindow is not None: mainWindow._savePresetsQuick()
-            except Exception:
-                pass
+            savePresetsToFile()
+            if mainWindow is not None:
+                mainWindow._presetsChangedSignal.emit()
             printDebugString("HTTP: Deleted preset " + str(presetIdx + 1))
 
     elif paramsList[3] == "batch":
@@ -6354,13 +6618,70 @@ def loadAllSequences():
         printDebugString("Loaded " + str(len(savedSequences)) + " sequence(s)")
 
 
+def _sequenceFilesNamed(name):
+    """Files in light_prefs/sequences holding a sequence with this name (case-insensitive)."""
+    found = []
+    if not os.path.isdir(sequencesDir):
+        return found
+    for filename in os.listdir(sequencesDir):
+        if not filename.lower().endswith(".json"):
+            continue
+        path = os.path.join(sequencesDir, filename)
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (IOError, OSError, ValueError):
+            continue
+        if isinstance(data, dict) and str(data.get("name", "")).lower() == str(name).lower():
+            found.append(path)
+    return found
+
+
 def saveSequenceToFile(sequence):
-    """Save a sequence as light_prefs/sequences/<name>.json."""
+    """Save a sequence as light_prefs/sequences/<name>.json. Any other file holding a sequence
+    of the same name is removed, so a reload doesn't bring back the old version."""
     ensureSequencesDir()
     safeName = "".join(c for c in sequence["name"] if c.isalnum() or c in " _-").strip() or "sequence"
-    with open(os.path.join(sequencesDir, safeName + ".json"), "w", encoding="utf-8") as f:
+    target = os.path.join(sequencesDir, safeName + ".json")
+    for path in _sequenceFilesNamed(sequence["name"]):
+        if os.path.normcase(os.path.abspath(path)) != os.path.normcase(os.path.abspath(target)):
+            os.remove(path)
+    with open(target, "w", encoding="utf-8") as f:
         json.dump(sequence, f, indent=2)
+    for existing in [n for n in savedSequences if n.lower() == sequence["name"].lower()]:
+        savedSequences.pop(existing)
     savedSequences[sequence["name"]] = sequence
+
+
+def deleteSequence(name):
+    """Delete a saved sequence and its file. Returns True if it existed."""
+    resolved = resolveSequenceName(name)
+    if resolved is None:
+        return False
+    for path in _sequenceFilesNamed(resolved):
+        os.remove(path)
+    savedSequences.pop(resolved, None)
+    return True
+
+
+def saveSequenceFromEditor(seqData, original=None, overwrite=False):
+    """Validate and save a sequence, as the editors and POST save do. original is the name it
+    was opened under: saving under a new name renames it (the old one is removed)."""
+    seq, errors, seqWarnings = buildSequence(seqData)
+    result = {"success": seq is not None, "errors": errors, "warnings": seqWarnings}
+    if seq is None:
+        return result
+    existing = resolveSequenceName(seq.name)
+    renaming = original is not None and str(original).lower() != seq.name.lower()
+    if existing is not None and (renaming or original is None) and not overwrite:
+        return {"success": False, "errors": ["a sequence named " + repr(existing) + " exists; send \"overwrite\": true to replace it"], "warnings": seqWarnings}
+    saveSequenceToFile(seqData)
+    if renaming:
+        deleteSequence(original)
+    result["sequence"] = seq.name
+    if mainWindow is not None:
+        mainWindow._sequenceListSignal.emit()
+    return result
 
 
 def buildSequence(data):
@@ -6401,6 +6722,62 @@ def startSequence(nameOrData, startMs=0):
     showEngine.playSequence(player, startMs)
     printDebugString("Sequence '" + seq.name + "' playing from " + str(startMs) + " ms (" + str(len(seq.cues)) + " cues, " + str(seq.duration) + " ms, " + str(seq.fps) + " fps)")
     return {"success": True, "sequence": seq.name, "errors": [], "warnings": seqWarnings}
+
+
+class SequenceEditorHost:
+    """What the timeline editor (neewerlux_timeline) needs from NeewerLux."""
+
+    def lights(self):
+        order = returnLightIndexesFromMacAddress("@all")
+        result = []
+        for idx in order:
+            light = availableLights[idx]
+            prefID = light[8] if len(light) > 8 else 0
+            result.append({"index": idx, "id": prefID if prefID > 0 else idx + 1,
+                           "name": light[2] if light[2] else light[0].name,
+                           "role": getLightShowPref(idx, "role"), "side": getLightShowPref(idx, "side"),
+                           "simulated": sim.isSimulated(light[0])})
+        return result
+
+    def resolveTarget(self, target):
+        return returnLightIndexesFromMacAddress(str(target)) if str(target).strip() else []
+
+    def targetChoices(self):
+        choices = [("Every light (*)", "*"), ("Every light, in sweep order (@all)", "@all")]
+        choices += [(r.capitalize() + " lights (@" + r + ")", "@" + r) for r in LIGHT_ROLES]
+        choices += [(s.capitalize() + " side (@" + s + ")", "@" + s) for s in LIGHT_SIDES]
+        choices.append(("Eye-line lights (@eyeline)", "@eyeline"))
+        for light in self.lights():
+            choices.append((str(light["id"]) + " - " + light["name"], str(light["id"])))
+        return choices
+
+    def animationNames(self):
+        return sorted(savedAnimations.keys(), key=str.lower)
+
+    def render(self, seq):
+        return renderSequence(seq)
+
+    def save(self, seq, original, overwrite):
+        return saveSequenceFromEditor(copy.deepcopy(seq), original, overwrite)
+
+    def sequenceExists(self, name):
+        return resolveSequenceName(name) is not None
+
+    def presetCount(self):
+        return numOfPresets
+
+    def playOnLights(self, seq, ms):
+        return startSequence(copy.deepcopy(seq), int(ms))
+
+    def stopOnLights(self):
+        if showEngine is not None and showEngine.status()["sequence"] is not None:
+            sequenceControl("stop")
+
+    def lightsPosition(self):
+        st = showEngine.status()["sequence"] if showEngine is not None else None
+        if st is None or st.get("state") != "playing":
+            return None
+        return st["position_ms"]
 
 
 def renderSequence(nameOrData, stepMs=None, startMs=0, endMs=None):
@@ -7314,7 +7691,7 @@ class NLPythonServer(BaseHTTPRequestHandler):
                               "animationPlaying": animationRunning,
                               "currentAnimation": currentAnimationName if animationRunning else "",
                               "presets": presetsData, "numPresets": numOfPresets,
-                              "sequences": [{"name": n, "duration_ms": d.get("duration_ms"), "description": d.get("description", "")}
+                              "sequences": [{"name": n, "duration_ms": d.get("duration_ms"), "cues": len(d.get("cues", [])), "description": d.get("description", "")}
                                             for n, d in sorted(savedSequences.items(), key=lambda kv: kv[0].lower())]}
                     self.wfile.write(_json.dumps(result).encode("utf-8"))
                     return
@@ -7556,8 +7933,8 @@ class NLPythonServer(BaseHTTPRequestHandler):
             return
 
         # ONLY ACCEPT REQUESTS TO SUPPORTED POST ENDPOINTS
-        if self.path not in ("/NeewerLux/batch", "/NeewerLux/animate", "/NeewerLux/sequence", "/NeewerLux/settings", "/NeewerLite-Python/batch", "/NeewerLite-Python/animate"):
-            self.send_error(404, "POST requests are supported at /NeewerLux/batch, /NeewerLux/animate, /NeewerLux/sequence and /NeewerLux/settings")
+        if self.path not in ("/NeewerLux/batch", "/NeewerLux/animate", "/NeewerLux/sequence", "/NeewerLux/settings", "/NeewerLux/presets", "/NeewerLite-Python/batch", "/NeewerLite-Python/animate"):
+            self.send_error(404, "POST requests are supported at /NeewerLux/batch, /NeewerLux/animate, /NeewerLux/sequence, /NeewerLux/presets and /NeewerLux/settings")
             return
 
         # READ AND PARSE THE JSON BODY
@@ -7599,7 +7976,8 @@ class NLPythonServer(BaseHTTPRequestHandler):
 
         elif self.path in ("/NeewerLux/animate", "/NeewerLite-Python/animate"):
             action = body.get("action", "play")  # play, stop, list, create
-            printDebugString("POST animate request from " + clientIP + ": " + action)
+            if action not in ("list", "status"):  # read-only polls would flood the log
+                printDebugString("POST animate request from " + clientIP + ": " + action)
 
             if action == "play":
                 animName = body.get("name", "")
@@ -7659,12 +8037,10 @@ class NLPythonServer(BaseHTTPRequestHandler):
                     savedAnimations[animData["name"]] = animData
                     saveAnimationToFile(animData)
                     resultData = {"success": True, "action": "create", "animation": animData["name"]}
-                    # Refresh GUI list if available
-                    try:
-                        if mainWindow is not None:
-                            mainWindow.animRefreshList()
-                    except Exception:
-                        pass
+                    if mainWindow is not None:
+                        mainWindow._animationListSignal.emit()
+            elif action in ("get", "save", "delete", "duplicate", "reload"):
+                resultData = animationEditAction(action, body)
             elif action == "status":
                 resultData = {"success": True, "running": animationRunning,
                               "animation": currentAnimationName if animationRunning else None,
@@ -7674,7 +8050,8 @@ class NLPythonServer(BaseHTTPRequestHandler):
 
         elif self.path == "/NeewerLux/sequence":
             action = str(body.get("action", "play")).lower()
-            printDebugString("POST sequence request from " + clientIP + ": " + action)
+            if action not in ("list", "status", "editor", "render", "get", "validate"):  # read-only requests would flood the log
+                printDebugString("POST sequence request from " + clientIP + ": " + action)
             if action == "play":
                 source = body.get("sequence") if isinstance(body.get("sequence"), dict) else body.get("name", "")
                 resultData = startSequence(source, body.get("start_ms", 0))
@@ -7706,27 +8083,52 @@ class NLPythonServer(BaseHTTPRequestHandler):
                         self.end_headers()
                         self.wfile.write(pngBytes)
                         return
-            elif action in ("validate", "save"):
-                seqData = body.get("sequence")
-                seq, errors, seqWarnings = buildSequence(seqData)
+            elif action == "validate":
+                seq, errors, seqWarnings = buildSequence(body.get("sequence"))
                 resultData = {"success": seq is not None, "action": action, "errors": errors, "warnings": seqWarnings}
-                if seq is not None and action == "save":
-                    existing = resolveSequenceName(seq.name)
-                    if existing is not None and not body.get("overwrite", False):
-                        resultData = {"success": False, "action": "save", "errors": ["a sequence named " + repr(existing) + " exists; send \"overwrite\": true to replace it"], "warnings": seqWarnings}
-                    else:
-                        if existing is not None and existing != seq.name:
-                            savedSequences.pop(existing, None)
-                        saveSequenceToFile(seqData)
-                        resultData["sequence"] = seq.name
-                        if mainWindow is not None:
-                            mainWindow._sequenceListSignal.emit()
+            elif action == "save":
+                resultData = saveSequenceFromEditor(body.get("sequence"), body.get("original"), bool(body.get("overwrite", False)))
+                resultData["action"] = "save"
+            elif action == "editor":
+                # what the web timeline editor needs: lights in sweep order, which lights each
+                # target drives (by ID), target choices, animation names and the preset count
+                host = SequenceEditorHost()
+                lights = host.lights()
+                idOf = {l["index"]: str(l["id"]) for l in lights}
+                targets = body.get("targets") or []
+                resultData = {"success": True, "action": "editor", "lights": lights,
+                              "targets": {str(t): [idOf[i] for i in host.resolveTarget(str(t)) if i in idOf] for t in targets},
+                              "choices": [{"label": c[0], "target": c[1]} for c in host.targetChoices()],
+                              "animations": host.animationNames(), "presets": numOfPresets}
+            elif action == "get":
+                resolved = resolveSequenceName(body.get("name", ""))
+                if resolved is None:
+                    resultData = {"success": False, "action": "get", "errors": ["no sequence named " + repr(body.get("name", ""))]}
+                else:
+                    resultData = {"success": True, "action": "get", "sequence": savedSequences[resolved]}
+            elif action == "delete":
+                name = body.get("name", "")
+                active = showEngine.status()["sequence"] if showEngine is not None else None
+                if active is not None and str(active.get("name", "")).lower() == str(name).lower():
+                    sequenceControl("stop")
+                ok = deleteSequence(name)
+                resultData = {"success": ok, "action": "delete", "errors": [] if ok else ["no sequence named " + repr(name)]}
+                if ok and mainWindow is not None:
+                    mainWindow._sequenceListSignal.emit()
             else:
                 resultData = {"success": False, "error": "Unknown action: " + action}
 
+        elif self.path == "/NeewerLux/presets":
+            action = str(body.get("action", "list")).lower()
+            if action not in ("list", "get"):
+                printDebugString("POST presets request from " + clientIP + ": " + action)
+            resultData = presetEditAction(action, body)
+            resultData["action"] = action
+
         elif self.path == "/NeewerLux/settings":
             action = str(body.get("action", "get")).lower()
-            printDebugString("POST settings request from " + clientIP + ": " + action)
+            if action != "get":
+                printDebugString("POST settings request from " + clientIP + ": " + action)
             if action == "get":
                 resultData = getWebSettings()
             elif action == "set_global":
