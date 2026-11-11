@@ -405,7 +405,7 @@ def t_guidSidecar(rig):
 
 def t_statusShape(rig):
     st = rig.getJSON("status_json")
-    check(set(st) == {"layers", "sequence", "lights"}, "status keys")
+    check(set(st) == {"apiVersion", "layers", "sequence", "lights"}, "status keys")
     check([l["role"] for l in st["lights"]] == ["key", "fill", "rim", "ambient"], "roles in status")
     check(all(l["layer"] == "base" for l in st["lights"]), "idle lights are on base")
 
@@ -685,6 +685,100 @@ def t_addSimulatedRig(rig):
         del nl.availableLights[before:]
 
 
+# ----------------------------------------------------------------- 1.3.3: HTTP API fixes
+
+def t_batchKelvin(rig):
+    r = rig.post("/NeewerLux/batch", {"commands": [{"light": "2", "mode": "CCT", "temp": 4300, "bri": 40}]}, 0.4)
+    check(r["success"], str(r))
+    last = rig.rec.last(rig.mac(FILL))
+    check(last[1] == 135 and last[4] == 43, "JSON temp in Kelvin: sent " + str(last))
+    rig.post("/NeewerLux/batch", {"commands": [{"light": "2", "mode": "CCT", "temp": 50, "bri": 40}]}, 0.4)
+    check(rig.rec.last(rig.mac(FILL))[4] == 50, "hundreds of Kelvin still work")
+
+
+def t_batchCoalescesUnderLoad(rig):
+    """A Stream Deck dial: 40 requests as fast as possible, from 4 threads at once. None
+    may be refused, and the light must end on the last value sent."""
+    import threading as _t
+    refused = []
+    lock = _t.Lock()
+    def burst(start):
+        for n in range(start, 40, 4):
+            r = rig.post("/NeewerLux/batch", {"commands": [{"light": "2", "mode": "CCT", "temp": 50, "bri": n + 1}]})
+            if not r.get("success"):
+                with lock:
+                    refused.append(r)
+    threads = [_t.Thread(target=burst, args=(k,)) for k in range(4)]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
+    check(not refused, "batch requests refused: " + str(refused[:2]))
+    final = rig.post("/NeewerLux/batch", {"commands": [{"light": "2", "mode": "CCT", "temp": 50, "bri": 77}]}, 0.5)
+    check(final["success"] and bri(rig.rec.last(rig.mac(FILL))) == 77, "the last value must win: " + str(rig.rec.last(rig.mac(FILL))))
+    writes = [d for _, d in writesFor(rig, FILL) if d[1] == 135]
+    check(len(writes) <= 41, "coalescing should never write more often than requested (%d writes)" % len(writes))
+
+
+def t_getDuringBusyWorkerNotDropped(rig):
+    """A light command arriving while the worker is mid-preset used to be dropped after a
+    5 s wait; now it's queued and sent as soon as the worker is free."""
+    nl = rig.nl
+    real = nl.processMultipleSends
+    def slow(loop, action, updateGUI=True):
+        if action == "slowtest":
+            time.sleep(6)  # longer than the old 5 s wait
+            return ""
+        return real(loop, action, updateGUI)
+    nl.processMultipleSends = slow
+    try:
+        nl.threadAction = "slowtest"
+        time.sleep(0.4)  # the worker is now stuck in it
+        t0 = time.monotonic()
+        rig.get("light=3&mode=HSI&hue=90&sat=100&bri=50")
+        check(time.monotonic() - t0 < 1.0, "a light command shouldn't wait for the worker")
+        time.sleep(6.5)
+    finally:
+        nl.processMultipleSends = real
+    check(hueOf(rig.rec.last(rig.mac(RIM))) == 90, "queued command never sent: " + str(rig.rec.last(rig.mac(RIM))))
+
+
+def t_batchStopsOverrideAnimation(rig):
+    rig.get("light=*&mode=CCT&temp=40&bri=30", 0.5)
+    before = rig.rec.last(rig.mac(FILL))
+    rig.get("animate=Spotlight|1|5|100", 0.8)
+    check(rig.nl.animationRunning, "animation should be playing")
+    rig.post("/NeewerLux/batch", {"commands": [{"light": "1", "mode": "HSI", "hue": 200, "sat": 50, "bri": 70}]}, 0.8)
+    check(not rig.nl.animationRunning, "POST batch should stop the override animation, as GET does")
+    check(hueOf(rig.rec.last(rig.mac(KEY))) == 200, "key should keep the batch command")
+    check(rig.rec.last(rig.mac(FILL)) == before, "other lights revert to their pre-animation state")
+
+
+def t_batchDuringSequenceBecomesRevertTarget(rig):
+    rig.post("/NeewerLux/sequence", {"action": "play", "sequence": stepSequence("bseq", [120, 240], 400, target="@all")}, 0.3)
+    rig.post("/NeewerLux/batch", {"commands": [{"light": "1", "mode": "CCT", "temp": 3300, "bri": 25}]}, 0.3)
+    check(rig.nl.showEngine.status()["sequence"] is not None, "a batch must not stop a sequence")
+    rig.post("/NeewerLux/sequence", {"action": "stop"}, 0.5)
+    last = rig.rec.last(rig.mac(KEY))
+    check(last[1] == 135 and last[3] == 25 and last[4] == 33, "after the sequence the key returns to the batch value: " + str(last))
+
+
+def t_listJsonStructured(rig):
+    rig.get("light=1&mode=CCT&temp=4500&bri=60", 0.4)
+    rig.get("light=2&mode=HSI&hue=10&sat=90&bri=30", 0.4)
+    data = rig.getJSON("list_json")
+    check(data["apiVersion"] == 2 and data["version"] == rig.nl.NEEWERLUX_VERSION, "apiVersion and version")
+    key = data["lights"][0]
+    check(key["setting"] == {"mode": "CCT", "temp": 4500, "bri": 60}, "setting in Kelvin: " + str(key["setting"]))
+    check(key["output"]["mode"] == "CCT" and key["output"]["color"].startswith("#"), "output: " + str(key["output"]))
+    check(data["lights"][1]["setting"] == {"mode": "HSI", "hue": 10, "sat": 90, "bri": 30}, "HSI setting")
+    check(key["cctRange"] == [3200, 5600] and key["cctOnly"] is False, "capabilities: %s %s" % (key["cctRange"], key["cctOnly"]))
+    check(key["role"] == "key" and key["layer"] == "base" and key["power"] in ("on", "standby", None), "show fields and power")
+    check(isinstance(key["status"], str), "the display string stays for older clients")
+    check(any(sq["name"] == "Example - Four Light Demo" for sq in data["sequences"]), "sequences listed")
+    check(rig.getJSON("status_json")["apiVersion"] == 2, "status_json carries apiVersion")
+
+
 TESTS = [t_maxBrightnessHTTP, t_maxBrightnessAnimationAndSequence, t_minBrightness, t_globalDefaultLimit,
          t_slidersExempt, t_lockedLight, t_roleTargets, t_effectOverPartOfRigRejoinsInSync, t_revertToPresetAtEnd,
          t_endPreset, t_holdAtEnd, t_pauseRevertsAndResumes, t_seekAndSetPosition, t_effectQueueReplaceFull,
@@ -694,6 +788,8 @@ TESTS = [t_maxBrightnessHTTP, t_maxBrightnessAnimationAndSequence, t_minBrightne
          t_simStateFollowsCommands, t_statusPollThroughNotifications, t_cctOnlySplitPackets,
          t_cctOnlyDisplayAndRender, t_dimColoursStayVisible,
          t_stageTilesAndStatusColours, t_renderMatchesPlayback, t_renderRespectsLimitsAndLocks, t_renderPNG,
+         t_batchKelvin, t_batchCoalescesUnderLoad, t_getDuringBusyWorkerNotDropped, t_batchStopsOverrideAnimation,
+         t_batchDuringSequenceBecomesRevertTarget, t_listJsonStructured,
          t_addSimulatedRig]
 
 

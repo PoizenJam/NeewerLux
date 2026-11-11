@@ -2,6 +2,18 @@
 
 Changes relative to upstream [NeewerLite-Python v0.12d](https://github.com/taburineagle/NeewerLite-Python).
 
+## v1.3.3 - 2026-11-11
+
+### Added
+- **`docs/HTTP_API.md`**, the full HTTP contract: every endpoint, parameter, unit and response shape, how lights are named, and how commands are queued.
+- **Structured light state in `list_json`** (API version 2): `power`, `channel`, `setting` (the last command, colour temperature in Kelvin), `output` (what the light is actually showing, with an approximate colour), `cctRange`, `cctOnly`, role, side, Locked and the driving layer per light, plus the sequence list. The display string `status` stays for older clients.
+- **`apiVersion`** (now 2) and `version` in `list_json`, `status_json` and the settings API, so controllers can tell what a NeewerLux supports.
+
+### Fixed
+- **JSON batch colour temperatures in Kelvin.** `"temp": 5600` was clamped to 85 and set 8500K; values over 100 are now read as Kelvin, as the GET batch string already did.
+- **Light commands are no longer turned away when NeewerLux is busy.** POST batch answered "Server is busy" whenever another command was in progress, and GET light commands waited up to 5 seconds and were then dropped. Light commands from GET, GET batch, POST batch and the brightness hotkeys now go into a per-light queue: a newer command for a waiting light replaces the older one, and each light is written once with its latest value. Rapid Stream Deck presses and dials no longer lose commands, and never cause more writes than were requested.
+- **POST batch stops an override animation**, as GET light commands always have; before, the animation's next frame overwrote the batch. Sequences and effects keep running, and the batch becomes what their lights return to.
+
 ## v1.3.2 - 2026-11-11
 
 ### Added

@@ -635,6 +635,10 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
                 <div class="api-desc">Different settings per light in one request</div>
                 <div class="api-code">GET /NeewerLux/doAction?batch=Key:HSI:0:100:50;Fill:CCT:56:80</div>
                 <div class="api-desc">Lights can be addressed by index, alias name, or MAC address</div>
+                <div class="api-desc">JSON batch (temperature in Kelvin or hundreds of Kelvin). Commands for the same light coalesce: the latest wins, nothing is refused as busy.</div>
+                <div class="api-code">POST /NeewerLux/batch {"commands":[{"light":"1","mode":"CCT","temp":5600,"bri":80},{"light":"@rim","mode":"HSI","hue":300,"sat":100,"bri":60}]}</div>
+                <div class="api-desc">Structured state of every light, with apiVersion (see docs/HTTP_API.md)</div>
+                <div class="api-code">GET /NeewerLux/doAction?list_json</div>
             </div>
             <div class="api-section">
                 <h3>Animations</h3>

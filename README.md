@@ -150,9 +150,11 @@ For richer control, POST JSON to `/NeewerLux/batch` (several lights in one reque
 
 `{"action": "render", "name": "...", "format": "png"}` on `/NeewerLux/sequence` returns the render strip as an image, and `"format": "json"` (the default) returns each light's colour changes over time, which is what a script or an AI model generating sequences should check its work against. `GET /NeewerLux/doAction?status_json` includes each light's current colour.
 
-[docs/SEQUENCE_FORMAT.md](docs/SEQUENCE_FORMAT.md) lists every sequence command and layer option.
+[docs/HTTP_API.md](docs/HTTP_API.md) is the full contract for controllers and scripts: every endpoint, parameter, unit and response, including the structured light state in `list_json` (power, channel, current setting and output, colour temperature range) and an `apiVersion` field for feature detection. [docs/SEQUENCE_FORMAT.md](docs/SEQUENCE_FORMAT.md) lists every sequence command and layer option.
 
-The Info tab and the dashboard both carry the full command reference.
+Light commands are never turned away as busy: if a light already has a command waiting, the newer one replaces it, so a Stream Deck dial can send as fast as it likes. JSON colour temperatures can be given in Kelvin (`"temp": 5600`) or hundreds of Kelvin (`56`).
+
+The Info tab and the dashboard both carry a command reference.
 
 **Security:** the HTTP server has no authentication. Access is limited only by the IP allowlist in Global Preferences, which by default admits this machine and common private network ranges. Don't expose the port to the internet.
 

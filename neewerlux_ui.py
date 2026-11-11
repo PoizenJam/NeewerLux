@@ -1072,7 +1072,8 @@ copied between installations.</p>
 for sequences (list, reload, play, pause, resume, stop, seek, set_position, status, validate,
 save, render), or to <code>/NeewerLux/settings</code> for light and show preferences (get,
 set_light, set_global). The web dashboard has the same Sequences, Stage and Settings panels
-as this window.</p>
+as this window. The full contract, including the structured light state in <code>list_json</code>,
+is in <code>docs/HTTP_API.md</code>.</p>
 
 <hr>
 

@@ -15,7 +15,7 @@
 ##          Windows, Linux/Ubuntu, MacOS and RPi
 ############################################################
 
-NEEWERLUX_VERSION = "1.3.2"
+NEEWERLUX_VERSION = "1.3.3"
 NEEWERLUX_REPO_URL = "https://github.com/poizenjam/NeewerLux/"
 NEEWERLUX_RELEASES_API = "https://api.github.com/repos/poizenjam/NeewerLux/releases/latest"
 
@@ -249,6 +249,9 @@ savedSequences = {}            # dict of {name: sequence_dict} loaded from disk
 sequencesDir = os.path.dirname(os.path.abspath(sys.argv[0])) + os.sep + "light_prefs" + os.sep + "sequences"
 lightShowPrefs = {}            # {MAC: {"role", "side", "order", "eyeline", "maxBri", "minBri", "locked"}}
 _lastWritten = {}              # {MAC: bytes last actually written, after CCT-only conversion and limits}, for display
+API_VERSION = 2                # HTTP API contract version (docs/HTTP_API.md); v1.3.0 and earlier count as 1
+_pendingSends = set()          # light indices whose stored value ([3]) still needs writing; latest value wins
+_pendingSendsLock = threading.Lock()
 _lightsOff = set()             # MACs whose last power command was OFF
 SHOW_PREF_DEFAULTS = {"role": "ambient", "side": "centre", "order": 0, "eyeline": False,
                       "maxBri": -1, "minBri": -1, "locked": False} # -1 brightness = use the global default
@@ -2142,8 +2145,7 @@ try: # try to load the GUI
                 except Exception:
                     pass
 
-            if threadAction == "":
-                threadAction = "psend|" + "|".join(map(str, adjusted))
+            queueLightSend(adjusted)
 
         def _syncSlidersToLight(self, lightIdx):
             """Move the active tab's sliders to match a light's stored values, without re-sending."""
@@ -4983,6 +4985,22 @@ async def connectToOneLight(MACAddress):
         printDebugString("Error finding the Neewer light with MAC address " + MACAddress)
         print(e)
 
+def queueLightSend(lightIndices):
+    """Ask the worker to write the lights' stored values ([3]) with the synchronized send.
+    Never refused: a light already waiting is just written once, with whatever value it has
+    by then, so rapid commands (a Stream Deck dial) coalesce instead of being turned away."""
+    with _pendingSendsLock:
+        _pendingSends.update(int(i) for i in lightIndices)
+    workerWakeEvent.set()
+
+
+def _takePendingSends():
+    with _pendingSendsLock:
+        indices = sorted(i for i in _pendingSends if i < len(availableLights))
+        _pendingSends.clear()
+    return indices
+
+
 def _recordWritten(lightIdx, byteVal):
     """Remember what a light was actually sent, for the Stage window, swatches and status.
     availableLights[i][3] keeps the requested value (before the CCT-only conversion), which
@@ -5204,6 +5222,16 @@ def workerThread(_loop):
         elif threadAction != "" and threadAction != "HTTP": # "HTTP" only marks a request in progress
             result = processMultipleSends(_loop, threadAction)
             threadAction = result if result is not None else ""
+
+        # QUEUED SENDS (HTTP and batch commands): one synchronized write per waiting light
+        if threadAction == "" and _pendingSends:
+            pending = _takePendingSends()
+            if pending:
+                _loop.run_until_complete(parallelWriteToLights(pending))
+                if mainWindow is not None:
+                    for idx in pending:
+                        if idx < len(availableLights) and availableLights[idx][3] is not None:
+                            mainWindow._tableUpdateSignal.emit(["", "", "", updateStatus(True, availableLights[idx][3])], idx)
 
         # SHOW ENGINE FRAMES: latest value per light, written once the worker is free
         if threadAction == "" and showEngine is not None and showEngine.hasPending():
@@ -5478,18 +5506,20 @@ def processHTMLCommands(paramsList, loop):
     """
     global threadAction, numOfPresets, defaultLightPresets, customLightPresets, animRevertOnFinish
 
-    # Wait briefly if worker is busy, BLE writes can take a few seconds
-    for _retry in range(20):  # up to 5 seconds
-        if threadAction in ("", "HTTP"):
-            break
-        time.sleep(0.25)
-    
-    if threadAction not in ("", "HTTP"):
-        printDebugString("The HTTP Server requested an action, but the worker thread is busy (" + threadAction + ") after waiting. Skipping.")
-        return
-
     if len(paramsList) == 0:
         return
+
+    # Scans, links and preset recalls take over the worker's action slot, so wait briefly if
+    # it's in use (BLE work can take a few seconds). Light commands go through queueLightSend
+    # and never wait.
+    if paramsList[3] in ("discover", "link", "use_preset"):
+        for _retry in range(20):  # up to 5 seconds
+            if threadAction in ("", "HTTP"):
+                break
+            time.sleep(0.25)
+        if threadAction not in ("", "HTTP"):
+            printDebugString("The HTTP Server requested an action, but the worker thread is busy (" + threadAction + ") after waiting. Skipping.")
+            return
 
     # Stop the override animation for non-animation HTTP commands (sequences and effects keep running)
     if paramsList[3] not in ("animate", "stop_animate", "list_animations", "sequence", "stop_layer") and animationRunning:
@@ -5682,8 +5712,7 @@ def processHTMLCommands(paramsList, loop):
                 if lightIdx < len(availableLights):
                     availableLights[lightIdx][3] = computedValue
 
-            # Queue the send via worker thread (parallel write)
-            threadAction = "psend|" + "|".join(map(str, selectedLights))
+            queueLightSend(selectedLights)
 
 def reorderByPreferredID():
     """Put lights with a preferred ID first, in ID order, then the rest in discovery order,
@@ -5969,7 +5998,10 @@ def processBatchCommands(batchInput, loop):
             elif mode == "OFF":
                 byteVal = [120, 129, 1, 2, 252]  # power off
             elif mode == "CCT":
-                temp = max(32, min(85, int(cmd.get("temp", 56))))
+                temp = float(cmd.get("temp", 56))
+                if temp > 100:  # Kelvin (5600), as the GET batch string also accepts
+                    temp = round(temp / 100)
+                temp = max(32, min(85, int(temp)))
                 bri = max(0, min(100, int(cmd.get("bri", 100))))
                 byteVal = calculateByteString(True, colorMode="CCT", brightness=bri, temp=temp)
             elif mode == "HSI":
@@ -6003,8 +6035,7 @@ def processBatchCommands(batchInput, loop):
     # Now queue all changed lights for the worker thread to send
     if changedLights:
         printDebugString("Batch: queuing send to " + str(len(changedLights)) + " light(s)")
-        global threadAction
-        threadAction = "psend|" + "|".join(map(str, changedLights))
+        queueLightSend(changedLights)
 
     return {"success": True, "commands_processed": len(commands), "lights_updated": len(changedLights), "results": results}
 
@@ -6589,7 +6620,7 @@ def getStageTiles():
 def getShowStatus():
     """Layer, sequence and per-light status for the HTTP status endpoints and the GUI."""
     if showEngine is None:
-        return {"layers": {}, "sequence": None, "lights": []}
+        return {"apiVersion": API_VERSION, "layers": {}, "sequence": None, "lights": []}
     st = showEngine.status()
     lights = []
     for idx, light in enumerate(availableLights):
@@ -6603,7 +6634,42 @@ def getShowStatus():
                        "linked": linked, "simulated": simulated,
                        "mode": cmd["mode"] if cmd else None, "bri": cmd.get("bri") if cmd else None,
                        "color": show.rgbHex(rgb)})
-    return {"layers": st["layers"], "sequence": st["sequence"], "lights": lights}
+    return {"apiVersion": API_VERSION, "layers": st["layers"], "sequence": st["sequence"], "lights": lights}
+
+
+def _commandJSON(cmd):
+    """A light command for HTTP clients: colour temperature in Kelvin, nothing internal."""
+    if not cmd:
+        return None
+    mode = cmd.get("mode")
+    if mode == "CCT":
+        return {"mode": "CCT", "temp": cmd["temp"] * 100, "bri": cmd["bri"]}
+    if mode == "HSI":
+        return {"mode": "HSI", "hue": cmd["hue"], "sat": cmd["sat"], "bri": cmd["bri"]}
+    if mode == "ANM":
+        return {"mode": "ANM", "scene": cmd["scene"], "bri": cmd["bri"]}
+    return {"mode": mode}
+
+
+def lightStateJSON(lightIdx):
+    """Structured state of one light for list_json (API version 2): what it was last told
+    (setting), what it's showing (output, after the CCT-only conversion and limits), power
+    and channel from its last status reply, and its capabilities and show settings."""
+    light = availableLights[lightIdx]
+    cmd, rgb, linked, simulated = getLightDisplayState(lightIdx)
+    reported = light[7] if isinstance(light[7], list) and len(light[7]) > 1 else ["---", "---"]
+    power = {"ON": "on", "STBY": "standby"}.get(reported[0])
+    channel = reported[1] if isinstance(reported[1], int) else None
+    minK, maxK = getEffectiveCCTRange(lightIdx)
+    layer = "base"
+    if showEngine is not None:
+        layer = show.LAYER_NAMES[showEngine.status()["owners"].get(lightIdx, 0)]
+    return {"simulated": simulated, "power": power, "channel": channel,
+            "setting": _commandJSON(show.bytesToCommand(light[3])),
+            "output": dict(_commandJSON(cmd) or {}, color=show.rgbHex(rgb)) if cmd else None,
+            "cctRange": [minK, maxK], "cctOnly": bool(light[5]),
+            "role": getLightShowPref(lightIdx, "role"), "side": getLightShowPref(lightIdx, "side"),
+            "locked": bool(getLightShowPref(lightIdx, "locked")), "layer": layer}
 
 
 # ============================================================================
@@ -6645,7 +6711,7 @@ def getWebSettings():
             entry[key] = getLightShowPref(idx, key)
         lights.append(entry)
     current = {name: globals()[name] for name in WEB_GLOBAL_PREFS}
-    return {"success": True, "global": current, "lights": lights, "roles": LIGHT_ROLES, "sides": LIGHT_SIDES,
+    return {"success": True, "apiVersion": API_VERSION, "global": current, "lights": lights, "roles": LIGHT_ROLES, "sides": LIGHT_SIDES,
             "simulatedRigs": ["Off"] + [", ".join(r["role"] for r in sim.RIG_LIGHTS[:n]) for n in range(1, len(sim.RIG_LIGHTS) + 1)]}
 
 
@@ -7216,9 +7282,10 @@ class NLPythonServer(BaseHTTPRequestHandler):
                                 status = ""
                         except Exception:
                             status = ""
-                        lightsData.append({"id": effectiveID, "name": name, "mac": mac,
-                                           "linked": linked, "status": status,
-                                           "model": light[0].name})
+                        entry = {"id": effectiveID, "name": name, "mac": mac,
+                                 "linked": linked, "status": status, "model": light[0].name}
+                        entry.update(lightStateJSON(idx))
+                        lightsData.append(entry)
 
                     animData = []
                     for aName, aData in sorted(savedAnimations.items()):
@@ -7242,10 +7309,13 @@ class NLPythonServer(BaseHTTPRequestHandler):
                                     and customLightPresets[i] != defaultLightPresets[i])
                         presetsData.append({"index": i + 1, "name": pName, "custom": isCustom})
 
-                    result = {"lights": lightsData, "animations": animData,
+                    result = {"apiVersion": API_VERSION, "version": NEEWERLUX_VERSION,
+                              "lights": lightsData, "animations": animData,
                               "animationPlaying": animationRunning,
                               "currentAnimation": currentAnimationName if animationRunning else "",
-                              "presets": presetsData, "numPresets": numOfPresets}
+                              "presets": presetsData, "numPresets": numOfPresets,
+                              "sequences": [{"name": n, "duration_ms": d.get("duration_ms"), "description": d.get("description", "")}
+                                            for n, d in sorted(savedSequences.items(), key=lambda kv: kv[0].lower())]}
                     self.wfile.write(_json.dumps(result).encode("utf-8"))
                     return
 
@@ -7517,17 +7587,15 @@ class NLPythonServer(BaseHTTPRequestHandler):
 
             printDebugString("POST batch request from " + clientIP + " with " + str(len(commands)) + " command(s)")
 
-            if threadAction != "" and threadAction != "finished":
-                resultData = {"success": False, "error": "Server is busy processing another command. Please retry."}
-            else:
-                threadAction = "HTTP"
-                try:
-                    resultData = processBatchCommands(commands, asyncioEventLoop)
-                except Exception as e:
-                    resultData = {"success": False, "error": str(e)}
-                finally:
-                    if threadAction == "HTTP": # don't clear the send processBatchCommands just queued
-                        threadAction = ""
+            # Like a GET light command: stop the override animation (it would overwrite the
+            # batch on its next frame); sequences and effects keep running, and the batch
+            # becomes what their lights return to
+            if animationRunning:
+                stopAnimation()
+            try:
+                resultData = processBatchCommands(commands, asyncioEventLoop)
+            except Exception as e:
+                resultData = {"success": False, "error": str(e)}
 
         elif self.path in ("/NeewerLux/animate", "/NeewerLite-Python/animate"):
             action = body.get("action", "play")  # play, stop, list, create
