@@ -383,7 +383,11 @@ def t_guidSidecar(rig):
     """macOS addresses are GUIDs; their sidecars must still load show settings."""
     guid = "6F3A1C2E-0000-4000-8000-00000000ABCD"
     light = rig.nl.availableLights[AMB]
-    oldDevice = light[0]
+    oldDevice, oldClient = light[0], light[1]
+    # Detach the connection while the address is swapped: otherwise the worker's status poll
+    # can subscribe this client under the GUID, and after the swap back the light's replies
+    # keep going to the GUID's slot (a test artefact; a real light's address never changes)
+    light[1] = ""
     light[0] = rig.nl.sim.SimDevice(guid, oldDevice.name)
     path = os.path.join(rig.workdir, "light_prefs", guid)
     try:
@@ -393,6 +397,8 @@ def t_guidSidecar(rig):
         check(rig.nl.getLightShowPref(AMB, "maxBri") == 60, "GUID light limit")
     finally:
         light[0] = oldDevice
+        light[1] = oldClient
+        rig.nl._forgetNotify(guid)
         os.remove(path)
         rig.nl.loadLightAliases()
 
@@ -526,9 +532,13 @@ def t_simStateFollowsCommands(rig):
 
 
 def t_statusPollThroughNotifications(rig):
-    time.sleep(4.5)  # the worker polls every few seconds while idle
-    statuses = [l[7] for l in rig.nl.availableLights]
+    # The worker polls every few seconds while idle; a round takes longer on Windows, where
+    # short sleeps round up to the 15.6 ms timer tick, so wait for a full round rather than a fixed time
     expected = [["ON" if l[0].state.power else "STBY", 1] for l in rig.nl.availableLights]
+    end = time.monotonic() + 12
+    while time.monotonic() < end and [l[7] for l in rig.nl.availableLights] != expected:
+        time.sleep(0.25)
+    statuses = [l[7] for l in rig.nl.availableLights]
     check(statuses == expected, "status poll results %s, lights are %s" % (statuses, expected))
     check(all(rig.nl._notifyClients.get(l[0].address) is l[1] for l in rig.nl.availableLights), "one subscription per light")
 
