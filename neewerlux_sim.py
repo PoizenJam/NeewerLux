@@ -26,7 +26,7 @@ RIG_LIGHTS = [
     {"label": "Key", "role": "key", "side": "right", "order": 4, "model": "RGB660"},
     {"label": "Fill", "role": "fill", "side": "left", "order": 1, "model": "RGB660"},
     {"label": "Rim", "role": "rim", "side": "right", "order": 3, "model": "RGB660"},
-    {"label": "Ambient", "role": "ambient", "side": "left", "order": 2, "model": "RGB660"},
+    {"label": "Background", "role": "background", "side": "left", "order": 2, "model": "RGB660"},
 ]
 CCT_ONLY_LIGHT = {"label": "Practical", "role": "practical", "side": "centre", "order": 5, "model": "SNL660"}
 SIM_PREFERRED_ID_BASE = 90  # simulated lights get IDs 91 and up, clear of real lights' 1, 2, 3...

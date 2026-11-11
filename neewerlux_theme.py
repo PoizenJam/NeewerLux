@@ -139,11 +139,16 @@ QSlider::handle:horizontal {
 }
 QSlider::handle:horizontal:hover { background: $accentHover; border-color: $accent; }
 QSlider::sub-page:horizontal { background: $accent; border-radius: $radiusSm; }
-QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QComboBox {
+QLineEdit, QTextEdit, QPlainTextEdit, QAbstractSpinBox, QComboBox {
     background-color: $bg2; border: 1px solid $border; border-radius: $radiusSm;
     color: $text; padding: $padInput; selection-background-color: $accent; selection-color: $onAccent;
 }
-QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus, QSpinBox:focus, QComboBox:focus { border-color: $accent; }
+QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus, QAbstractSpinBox:focus, QComboBox:focus { border-color: $accent; }
+/* No spin box shows Qt's own arrows: once the box is styled they sit under the text area on Windows,
+   and Qt 6.12 squashes the text area of a box set to NoButtons to nothing. Boxes with -/+ beside them
+   (SpinBoxWithButtons) and typed-only boxes carry arrows="none" (neewerlux_ui.hideSpinArrows). */
+QAbstractSpinBox[arrows="none"]::up-button, QAbstractSpinBox[arrows="none"]::down-button { width: 0px; border: none; }
+QAbstractSpinBox[arrows="none"]::up-arrow, QAbstractSpinBox[arrows="none"]::down-arrow { width: 0px; height: 0px; border: none; image: none; }
 QComboBox::drop-down { border-left: 1px solid $border; width: 20px; subcontrol-origin: padding; subcontrol-position: center right; }
 QComboBox::down-arrow { width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 6px solid $textDim; }
 QComboBox QAbstractItemView {

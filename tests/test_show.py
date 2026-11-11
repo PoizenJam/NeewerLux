@@ -55,6 +55,18 @@ def writesFor(rig, i, since=0.0):
     return [(t, d) for t, m, d in rig.rec.snapshot() if m == rig.mac(i) and t >= since]
 
 
+def waitFor(rig, i, since, done, timeout):
+    """Writes to light i since `since`, once one satisfies done(bytes) or the timeout passes.
+    Windows schedules the worker less tightly than Linux, so fixed short windows are flaky."""
+    end = time.monotonic() + timeout
+    while True:
+        w = [d for t, d in writesFor(rig, i, since)]
+        if any(done(d) for d in w) or time.monotonic() > end:
+            time.sleep(0.1)  # anything sent just after still counts
+            return [d for t, d in writesFor(rig, i, since)]
+        time.sleep(0.02)
+
+
 class StubWindow:
     """Just enough of MainWindow for the slider send path."""
 
@@ -336,9 +348,10 @@ def t_fadeInEverywhere(rig):
                                         "entries": [{"light": "*", "mode": "CCT", "temp": 5600, "bri": 20}]})
         check(idx not in nl.presetFades, "fade cleared")
         t1 = time.monotonic()
-        rig.get("use_preset=2", 0.3)
-        w = [d for t, d in writesFor(rig, FILL, t1) if d[1] == 135]
-        check(len(w) <= 2 and w[-1][4] == 56, "global 0: the preset cuts: " + str(w))
+        rig.get("use_preset=2")
+        w = waitFor(rig, FILL, t1, lambda d: d[1] == 135 and d[4] == 56, 1.5)
+        temps = [d[4] for d in w if d[1] == 135]
+        check(temps and temps[-1] == 56 and set(temps) <= {32, 56}, "global 0: the preset cuts to 5600K: " + str(temps))
         # an animation's own fade in from its file, overridden by the URL
         anim = {"name": "Harness Fade", "loop": True, "fade_in_ms": 500, "keyframes": [
             {"hold_ms": 1000, "fade_ms": 0, "lights": {"*": {"mode": "HSI", "hue": 120, "sat": 100, "bri": 60}}}]}
@@ -377,6 +390,65 @@ def t_fadeInEverywhere(rig):
         nl.presetFades.pop(1, None)
         for n in ("Harness Fade", "Harness Fade 2"):
             rig.post(A, {"action": "delete", "name": n})
+
+
+def t_fadesOnlyBetweenItems(rig):
+    """1.3.3: Fade in and Fade back smooth the change into and out of an item, never what happens
+    inside it. An animation's hard cuts stay hard cuts (it is held on its first frame while it fades
+    in, then runs as written), lights a sequence picks up or drops while running cut, and
+    restarting the same animation cuts."""
+    nl = rig.nl
+    programmed = {(0, 100, 100), (0, 0, 100), (0, 100, 5)}  # Ambulance: red, white, dim red
+
+    def hsi(t0, a, b):
+        return [(hueOf(d), d[5], d[6]) for t, d in writesFor(rig, FILL, t0) if d[1] == 134 and a <= t - t0 <= b]
+    try:
+        runs = {}
+        for fin, back in ((0, 0), (400, 500)):
+            nl.fadeInMs, nl.handbackFadeMs = fin, back
+            rig.get("light=*&mode=CCT&temp=56&bri=20", 0.6)
+            t0 = time.monotonic()
+            rig.get("light=*&animate=Ambulance", 2.2)
+            runs[fin] = hsi(t0, fin / 1000.0 + 0.03, 2.2)
+            if fin:
+                blend = hsi(t0, 0, fin / 1000.0 - 0.03)
+                check(len(blend) >= 4 and blend[-1][1] > blend[0][1], "it fades in from white towards red: " + str(blend))
+            rig.get("stop_animation=1", 0.8)
+        for fin, vals in runs.items():
+            check(len(vals) >= 6 and set(vals) <= programmed,
+                  "fade in %d ms: only Ambulance's own colours once it runs, got %s" % (fin, sorted(set(vals) - programmed)))
+        check(runs[0][:6] == runs[400][:6], "the same keyframes in the same order with and without fades: %s / %s" % (runs[0][:6], runs[400][:6]))
+
+        # a sequence: Fill joins at 0.4 s and leaves at 0.8 s while the sequence keeps running. With
+        # Fade in 0.4 s the sequence holds its first frame for 0.4 s, so those are 0.8 and 1.2 s.
+        rig.get("light=*&mode=CCT&temp=56&bri=20", 0.6)
+        seq = {"format": 1, "name": "join", "duration_ms": 1400, "cues": [
+            {"at_ms": 0, "target": "@key", "state": {"mode": "HSI", "hue": 30, "sat": 100, "bri": 60}},
+            {"at_ms": 400, "duration_ms": 400, "target": "@fill", "state": {"mode": "HSI", "hue": 200, "sat": 100, "bri": 60}}]}
+        t1 = time.monotonic()
+        rig.post("/NeewerLux/sequence", {"action": "play", "sequence": seq}, 1.6)
+        w = [(t - t1, list(d)) for t, d in writesFor(rig, FILL, t1)]
+        hsiW = [(round(t, 2), hueOf(d), d[5]) for t, d in w if d[1] == 134]
+        check(hsiW and all((h, sat) == (200, 100) for _, h, sat in hsiW) and 0.75 < hsiW[0][0] < 0.95,
+              "Fill cuts to its cue at 0.8 s, no blend: " + str(hsiW))
+        back = [d for t, d in w if t > 1.15 and d[1] == 135]
+        check(back and bri(back[0]) == 20 and len(back) == 1, "and cuts back when its cue ends: " + str(w))
+        keyW = [list(d) for t, d in writesFor(rig, KEY, t1)]
+        check(len([d for d in keyW if d[1] == 134 and d[5] < 100]) >= 3, "Key still fades in at the start: " + str(keyW[:5]))
+        time.sleep(1.0)
+        tail = [d for t, d in writesFor(rig, KEY, t1 + 1.8)]
+        check(len(tail) >= 4 and tail[-1][1] == 135, "and fades back at the end: " + str(tail[-3:]))
+
+        # restarting the same animation cuts
+        nl.fadeInMs = 400
+        rig.get("animate=Ambulance|1|10|100|true|||effect", 0.8)
+        t2 = time.monotonic()
+        rig.get("animate=Ambulance|1|10|100|true|||effect|replace", 0.6)
+        vals = hsi(t2, 0, 0.6)
+        check(vals and set(vals) <= programmed, "a restart cuts: " + str(vals))
+        rig.get("stop_layer=effect", 0.8)
+    finally:
+        nl.fadeInMs, nl.handbackFadeMs = 0, 0
 
 
 def t_blendCommands(rig):
@@ -642,7 +714,7 @@ def t_guidSidecar(rig):
 def t_statusShape(rig):
     st = rig.getJSON("status_json")
     check(set(st) == {"apiVersion", "layers", "sequence", "lights", "flashGuard", "stage", "handbackFadeMs", "fadeInMs"}, "status keys: " + str(sorted(st)))
-    check([l["role"] for l in st["lights"]] == ["key", "fill", "rim", "ambient"], "roles in status")
+    check([l["role"] for l in st["lights"]] == ["key", "fill", "rim", "background"], "roles in status")
     check(all(l["layer"] == "base" for l in st["lights"]), "idle lights are on base")
 
 
@@ -816,10 +888,10 @@ def t_cctOnlyDisplayAndRender(rig):
             nl.sim.isSimulated = real
         r = nl.renderSequence(stepSequence("cctonly", [240], 300, target="@fill"))
         byRole = {l["role"]: l["id"] for l in r["lights"]}
-        ambBase = [c for c in r["changes"][byRole["ambient"]] if c[4] == "base"]
+        ambBase = [c for c in r["changes"][byRole["background"]] if c[4] == "base"]
         check(ambBase and ambBase[0][3] == "CCT", "render base of a CCT-only light should be CCT: " + str(ambBase[:1]))
-        r = nl.renderSequence(stepSequence("cctonly2", [240], 300, target="@ambient"))
-        seqCh = [c for c in r["changes"][byRole["ambient"]] if c[4] == "sequence"]
+        r = nl.renderSequence(stepSequence("cctonly2", [240], 300, target="@background"))
+        seqCh = [c for c in r["changes"][byRole["background"]] if c[4] == "sequence"]
         check(seqCh and all(c[3] == "CCT" for c in seqCh), "render of colour cues on a CCT-only light: " + str(seqCh[:2]))
     finally:
         nl.availableLights[AMB][5] = False
@@ -836,7 +908,7 @@ def t_dimColoursStayVisible(rig):
 def t_stageTilesAndStatusColours(rig):
     rig.get("light=*&mode=HSI&hue=0&sat=100&bri=100", 0.5)
     tiles = rig.nl.getStageTiles()
-    check([t["role"] for t in tiles] == ["fill", "ambient", "rim", "key"], "stage tiles in sweep order: " + str([t["role"] for t in tiles]))
+    check([t["role"] for t in tiles] == ["fill", "background", "rim", "key"], "stage tiles in sweep order: " + str([t["role"] for t in tiles]))
     check(all(t["rgb"] == (255, 0, 0) and t["linked"] and t["simulated"] for t in tiles), "stage tile colours: " + str([t["rgb"] for t in tiles]))
     st = rig.getJSON("status_json")
     check(all(l["color"] == "#ff0000" and l["mode"] == "HSI" and l["bri"] == 100 for l in st["lights"]), "status_json colours")
@@ -1248,6 +1320,7 @@ TESTS = [t_maxBrightnessHTTP, t_maxBrightnessAnimationAndSequence, t_minBrightne
          t_presetEditAPI, t_animationEditAPI, t_sequenceEditAPI, t_commandsDontWaitForStatusPoll,
          t_flashGuardLimitsOutput, t_flashGuardRedFlashes, t_shippedContentUnderFlashLimit,
          t_positionTargetsAndSweep, t_animationModeValidation, t_exactAnimationTiming, t_handbackFade, t_blendCommands, t_fadeInEverywhere,
+         t_fadesOnlyBetweenItems,
          t_addSimulatedRig]
 
 

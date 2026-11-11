@@ -20,7 +20,7 @@ Wherever a light is named (`light=`, the `light` field of a batch command, anima
 | Name | `Key Light` | The custom name, case-insensitive |
 | MAC address | `AA:BB:CC:DD:EE:FF` | On macOS, the GUID Bluetooth reports instead |
 | All | `*` or `all` | Every light |
-| Role or position | `@key`, `@fill`, `@rim`, `@ambient`, `@practical`, `@left`, `@centre`, `@right`, `@front`, `@beside`, `@back`, `@low`, `@middle`, `@high`, `@eyeline`, `@all` | From each light's show settings; dots combine them (`@rim.left`, `@back.left.high`). Sides are the streamer's left and right facing the camera; front is between the streamer and the camera |
+| Role or position | `@key`, `@fill`, `@rim`, `@background`, `@practical`, `@left`, `@centre`, `@right`, `@front`, `@beside`, `@back`, `@low`, `@middle`, `@high`, `@eyeline`, `@all` | From each light's show settings; dots combine them (`@rim.left`, `@back.left.high`). Sides are the streamer's left and right facing the camera; front is between the streamer and the camera |
 | A list | `1;3;@rim` | Any mix, separated by `;` |
 
 ### The flash guard

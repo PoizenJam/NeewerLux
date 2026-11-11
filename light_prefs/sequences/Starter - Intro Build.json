@@ -1,7 +1,7 @@
 {
   "format": 1,
   "name": "Starter - Intro Build",
-  "description": "20 s opening: lights rise from almost dark, ambient and fill first, then the rim, then the key. Holds the last look.",
+  "description": "20 s opening: lights rise from almost dark, background and fill first, then the rim, then the key. Holds the last look.",
   "duration_ms": 20000,
   "end": "hold",
   "cues": [
@@ -18,7 +18,7 @@
     },
     {
       "at_ms": 2000,
-      "target": "@ambient",
+      "target": "@background",
       "state": {
         "mode": "HSI",
         "hue": 270,
@@ -63,7 +63,7 @@
     {
       "at_ms": 16000,
       "duration_ms": 4000,
-      "target": "@fill;@ambient;@rim",
+      "target": "@fill;@background;@rim",
       "clip": {
         "name": "Color Wash",
         "fit": "stretch",

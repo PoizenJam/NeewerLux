@@ -643,7 +643,7 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
                 <div>
                     <h4>In sequences and effects</h4>
                     <div class="form-grid">
-                        <label>Role</label><select id="lpRole"></select>
+                        <label>Role</label><select id="lpRole" title="Key: main light on you. Fill: softens the key's shadows. Rim / back: behind you, outlines you. Background: lights the wall or set behind you. Practical: a light that is visible in shot. Lights without a role count as Background."></select>
                         <label>Sweep order</label><input type="number" id="lpOrder" min="0" max="99"><div class="hint">0 = automatic (left to right, front to back, low to high).</div>
                     </div>
                     <div style="margin-top:8px;color:var(--muted);font-size:12px">Position, height and aim (from your seat, facing the camera)</div>
@@ -1563,7 +1563,7 @@ function fillSelect(id, values, labels) {
 }
 function applySettings(d) {
     settingsData = d;
-    fillSelect('lpRole', d.roles);
+    fillSelect('lpRole', d.roles, d.roles.map(r => r === 'rim' ? 'Rim / back' : r.charAt(0).toUpperCase() + r.slice(1)));
 
     fillSelect('gpSim', d.simulatedRigs.map((_, i) => i), d.simulatedRigs.map((r, i) => i ? i + ' (' + r + ')' : r));
     fillSelect('lpLight', d.lights.map(l => l.index), d.lights.map(l => l.id + ' - ' + (l.customName || l.model) + (l.simulated ? ' (simulated)' : '')));
@@ -2662,7 +2662,7 @@ function tlProps() {
     const names = ids.map(id => (tl.tracks.find(t => t.id === id) || {}).name || id);
     let html = '<b>Cue at ' + tlFmt(c.at_ms || 0, true) + '</b><div class="form-grid" style="margin-top:8px">'
         + '<label>Start (s)</label><input type="number" id="tpStart" step="0.1" min="0" value="' + ((+c.at_ms || 0) / 1000) + '">'
-        + '<label>Lights</label><input type="text" id="tpTarget" list="tpTargets" value="' + esc(c.target == null ? '*' : c.target) + '" title="An ID, a name, @key/@fill/@rim/@ambient/@practical, @left/@right, @all or *, several joined with ;"><datalist id="tpTargets">' + choices + '</datalist>'
+        + '<label>Lights</label><input type="text" id="tpTarget" list="tpTargets" value="' + esc(c.target == null ? '*' : c.target) + '" title="An ID, a name, @key/@fill/@rim/@background/@practical, @left/@right, @all or *, several joined with ;"><datalist id="tpTargets">' + choices + '</datalist>'
         + '<span></span><span style="color:var(--muted)">' + (ids.length ? 'Drives: ' + esc(names.join(', ')) : 'Matches no light right now') + '</span>'
         + '<label>Type</label><select id="tpKind"><option value="state"' + (kind === 'state' ? ' selected' : '') + '>Colour</option><option value="clip"' + (kind === 'clip' ? ' selected' : '') + '>Clip (animation)</option></select>';
     if (kind === 'state') {

@@ -68,14 +68,14 @@ def main():
     big = QFont(stage.font())
     big.setPointSizeF(max(14.0, big.pointSizeF() * 1.6))
     stage.view.setFont(big)
-    longTiles = [dict(t, name=n, simulated=True) for t, n in zip(stage.view.tiles, ["SIM-RGB660-Fill", "SIM-RGB660-Ambient", "NEEWER-RGB660 PRO", "A very long custom light name"])]
+    longTiles = [dict(t, name=n, simulated=True) for t, n in zip(stage.view.tiles, ["SIM-RGB660-Fill", "SIM-RGB660-Background", "NEEWER-RGB660 PRO", "A very long custom light name"])]
     stage.view.setTiles(longTiles)
     stage.resize(200, 100)  # smaller than it can be: the minimum size must win
     app.processEvents()
     tileW, swatchH, gap, line, sline = stage.view._geometry()
     assert stage.view.height() >= swatchH + line + 2 * sline, "Stage view is shorter than one tile"
     fm = QFontMetrics(stage.view._smallFont())
-    assert tileW >= fm.horizontalAdvance("Ambient  HSI 100%"), "detail line doesn't fit the tile"
+    assert tileW >= fm.horizontalAdvance("Background  HSI 100%"), "detail line doesn't fit the tile"
     stage.resize(stage.view.sizeHint().width() + 20, stage.view.sizeHint().height() + 60)
     app.processEvents()
     shotBig = os.path.join(rig.workdir, "stage_bigfont.png")
@@ -134,11 +134,11 @@ def main():
     fresh.viewCombo.setCurrentIndex(1)
     app.processEvents()
     assert remembered and remembered[-1][0] == "height", "changing the view is remembered: %r" % remembered
-    fresh.resize(900, 700); app.processEvents()
+    fresh.resize(1000, 720); app.processEvents()
     fresh.close(); app.processEvents()
-    assert remembered[-1][0] == "height" and remembered[-1][1].endswith("900,700"), "closing remembers the size: %r" % remembered
+    assert remembered[-1][0] == "height" and remembered[-1][1].endswith("1000,720"), "closing remembers the size: %r" % remembered
     again = StageWindow(nl.getStageTiles, win, view=remembered[-1][0], geometry=remembered[-1][1])
-    assert again.view.viewMode == "height" and again.width() == 900 and again.height() == 700, "reopens the same way"
+    assert again.view.viewMode == "height" and again.width() == 1000 and again.height() == 720, "reopens the same way"
     again.close()
     nl._rememberStageWindow("height", "10,10,800,600")
     assert nl.stageView == "height" and "stageView=height" in open(nl.globalPrefsFile, encoding="utf-8").read(), "kept in the prefs file"
@@ -163,6 +163,74 @@ def main():
     sd.apply(seqOut)
     assert seqOut.get("fade_in_ms") == 250 and seqOut.get("handback_fade_ms") == 900, seqOut
     assert win.fadeInSpin.value() == nl.fadeInMs and win.handbackFadeSpin.value() == nl.handbackFadeMs
+
+    # Spin boxes: Qt's own arrows end up under the text area on Windows, and Qt 6.12 squashes the
+    # text of NoButtons boxes, so every spin box hides its arrows through the theme and keeps a
+    # usable text area. Walks the main window, every editor and the modal dialogs (exec intercepted).
+    from PySide6.QtWidgets import QAbstractSpinBox, QStyle, QStyleOptionSpinBox
+    from PySide6.QtCore import QRect
+    from neewerlux_ui import SpinBoxWithButtons, DoubleSpinBoxWithButtons
+
+    def nativeSpins(root):
+        bad = []
+        for w in root.findChildren(QAbstractSpinBox):
+            opt = QStyleOptionSpinBox()
+            opt.initFrom(w)
+            opt.rect = QRect(0, 0, 120, 30)
+            opt.buttonSymbols = w.buttonSymbols()
+            opt.subControls = QStyle.SC_All
+            opt.frame = True
+            edit = w.style().subControlRect(QStyle.CC_SpinBox, opt, QStyle.SC_SpinBoxEditField, w)
+            if w.property("arrows") != "none" or edit.width() < 100:
+                bad.append("%s/%s (text %d px)" % (root.windowTitle() or type(root).__name__,
+                                                   w.parent().objectName() or type(w.parent()).__name__, edit.width()))
+        return bad
+
+    native = nativeSpins(win)
+    seen = []
+    realExec = nl.pyside_exec
+
+    def inspect(dlg):
+        seen.append(dlg.windowTitle())
+        native.extend(nativeSpins(dlg))
+        return 0
+    nl.pyside_exec = inspect
+    try:
+        win._openPresetEditor(0)
+        win.animNew()
+        win._animEditJSON(sorted(nl.savedAnimations)[0])
+    finally:
+        nl.pyside_exec = realExec
+    assert len(seen) == 3, "the three modal editors opened: %r" % seen
+    ed = AnimationEditorDialog(win, {"name": "Spin", "loop": True, "keyframes": [
+        {"hold_ms": 100, "fade_ms": 0, "lights": {"*": {"mode": "HSI", "hue": 0, "sat": 100, "bri": 50}}}]}, "Spin")
+    native.extend(nativeSpins(ed))
+    ed.close()
+    native.extend(nativeSpins(SequenceSettingsDialog({"name": "x"}, 8, win)))
+    from neewerlux_timeline import SequenceEditor
+    win.seqOpenEditor(sorted(nl.savedSequences)[0])
+    app.processEvents()
+    for w in app.topLevelWidgets():
+        if isinstance(w, SequenceEditor):
+            native.extend(nativeSpins(w))
+            w.close()
+    assert not native, "spin boxes with Qt arrows or no room for text (use SpinBoxWithButtons or hideSpinArrows): %r" % native
+    sb = SpinBoxWithButtons(minVal=0, maxVal=1000)
+    sb.setSingleStep(100); sb.setSpecialValueText("Global")
+    sb._plus.click(); sb._plus.click(); sb._minus.click()
+    assert sb.value() == 100 and sb.text() == "100", (sb.value(), sb.text())
+    sb.setValue(0)
+    assert sb.text() == "Global"
+    got = []
+    sb.valueChanged.connect(got.append)
+    sb.blockSignals(True); sb.setValue(5); sb.blockSignals(False); sb.setValue(6)
+    assert got == [6], "blockSignals reaches the inner box: %r" % got
+    dsb = DoubleSpinBoxWithButtons(minVal=0.0, maxVal=2.0)
+    dsb.setSingleStep(0.25); dsb._plus.click()
+    assert abs(dsb.value() - 0.25) < 1e-9
+    sb.resize(160, 30); sb.show(); app.processEvents()
+    assert sb._spin.lineEdit().width() > 60, "the value has room to show: %d" % sb._spin.lineEdit().width()
+    sb.close()
 
     # Light Prefs round trip through the sidecar file
     win.lightTable.selectRow(0)
@@ -262,7 +330,7 @@ def main():
     r = nl.setWebLightSettings(1, {"role": "rim", "maxBri": 33})
     assert r["success"], r
     app.processEvents()
-    assert win.lightRoleCombo.currentText() == "Rim" and win.lightMaxBriSpin.value() == 33, (win.lightRoleCombo.currentText(), win.lightMaxBriSpin.value())
+    assert win.lightRoleCombo.currentText() == "Rim / back" and win.lightMaxBriSpin.value() == 33, (win.lightRoleCombo.currentText(), win.lightMaxBriSpin.value())
 
     # Flash guard: on by default; unticking asks, and saying No keeps it on
     win.setupGlobalLightPrefsTab()

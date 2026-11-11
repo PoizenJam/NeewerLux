@@ -111,7 +111,7 @@ def main():
         waitFor(page, "[...document.querySelectorAll('.stage-box')].every(b => b.style.background.includes('0, 255, 0'))", "green tiles")
         check(js(page, "document.querySelectorAll('[data-swatch]').length") == 4, "table swatches")
         check(js(page, "document.querySelector('[data-swatch]').style.background").startswith("rgb(0, 255, 0"), "swatch colour")
-        # plan view: each light in its cell (the harness rig is fill and ambient on the left,
+        # plan view: each light in its cell (the harness rig is fill and background on the left,
         # key and rim on the right, all beside you by default)
         js(page, "setStageView('plan')")
         waitFor(page, "document.getElementById('stageGrid').classList.contains('stage-plan')", "plan layout")
@@ -224,7 +224,7 @@ def main():
         check(js(page, "document.getElementById('commandLog').textContent.includes('not saved')"), "refusal shown in the log")
         # put it back to defaults: the sidecar is deleted, as on the desktop
         js(page, """document.getElementById('lpLight').value = '1'; fillLightPrefs();
-                    document.getElementById('lpRole').value = 'ambient'; lpPos = {side: 'centre', depth: 'beside', height: 'middle', aim: 'you'};
+                    document.getElementById('lpRole').value = 'background'; lpPos = {side: 'centre', depth: 'beside', height: 'middle', aim: 'you'};
                     document.getElementById('lpOrder').value = '0'; document.getElementById('lpEyeline').checked = false;
                     document.getElementById('lpMaxBri').value = '-1'; document.getElementById('lpMinBri').value = '-1';
                     document.getElementById('lpLocked').checked = false; document.getElementById('lpName').value = '';

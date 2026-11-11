@@ -22,7 +22,7 @@
     },
     {
       "at_ms": 0,
-      "target": "@fill;@ambient;@practical",
+      "target": "@fill;@background;@practical",
       "state": {
         "mode": "HSI",
         "hue": 250,
@@ -55,7 +55,7 @@
     },
     {
       "at_ms": 16000,
-      "target": "@fill;@ambient;@practical",
+      "target": "@fill;@background;@practical",
       "state": {
         "mode": "HSI",
         "hue": 210,
@@ -89,7 +89,7 @@
     {
       "at_ms": 48000,
       "duration_ms": 32000,
-      "target": "@fill;@ambient;@rim",
+      "target": "@fill;@background;@rim",
       "clip": {
         "name": "Color Chase",
         "fit": "loop",
@@ -109,7 +109,7 @@
     },
     {
       "at_ms": 80000,
-      "target": "@fill;@ambient;@practical",
+      "target": "@fill;@background;@practical",
       "state": {
         "mode": "HSI",
         "hue": 170,
@@ -143,7 +143,7 @@
     {
       "at_ms": 112000,
       "duration_ms": 32000,
-      "target": "@fill;@ambient;@rim",
+      "target": "@fill;@background;@rim",
       "clip": {
         "name": "Color Chase",
         "fit": "loop",
@@ -163,7 +163,7 @@
     },
     {
       "at_ms": 144000,
-      "target": "@fill;@ambient;@rim;@practical",
+      "target": "@fill;@background;@rim;@practical",
       "state": {
         "mode": "HSI",
         "hue": 270,
@@ -186,7 +186,7 @@
     {
       "at_ms": 160000,
       "duration_ms": 16000,
-      "target": "@fill;@ambient;@rim",
+      "target": "@fill;@background;@rim",
       "clip": {
         "name": "Rainbow Chase",
         "fit": "loop",
@@ -206,7 +206,7 @@
     },
     {
       "at_ms": 176000,
-      "target": "@fill;@ambient;@rim;@practical",
+      "target": "@fill;@background;@rim;@practical",
       "state": {
         "mode": "HSI",
         "hue": 250,

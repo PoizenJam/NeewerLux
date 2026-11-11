@@ -29,7 +29,7 @@ rejected with an error message naming the cue and field.
 | `fps` | no | integer, 1 to 30 | Updates per second during fades and clips. Default: the Sequence frame rate in Global Preferences (20). Cue starts are not rounded to frames. |
 | `end` | no | `"revert"`, `"hold"` or `"preset:N"` | What the lights do at the end. `revert` (default): back to the state they were in before the sequence started, usually a preset. `hold`: stay on the last frame. `preset:3`: recall preset 3. |
 | `pause_mode` | no | `"revert"` or `"freeze"` | While paused: `revert` (default) puts the lights back to their pre-sequence state and resumes the show exactly where it stopped; `freeze` holds the current frame. |
-| `fade_in_ms` | no | integer, 0 to 10000 | How long the lights take to fade into the sequence when it starts. Default: Fade in in Global Preferences (0, a cut). |
+| `fade_in_ms` | no | integer, 0 to 10000 | How long the lights take to fade into the sequence when it starts. The sequence holds its first frame for that long, then plays from `start_ms` with its cues exactly as written (lights it picks up or drops later follow their cues, with no extra fade). Default: Fade in in Global Preferences (0, a cut). |
 | `handback_fade_ms` | no | integer, 0 to 10000 | How long the lights take to fade back when this sequence lets go of them (when it ends, stops or pauses with `revert`). Default: Fade back in Global Preferences (500 ms). 0 cuts. |
 | `on_interrupt` | no | `"continue"` or `"pause"` | While an effect or override animation is playing: `continue` (default) keeps the sequence clock running underneath, so lights rejoin in sync with the song; `pause` stops the clock until the interruption ends. |
 | `description`, `artist`, `song`, `notes` | no | string | Shown in lists or ignored. |
@@ -116,7 +116,7 @@ pre-sequence state.
 ## Targets
 
 A target is one or more of these, separated by `;`. The result is the union, in the
-order written (`@fill;@ambient;@rim` puts the fill first, which matters for clips):
+order written (`@fill;@background;@rim` puts the fill first, which matters for clips):
 
 | Target | Lights |
 |---|---|
@@ -124,7 +124,7 @@ order written (`@fill;@ambient;@rim` puts the fill first, which matters for clip
 | `1`, `2`, ... | a light by number (its Preferred ID if set, otherwise its row) |
 | `Key Light` | a light by its custom name |
 | `D0:A8:9E:6B:20:84` | a light by MAC address |
-| `@key`, `@fill`, `@rim`, `@ambient`, `@practical` | lights with that role (Light Preferences). Lights without a role count as ambient. |
+| `@key`, `@fill`, `@rim`, `@background`, `@practical` | lights with that role (Light Preferences). Lights without a role count as background. Rim is also called a back or hair light; a practical is a light that is visible in shot. |
 | `@left`, `@centre` (or `@center`), `@right` | lights on that side: the streamer's left and right, facing the camera |
 | `@front`, `@beside`, `@back` | lights at that depth: between the streamer and the camera, level with them, behind them |
 | `@low`, `@middle`, `@high` | lights at that height |
@@ -242,7 +242,7 @@ can't, and treats a clip `duration_ms` of 0 as an error.
 ### Example
 
 A 40-second demo for a four-light rig (front right key, front left fill, rear right rim,
-rear left ambient). It ships as `light_prefs/sequences/Example - Four Light Demo.json`.
+rear left background). It ships as `light_prefs/sequences/Example - Four Light Demo.json`.
 
 ```json
 {
@@ -254,14 +254,14 @@ rear left ambient). It ships as `light_prefs/sequences/Example - Four Light Demo
   "end": "revert",
   "cues": [
     {"at_ms": 0, "target": "@key", "state": {"mode": "CCT", "temp": 45, "bri": 55, "fade_ms": 1000}, "label": "key stays a soft, steady white"},
-    {"at_ms": 0, "target": "@fill;@ambient;@rim", "state": {"mode": "CCT", "temp": 35, "bri": 30, "fade_ms": 2000}},
+    {"at_ms": 0, "target": "@fill;@background;@rim", "state": {"mode": "CCT", "temp": 35, "bri": 30, "fade_ms": 2000}},
     {"at_ms": 4000, "target": "@fill", "state": {"mode": "HSI", "hue": 280, "sat": 90, "bri": 45, "fade_ms": 3000}},
-    {"at_ms": 4000, "target": "@ambient", "state": {"mode": "HSI", "hue": 200, "sat": 90, "bri": 45, "fade_ms": 3000}},
+    {"at_ms": 4000, "target": "@background", "state": {"mode": "HSI", "hue": 200, "sat": 90, "bri": 45, "fade_ms": 3000}},
     {"at_ms": 6000, "target": "@rim", "state": {"mode": "HSI", "hue": 320, "sat": 100, "bri": 60, "fade_ms": 2000}},
-    {"at_ms": 12000, "duration_ms": 10000, "target": "@fill;@ambient;@rim", "clip": {"name": "Color Chase", "fit": "loop", "speed": 1.0, "brightness": 70}, "label": "chase over the three colour lights"},
-    {"at_ms": 22000, "target": "@fill;@ambient", "state": {"mode": "HSI", "hue": 30, "sat": 100, "bri": 50, "fade_ms": 1500}},
+    {"at_ms": 12000, "duration_ms": 10000, "target": "@fill;@background;@rim", "clip": {"name": "Color Chase", "fit": "loop", "speed": 1.0, "brightness": 70}, "label": "chase over the three colour lights"},
+    {"at_ms": 22000, "target": "@fill;@background", "state": {"mode": "HSI", "hue": 30, "sat": 100, "bri": 50, "fade_ms": 1500}},
     {"at_ms": 24000, "duration_ms": 6000, "target": "@rim", "clip": {"name": "Heartbeat", "fit": "loop", "brightness": 80}},
-    {"at_ms": 32000, "target": "@fill;@ambient;@rim", "state": {"mode": "CCT", "temp": 35, "bri": 25, "fade_ms": 4000}, "label": "calm ending before revert"}
+    {"at_ms": 32000, "target": "@fill;@background;@rim", "state": {"mode": "CCT", "temp": 35, "bri": 25, "fade_ms": 4000}, "label": "calm ending before revert"}
   ]
 }
 ```

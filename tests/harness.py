@@ -21,12 +21,12 @@ import time
 import urllib.parse
 import urllib.request
 
-# Robert's rig: front right key, front left fill, rear right rim, rear left ambient
+# Robert's rig: front right key, front left fill, rear right rim, rear left background
 RIG = [
     ("AA:00:00:00:00:01", "Key", {"role": "key", "side": "right", "order": 4}),
     ("AA:00:00:00:00:02", "Fill", {"role": "fill", "side": "left", "order": 1}),
     ("AA:00:00:00:00:03", "Rim", {"role": "rim", "side": "right", "order": 3}),
-    ("AA:00:00:00:00:04", "Ambient", {"role": "ambient", "side": "left", "order": 2}),
+    ("AA:00:00:00:00:04", "Background", {"role": "background", "side": "left", "order": 2}),
 ]
 START_BYTES = [120, 135, 2, 20, 56, 77]  # CCT 5600K 20%
 

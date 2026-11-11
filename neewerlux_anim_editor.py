@@ -45,6 +45,8 @@ def _colorForCCT(temp, bri):
     return QColor(int(r * factor), int(g * factor), int(b * factor))
 
 
+from neewerlux_ui import SpinBoxWithButtons, hideSpinArrows
+
 try:
     from neewerlux_ui import GradientSlider
 except ImportError:
@@ -98,11 +100,11 @@ class AnimationEditorDialog(QDialog):
 
         # Fades: when this animation takes the lights, and when it lets go (-1 = the global settings)
         fadeRow = QHBoxLayout()
-        self._fadeInSpin = QSpinBox(); self._fadeInSpin.setRange(-1, 10000); self._fadeInSpin.setSingleStep(100)
+        self._fadeInSpin = SpinBoxWithButtons(); self._fadeInSpin.setRange(-1, 10000); self._fadeInSpin.setSingleStep(100)
         self._fadeInSpin.setSuffix(" ms"); self._fadeInSpin.setSpecialValueText("Global")
         self._fadeInSpin.setValue(int(self._animData.get("fade_in_ms", -1)))
         self._fadeInSpin.setToolTip("Fade into this animation when it starts or replaces another. Global = Global Preferences.")
-        self._fadeOutSpin = QSpinBox(); self._fadeOutSpin.setRange(-1, 10000); self._fadeOutSpin.setSingleStep(100)
+        self._fadeOutSpin = SpinBoxWithButtons(); self._fadeOutSpin.setRange(-1, 10000); self._fadeOutSpin.setSingleStep(100)
         self._fadeOutSpin.setSuffix(" ms"); self._fadeOutSpin.setSpecialValueText("Global")
         self._fadeOutSpin.setValue(int(self._animData.get("handback_fade_ms", -1)))
         self._fadeOutSpin.setToolTip("Fade back to what was underneath when it ends or stops. Global = Global Preferences.")
@@ -226,7 +228,7 @@ class AnimationEditorDialog(QDialog):
         self._holdSpin.setRange(0, 60000)
         self._holdSpin.setValue(200)
         self._holdSpin.setSuffix(" ms")
-        self._holdSpin.setButtonSymbols(QSpinBox.NoButtons)
+        hideSpinArrows(self._holdSpin)
         formGrid.addWidget(self._holdSpin, 1, 3)
 
         formGrid.addWidget(QLabel("Fade:"), 2, 2)
@@ -234,7 +236,7 @@ class AnimationEditorDialog(QDialog):
         self._fadeSpin.setRange(0, 60000)
         self._fadeSpin.setValue(0)
         self._fadeSpin.setSuffix(" ms")
-        self._fadeSpin.setButtonSymbols(QSpinBox.NoButtons)
+        hideSpinArrows(self._fadeSpin)
         formGrid.addWidget(self._fadeSpin, 2, 3)
 
         # Standard gradient stops for animation editor
@@ -252,7 +254,7 @@ class AnimationEditorDialog(QDialog):
                 gradientStops=_stopsHue, minLabel="0\u00B0", maxLabel="360\u00B0")
         else:
             self._p1Spin = QSpinBox(); self._p1Spin.setRange(0, 360); self._p1Spin.setValue(240)
-            self._p1Spin.setButtonSymbols(QSpinBox.NoButtons)
+            hideSpinArrows(self._p1Spin)
         formGrid.addWidget(self._p1Spin, 2, 1)
 
         self._p2Label = QLabel("Sat:")
@@ -262,7 +264,7 @@ class AnimationEditorDialog(QDialog):
                 gradientStops=_stopsSat, minLabel="0", maxLabel="100")
         else:
             self._p2Spin = QSpinBox(); self._p2Spin.setRange(0, 100); self._p2Spin.setValue(100)
-            self._p2Spin.setButtonSymbols(QSpinBox.NoButtons)
+            hideSpinArrows(self._p2Spin)
         formGrid.addWidget(self._p2Spin, 3, 1)
 
         self._p3Label = QLabel("Bri:")
@@ -272,7 +274,7 @@ class AnimationEditorDialog(QDialog):
                 gradientStops=_stopsBri, minLabel="0", maxLabel="100")
         else:
             self._p3Spin = QSpinBox(); self._p3Spin.setRange(0, 100); self._p3Spin.setValue(100)
-            self._p3Spin.setButtonSymbols(QSpinBox.NoButtons)
+            hideSpinArrows(self._p3Spin)
         formGrid.addWidget(self._p3Spin, 3, 3)
 
         # Store gradient sets for mode switching

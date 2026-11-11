@@ -12,7 +12,7 @@ try:
         QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QFormLayout,
         QSplitter, QSizePolicy, QAbstractItemView, QAbstractScrollArea,
         QPushButton, QLabel, QSlider, QTableWidget, QTableWidgetItem,
-        QTabWidget, QCheckBox, QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QComboBox, QAbstractButton,
+        QTabWidget, QCheckBox, QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, QComboBox, QAbstractButton,
         QGraphicsView, QGraphicsScene, QScrollArea, QKeySequenceEdit,
         QListWidget, QListWidgetItem, QStatusBar, QHeaderView, QFrame,
         QSystemTrayIcon, QMenu, QTextBrowser
@@ -27,7 +27,7 @@ except ImportError:
             QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QFormLayout,
             QSplitter, QSizePolicy, QAbstractItemView, QAbstractScrollArea,
             QPushButton, QLabel, QSlider, QTableWidget, QTableWidgetItem,
-            QTabWidget, QCheckBox, QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QComboBox, QAbstractButton,
+            QTabWidget, QCheckBox, QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, QComboBox, QAbstractButton,
             QGraphicsView, QGraphicsScene, QScrollArea, QKeySequenceEdit,
             QListWidget, QListWidgetItem, QStatusBar, QHeaderView, QFrame,
             QSystemTrayIcon, QMenu, QTextBrowser
@@ -189,61 +189,64 @@ class PositionPicker(QWidget):
             you.setIcon(QIcon())
 
 
-class SpinBoxWithButtons(QWidget):
-    """QSpinBox with external +/- buttons to avoid overlap issues at high DPI."""
-    valueChanged = customSignal(int)
+def hideSpinArrows(spin):
+    """Hide a spin box's own arrows through the theme (see neewerlux_theme). Not NoButtons: with a
+    style sheet Qt 6.12 shrinks a NoButtons box's text area to nothing."""
+    spin.setProperty("arrows", "none")
+    return spin
 
-    def __init__(self, parent=None, minVal=0, maxVal=100, value=0, suffix=""):
+
+class SpinBoxWithButtons(QWidget):
+    """A spin box whose -/+ are ordinary buttons beside it. Native spin arrows end up under the
+    text area once the theme styles the box (Windows, high DPI), so no spin box in the app uses
+    them; tests/smoke_gui.py fails if one does. Anything not defined here is passed to the inner
+    QSpinBox (or QDoubleSpinBox with double=True), so it is used like one: setRange, setSuffix,
+    setSpecialValueText, setDecimals, valueChanged, editingFinished and so on."""
+
+    def __init__(self, parent=None, minVal=0, maxVal=100, value=0, suffix="", double=False):
         super().__init__(parent)
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(2)
-        self._spin = QSpinBox()
+        self._spin = QDoubleSpinBox() if double else QSpinBox()
         self._spin.setRange(minVal, maxVal)
         self._spin.setValue(value)
         if suffix:
             self._spin.setSuffix(suffix)
-        self._spin.setButtonSymbols(QSpinBox.NoButtons)
-        self._spin.valueChanged.connect(self.valueChanged.emit)
-
-        btnStyle = "QPushButton { font-size: 14px; font-weight: bold; min-width: 28px; }"
+        hideSpinArrows(self._spin)
         self._minus = QPushButton("-")
-        self._minus.setStyleSheet(btnStyle)
-        self._minus.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
-        self._minus.setFixedWidth(30)
-        self._minus.clicked.connect(lambda: self._spin.setValue(self._spin.value() - self._spin.singleStep()))
         self._plus = QPushButton("+")
-        self._plus.setStyleSheet(btnStyle)
-        self._plus.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
-        self._plus.setFixedWidth(30)
-        self._plus.clicked.connect(lambda: self._spin.setValue(self._spin.value() + self._spin.singleStep()))
-
+        for b, step in ((self._minus, self._spin.stepDown), (self._plus, self._spin.stepUp)):
+            b.setStyleSheet("QPushButton { font-size: 14px; font-weight: bold; padding: 0px; }")
+            b.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
+            b.setFixedWidth(26)
+            b.setFocusPolicy(Qt.NoFocus)
+            b.setAutoRepeat(True)   # hold to keep stepping, like the native arrows
+            b.clicked.connect(step)
         lay.addWidget(self._spin, 1)
         lay.addWidget(self._minus)
         lay.addWidget(self._plus)
+        self.setFocusProxy(self._spin)
 
-    def value(self):
-        return self._spin.value()
+    def __getattr__(self, name):
+        if name == "_spin":   # not set yet (during construction)
+            raise AttributeError(name)
+        return getattr(self._spin, name)
 
-    def setValue(self, v):
-        self._spin.setValue(v)
-
-    def setRange(self, lo, hi):
-        self._spin.setRange(lo, hi)
-
-    def setSuffix(self, s):
-        self._spin.setSuffix(s)
-
-    def setSingleStep(self, s):
-        self._spin.setSingleStep(s)
+    def blockSignals(self, block):
+        self._spin.blockSignals(block)
+        return super().blockSignals(block)
 
     def setToolTip(self, t):
-        self._spin.setToolTip(t)
-        self._minus.setToolTip(t)
-        self._plus.setToolTip(t)
+        for w in (self, self._spin, self._minus, self._plus):
+            QWidget.setToolTip(w, t)
 
     def setMinimumWidth(self, w):
         self._spin.setMinimumWidth(w)
+
+
+def DoubleSpinBoxWithButtons(parent=None, minVal=0.0, maxVal=100.0, value=0.0, suffix=""):
+    return SpinBoxWithButtons(parent, minVal, maxVal, value, suffix, double=True)
 
 
 class customPresetButton(QPushButton):
@@ -918,7 +921,7 @@ class Ui_MainWindow(object):
         self.customName = QCheckBox("Custom name:")
         nameRow.addWidget(self.customName, 1)
         nameRow.addWidget(QLabel("Preferred ID:"))
-        self.preferredIDSpin = QSpinBox(); self.preferredIDSpin.setRange(0, 99); self.preferredIDSpin.setMinimumWidth(65)
+        self.preferredIDSpin = SpinBoxWithButtons(); self.preferredIDSpin.setRange(0, 99); self.preferredIDSpin.setMinimumWidth(65)
         self.preferredIDSpin.setSpecialValueText("Auto")
         self.preferredIDSpin.setToolTip("Fixed numeric ID for HTTP commands and animations (Auto = table order)")
         nameRow.addWidget(self.preferredIDSpin)
@@ -939,10 +942,10 @@ class Ui_MainWindow(object):
 
         lpLay.addWidget(QLabel("<strong>Limits in sequences, effects, presets and HTTP</strong>"))
         limitGrid = QGridLayout(); limitGrid.setSpacing(4)
-        self.lightMaxBriSpin = QSpinBox(); self.lightMaxBriSpin.setRange(-1, 100); self.lightMaxBriSpin.setSuffix("%")
+        self.lightMaxBriSpin = SpinBoxWithButtons(); self.lightMaxBriSpin.setRange(-1, 100); self.lightMaxBriSpin.setSuffix("%")
         self.lightMaxBriSpin.setSpecialValueText("Global"); self.lightMaxBriSpin.setValue(-1)
         self.lightMaxBriSpin.setToolTip("Brightness ceiling for presets, HTTP commands, animations and sequences.\nThe manual sliders are exempt. Global = the default in Global Preferences.")
-        self.lightMinBriSpin = QSpinBox(); self.lightMinBriSpin.setRange(-1, 100); self.lightMinBriSpin.setSuffix("%")
+        self.lightMinBriSpin = SpinBoxWithButtons(); self.lightMinBriSpin.setRange(-1, 100); self.lightMinBriSpin.setSuffix("%")
         self.lightMinBriSpin.setSpecialValueText("Global"); self.lightMinBriSpin.setValue(-1)
         self.lightMinBriSpin.setToolTip("Brightness floor while the light is on (0% and OFF still pass).\nThe manual sliders are exempt.")
         limitGrid.addWidget(QLabel("Max brightness:"), 0, 0); limitGrid.addWidget(self.lightMaxBriSpin, 0, 1)
@@ -961,9 +964,12 @@ class Ui_MainWindow(object):
         lpCols.addLayout(showLay, 5)
         showLay.addWidget(QLabel("<strong>In sequences and effects</strong>"))
         roleRow = QHBoxLayout()
-        self.lightRoleCombo = QComboBox(); self.lightRoleCombo.addItems(["Key", "Fill", "Rim", "Ambient", "Practical"])
-        self.lightRoleCombo.setToolTip("Role used by @key, @fill, @rim, @ambient and @practical targets.\nLights without a role count as Ambient.")
-        self.lightOrderSpin = QSpinBox(); self.lightOrderSpin.setRange(0, 99); self.lightOrderSpin.setSpecialValueText("Auto")
+        self.lightRoleCombo = QComboBox(); self.lightRoleCombo.addItems(["Key", "Fill", "Rim / back", "Background", "Practical"])
+        self.lightRoleCombo.setToolTip("Role used by @key, @fill, @rim, @background and @practical targets.\n"
+            "Key: main light on you. Fill: softens the key's shadows. Rim / back: behind you, outlines you.\n"
+            "Background: lights the wall or set behind you. Practical: a light that is visible in shot.\n"
+            "Lights without a role count as Background.")
+        self.lightOrderSpin = SpinBoxWithButtons(); self.lightOrderSpin.setRange(0, 99); self.lightOrderSpin.setSpecialValueText("Auto")
         self.lightOrderSpin.setToolTip("Position in sweeps: @ targets list lights in this order,\nand a clip's light 1, 2, 3... map onto them in this order.\nAuto = by position (left to right, front to back, low to high), then ID.")
         roleRow.addWidget(QLabel("Role:")); roleRow.addWidget(self.lightRoleCombo, 1)
         roleRow.addSpacing(12)
@@ -1029,18 +1035,18 @@ class Ui_MainWindow(object):
         self.globalCCTMinSpin = QSpinBox()
         self.globalCCTMinSpin.setRange(2700, 8500); self.globalCCTMinSpin.setValue(3200)
         self.globalCCTMinSpin.setSuffix("K"); self.globalCCTMinSpin.setSingleStep(100)
-        self.globalCCTMinSpin.setButtonSymbols(QSpinBox.NoButtons)
+        hideSpinArrows(self.globalCCTMinSpin)
         self.globalCCTMaxSpin = QSpinBox()
         self.globalCCTMaxSpin.setRange(2700, 8500); self.globalCCTMaxSpin.setValue(5600)
         self.globalCCTMaxSpin.setSuffix("K"); self.globalCCTMaxSpin.setSingleStep(100)
-        self.globalCCTMaxSpin.setButtonSymbols(QSpinBox.NoButtons)
+        hideSpinArrows(self.globalCCTMaxSpin)
         cctRangeRow.addWidget(cctRangeLabel)
         cctRangeRow.addWidget(self.globalCCTMinSpin)
         cctRangeRow.addWidget(QLabel("to"))
         cctRangeRow.addWidget(self.globalCCTMaxSpin)
-        self.envMaxBriSpin = QSpinBox(); self.envMaxBriSpin.setRange(1, 100); self.envMaxBriSpin.setValue(100); self.envMaxBriSpin.setSuffix("%")
+        self.envMaxBriSpin = SpinBoxWithButtons(); self.envMaxBriSpin.setRange(1, 100); self.envMaxBriSpin.setValue(100); self.envMaxBriSpin.setSuffix("%")
         self.envMaxBriSpin.setToolTip("Default brightness ceiling for lights without their own limit.\nApplies to presets, HTTP, animations and sequences; the manual sliders are exempt.")
-        self.envMinBriSpin = QSpinBox(); self.envMinBriSpin.setRange(0, 100); self.envMinBriSpin.setValue(0); self.envMinBriSpin.setSuffix("%")
+        self.envMinBriSpin = SpinBoxWithButtons(); self.envMinBriSpin.setRange(0, 100); self.envMinBriSpin.setValue(0); self.envMinBriSpin.setSuffix("%")
         self.envMinBriSpin.setToolTip("Default brightness floor while a light is on (0% and OFF still pass)")
         self.flashGuardCheck = QCheckBox("Flash guard: at most 3 flashes a second per light (recommended)")
         self.flashGuardCheck.setChecked(True)
@@ -1048,12 +1054,12 @@ class Ui_MainWindow(object):
                                         "(the WCAG limit for photosensitive seizures), from animations, sequences, effects,\n"
                                         "presets and HTTP commands. The manual sliders are exempt. Scenes run inside the\n"
                                         "light and can't be limited.")
-        self.seqFrameRateSpin = QSpinBox(); self.seqFrameRateSpin.setRange(1, 30); self.seqFrameRateSpin.setValue(20); self.seqFrameRateSpin.setSuffix(" /s")
+        self.seqFrameRateSpin = SpinBoxWithButtons(); self.seqFrameRateSpin.setRange(1, 30); self.seqFrameRateSpin.setValue(20); self.seqFrameRateSpin.setSuffix(" /s")
         self.seqFrameRateSpin.setToolTip("Updates per second for sequences that don't set their own 'fps'.\nSequences always use the synchronized (parallel) send.")
-        self.effectMaxSecondsSpin = QSpinBox(); self.effectMaxSecondsSpin.setRange(1, 600); self.effectMaxSecondsSpin.setValue(30); self.effectMaxSecondsSpin.setSuffix(" s")
+        self.effectMaxSecondsSpin = SpinBoxWithButtons(); self.effectMaxSecondsSpin.setRange(1, 600); self.effectMaxSecondsSpin.setValue(30); self.effectMaxSecondsSpin.setSuffix(" s")
         self.effectMaxSecondsSpin.setToolTip("Effect-layer animations that loop forever stop after this long,\nso one effect can't hold up the queue")
         self.simulatedLightsCombo = QComboBox()
-        self.simulatedLightsCombo.addItems(["Off", "1 light (key)", "2 lights (key, fill)", "3 lights (key, fill, rim)", "4 lights (key, fill, rim, ambient)"])
+        self.simulatedLightsCombo.addItems(["Off", "1 light (key)", "2 lights (key, fill)", "3 lights (key, fill, rim)", "4 lights (key, fill, rim, background)"])
         self.simulatedLightsCombo.setToolTip("Adds virtual lights that behave like real ones, for trying sequences, effects and\n"
             "HTTP commands without hardware. They show in the light table and the Stage window\n"
             "and can be used alongside real lights. Takes effect the next time NeewerLux starts.\n"
@@ -1145,12 +1151,12 @@ class Ui_MainWindow(object):
         self.EYELINE_FLASH = ["same", "gentler", "calm"]
         self.eyelineFlashCombo.addItems(["Same as other lights", "Gentler: at most 1 flash a second", "Calm: at most one change every 2 seconds"])
         self.eyelineFlashCombo.setToolTip("For lights marked 'In my eye line' in Light Preferences. Applies even with the flash guard off.")
-        self.handbackFadeSpin = QSpinBox(); self.handbackFadeSpin.setRange(0, 5000); self.handbackFadeSpin.setSingleStep(100)
+        self.handbackFadeSpin = SpinBoxWithButtons(); self.handbackFadeSpin.setRange(0, 5000); self.handbackFadeSpin.setSingleStep(100)
         self.handbackFadeSpin.setSuffix(" ms"); self.handbackFadeSpin.setSpecialValueText("Off (cut)"); self.handbackFadeSpin.setValue(500)
         self.handbackFadeSpin.setToolTip("When an effect ends and the sequence takes back over, a sequence ends and reverts,\n"
                                          "or an animation stops: fade to what comes next instead of cutting.\n"
                                          "Each animation and sequence can set its own; the slider tabs stay instant.")
-        self.fadeInSpin = QSpinBox(); self.fadeInSpin.setRange(0, 5000); self.fadeInSpin.setSingleStep(100)
+        self.fadeInSpin = SpinBoxWithButtons(); self.fadeInSpin.setRange(0, 5000); self.fadeInSpin.setSingleStep(100)
         self.fadeInSpin.setSuffix(" ms"); self.fadeInSpin.setSpecialValueText("Off (cut)"); self.fadeInSpin.setValue(0)
         self.fadeInSpin.setToolTip("When a preset is recalled, or an animation or sequence takes lights over (including\n"
                                    "one animation replacing another): fade into it instead of cutting.\n"

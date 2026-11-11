@@ -147,7 +147,7 @@ def t_rigPresets():
         check(len(rig) == n, "preset %d has %d lights" % (n, len(rig)))
     rig = sim.buildRig(4, includeCCTOnly=True)
     roles = [p["role"] for _, p in rig]
-    check(roles == ["key", "fill", "rim", "ambient", "practical"], "preset roles %s" % roles)
+    check(roles == ["key", "fill", "rim", "background", "practical"], "preset roles %s" % roles)
     check(len({d.address for d, _ in rig}) == 5 and all(d.address.startswith(sim.SIM_MAC_PREFIX) for d, _ in rig), "addresses")
     check([p["preferredID"] for _, p in rig] == [91, 92, 93, 94, 95], "preferred IDs")
     check(rig[4][0].name == "SIM-SNL660-Practical", "CCT-only light name picks a CCT-only model")

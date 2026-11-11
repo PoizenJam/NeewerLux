@@ -108,7 +108,7 @@ except Exception as e:
 
 # IMPORT THE GUI ITSELF
 try:
-    from neewerlux_ui import Ui_MainWindow
+    from neewerlux_ui import Ui_MainWindow, SpinBoxWithButtons, hideSpinArrows
     from neewerlux_theme import getThemeQSS
     from neewerlux_webui import getWebDashboardHTML
 except Exception as e:
@@ -282,10 +282,10 @@ _flashHeld = {}                # {light index: time a value was held back}; the 
 _pendingSends = set()          # light indices whose stored value ([3]) still needs writing; latest value wins
 _pendingSendsLock = threading.Lock()
 _lightsOff = set()             # MACs whose last power command was OFF
-SHOW_PREF_DEFAULTS = {"role": "ambient", "side": "centre", "order": 0, "eyeline": False,
+SHOW_PREF_DEFAULTS = {"role": "background", "side": "centre", "order": 0, "eyeline": False,
                       "maxBri": -1, "minBri": -1, "locked": False, # -1 brightness = use the global default
                       "depth": "beside", "height": "middle", "aim": "you"}
-LIGHT_ROLES = ["key", "fill", "rim", "ambient", "practical"]
+LIGHT_ROLES = ["key", "fill", "rim", "background", "practical"]  # rim is also called a back or hair light; practical = visible in shot
 LIGHT_SIDES = ["left", "centre", "right"]     # the streamer's left and right, facing the camera
 LIGHT_DEPTHS = ["front", "beside", "back"]    # between the streamer and the camera, level with them, behind them
 LIGHT_HEIGHTS = ["low", "middle", "high"]
@@ -797,7 +797,7 @@ try: # try to load the GUI
             nameField.setPlaceholderText("Preset name (optional)")
             nameRow.addWidget(nameField, 1)
             nameRow.addWidget(QLabel("Fade in:"))
-            fadeSpin = QSpinBox(); fadeSpin.setRange(-1, 10000); fadeSpin.setSingleStep(100); fadeSpin.setSuffix(" ms")
+            fadeSpin = SpinBoxWithButtons(); fadeSpin.setRange(-1, 10000); fadeSpin.setSingleStep(100); fadeSpin.setSuffix(" ms")
             fadeSpin.setSpecialValueText("Global (" + str(fadeInMs) + " ms)")
             fadeSpin.setValue(presetFades.get(idx, -1))
             fadeSpin.setToolTip("How long recalling this preset fades in. Global = the Fade in setting in Global Preferences.")
@@ -1685,14 +1685,14 @@ try: # try to load the GUI
             speedSpin.setRange(50, 5000)
             speedSpin.setValue(300)
             speedSpin.setSuffix(" ms")
-            speedSpin.setButtonSymbols(QSB.NoButtons)
+            hideSpinArrows(speedSpin)
             form.addRow("Speed / hold per frame:", speedSpin)
 
             fadeSpin = QSB()
             fadeSpin.setRange(0, 10000)
             fadeSpin.setValue(0)
             fadeSpin.setSuffix(" ms")
-            fadeSpin.setButtonSymbols(QSB.NoButtons)
+            hideSpinArrows(fadeSpin)
             form.addRow("Fade between frames:", fadeSpin)
 
             loopCheck = QCK("Loop animation")
@@ -1703,7 +1703,7 @@ try: # try to load the GUI
             briSpin.setRange(0, 100)
             briSpin.setValue(100)
             briSpin.setSuffix("%")
-            briSpin.setButtonSymbols(QSB.NoButtons)
+            hideSpinArrows(briSpin)
             form.addRow("Brightness:", briSpin)
 
             layout.addLayout(form)
@@ -1832,9 +1832,9 @@ try: # try to load the GUI
             form.addRow("Name:", nameField)
             descField = QLE(anim.get("description", ""))
             form.addRow("Description:", descField)
-            jsonFadeIn = QSpinBox(); jsonFadeIn.setRange(-1, 10000); jsonFadeIn.setSingleStep(100); jsonFadeIn.setSuffix(" ms")
+            jsonFadeIn = SpinBoxWithButtons(); jsonFadeIn.setRange(-1, 10000); jsonFadeIn.setSingleStep(100); jsonFadeIn.setSuffix(" ms")
             jsonFadeIn.setSpecialValueText("Global"); jsonFadeIn.setValue(int(anim.get("fade_in_ms", -1)))
-            jsonFadeOut = QSpinBox(); jsonFadeOut.setRange(-1, 10000); jsonFadeOut.setSingleStep(100); jsonFadeOut.setSuffix(" ms")
+            jsonFadeOut = SpinBoxWithButtons(); jsonFadeOut.setRange(-1, 10000); jsonFadeOut.setSingleStep(100); jsonFadeOut.setSuffix(" ms")
             jsonFadeOut.setSpecialValueText("Global"); jsonFadeOut.setValue(int(anim.get("handback_fade_ms", -1)))
             form.addRow("Fade in:", jsonFadeIn)
             form.addRow("Fade back:", jsonFadeOut)
@@ -6341,7 +6341,7 @@ def returnLightIndexesFromMacAddress(addresses):
                     discovery order
       "Key"         custom name from Light Preferences
       "D0:A8:..."   MAC address
-      "@rim"        lights with a role (key, fill, rim, ambient, practical), a side (left,
+      "@rim"        lights with a role (key, fill, rim, background, practical), a side (left,
                     centre, right), "eyeline" or "all"; "@rim.left" means both. Listed in
                     sweep order.
       "1;2;Key"     semicolon-separated mix of the above

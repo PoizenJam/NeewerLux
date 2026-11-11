@@ -132,7 +132,7 @@ class StageView(QWidget):
         line, sline = fm.height(), sfm.height()
         longest = max([_textWidth(fm, t.get("name", "")) for t in self.tiles] + [0])
         em = _textWidth(fm, "M")
-        tileW = max(120, em * 9, _textWidth(sfm, "Ambient  HSI 100%") + 12, min(longest + 12, em * 15))
+        tileW = max(120, em * 9, _textWidth(sfm, "Background  HSI 100%") + 12, min(longest + 12, em * 15))
         return tileW, max(60, min(int(tileW * 0.6), em * 5)), max(10, line), line + 2, sline + 2
 
     def _smallFont(self):

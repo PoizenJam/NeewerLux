@@ -7,7 +7,7 @@
   "cues": [
     {
       "at_ms": 0,
-      "target": "@fill;@ambient;@practical",
+      "target": "@fill;@background;@practical",
       "state": {
         "mode": "HSI",
         "hue": 300,
@@ -41,7 +41,7 @@
     {
       "at_ms": 2000,
       "duration_ms": 6000,
-      "target": "@fill;@ambient",
+      "target": "@fill;@background",
       "clip": {
         "name": "Color Chase",
         "fit": "loop",
@@ -50,7 +50,7 @@
     },
     {
       "at_ms": 8000,
-      "target": "@fill;@ambient;@rim;@practical",
+      "target": "@fill;@background;@rim;@practical",
       "state": {
         "mode": "HSI",
         "hue": 190,

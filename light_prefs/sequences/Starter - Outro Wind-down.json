@@ -17,7 +17,7 @@
     },
     {
       "at_ms": 0,
-      "target": "@fill;@ambient",
+      "target": "@fill;@background",
       "state": {
         "mode": "HSI",
         "hue": 230,
@@ -39,7 +39,7 @@
     },
     {
       "at_ms": 12000,
-      "target": "@fill;@ambient",
+      "target": "@fill;@background",
       "state": {
         "mode": "HSI",
         "hue": 240,

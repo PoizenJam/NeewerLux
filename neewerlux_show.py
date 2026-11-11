@@ -565,10 +565,10 @@ class AnimationPlayer:
         self.startMs = nowMs
 
     def elapsed(self, nowMs):
-        return nowMs - self.startMs
+        return max(0.0, nowMs - self.startMs)
 
     def frame(self, nowMs):
-        t = nowMs - self.startMs
+        t = nowMs - self.startMs   # negative while it fades in: the timeline shows its first frame
         state, finished, self.kfIndex = self.timeline.frameAt(t)
         if self.maxMs is not None and t >= self.maxMs:
             finished = True
@@ -595,7 +595,7 @@ class SequenceClock:
         self.slewStart = 0.0
 
     def position(self, nowMs):
-        if not self.playing:
+        if not self.playing or nowMs < self.anchor:   # before the anchor: held while it fades in
             return self.basePos
         pos = self.basePos + (nowMs - self.anchor)
         if self.slewTotal:
@@ -1073,9 +1073,7 @@ class ShowCompositor:
                     self._status("end", layer, old, reason="chained")
                 else:
                     self._endPlayer(layer, old, nowMs, "replaced")
-            player.start(nowMs)
-            self.layers[layer] = player
-            self._status("start", layer, player)
+            self._beginPlayer(layer, player, nowMs, old)
             return "playing"
         return self._command(run, now)
 
@@ -1096,9 +1094,7 @@ class ShowCompositor:
             old = self.layers[LAYER_SHOW]
             if old is not None:
                 self._endPlayer(LAYER_SHOW, old, nowMs, "replaced")
-            player.start(nowMs, startMs)
-            self.layers[LAYER_SHOW] = player
-            self._status("start", LAYER_SHOW, player)
+            self._beginPlayer(LAYER_SHOW, player, nowMs, old, startMs)
             return True
         return self._command(run, now)
 
@@ -1255,6 +1251,22 @@ class ShowCompositor:
         info.update(extra)
         self._deferred.append(lambda: self.hooks.onStatus(info))
 
+    def _beginPlayer(self, layer, player, nowMs, old=None, posMs=0.0):
+        """Put a player on its layer. Its fade in (its own, else the global) is the only blending it
+        gets: the player is held on its first frame for that long and then runs, so the keyframes
+        and cues inside it play exactly as written. Restarting the same animation cuts."""
+        if old is not None and player.kind == "animation" == old.kind and player.name == old.name:
+            player.fadeInMs = 0
+        hold = player.fadeInMs if player.fadeInMs is not None else \
+            (self.hooks.fadeInMs() if hasattr(self.hooks, "fadeInMs") else 0)
+        player.entryMs = nowMs
+        if isinstance(player, SequencePlayer):
+            player.start(nowMs + max(0, hold), posMs)
+        else:
+            player.start(nowMs + max(0, hold))
+        self.layers[layer] = player
+        self._status("start", layer, player)
+
     def _endPlayer(self, layer, player, nowMs, reason):
         """Remove a player. Its lights fall to the next active layer on this tick."""
         if self.layers.get(layer) is player:
@@ -1278,10 +1290,7 @@ class ShowCompositor:
                     self.baseStates[idx] = list(b)
         self._status("end", layer, player, reason=reason)
         if layer == LAYER_EFFECT and self.effectQueue and self.layers[LAYER_EFFECT] is None:
-            nxt = self.effectQueue.pop(0)
-            nxt.start(nowMs)
-            self.layers[LAYER_EFFECT] = nxt
-            self._status("start", LAYER_EFFECT, nxt)
+            self._beginPlayer(LAYER_EFFECT, self.effectQueue.pop(0), nowMs, player)
 
     def _tickLocked(self, now):
         nowMs = self._nowMs(now)
@@ -1345,11 +1354,17 @@ class ShowCompositor:
             was = fade[3] if fade is not None else (0 if prev == LAYER_FADE else prev)
             changed = win != was or (win > 0 and player is not oldPlayer)
             if changed:
+                # Fades belong to transitions between items, never to what happens inside one: a
+                # light an item picks up after it started, or drops while it keeps running, cuts
+                # (the item's own cues and fades decide how it looks).
                 taking = win > 0 and (win > was or player is not oldPlayer)
-                if taking:   # a preset, animation or sequence taking over: its fade in
-                    dur = player.fadeInMs if getattr(player, "fadeInMs", None) is not None else globalIn
-                else:        # a layer letting go: its hand-back fade
-                    dur = oldPlayer.fadeOutMs if getattr(oldPlayer, "fadeOutMs", None) is not None else globalBack
+                if taking:   # an animation or sequence starting: its fade in
+                    starting = nowMs - getattr(player, "entryMs", -1e12) < 1.0
+                    dur = (player.fadeInMs if player.fadeInMs is not None else globalIn) if starting else 0
+                else:        # one letting go: its hand-back fade, if it has ended
+                    ended = all(oldPlayer is not p for p in self.layers.values())
+                    dur = (oldPlayer.fadeOutMs if getattr(oldPlayer, "fadeOutMs", None) is not None
+                           else globalBack) if ended else 0
                 fromCmd = self.lastCmd.get(idx)
                 if fromCmd is None and prev == 0:
                     fromCmd = self.hooks.shownCommand(idx) if hasattr(self.hooks, "shownCommand") else None
