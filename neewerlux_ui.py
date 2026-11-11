@@ -1062,9 +1062,17 @@ copied between installations.</p>
     endless), revert (true/false).</td></tr>
 <tr><td><b>stop_animate</b></td><td>Stop the running animation</td></tr>
 <tr><td><b>list / list_json</b></td><td>List lights, presets, and animations</td></tr>
+<tr><td><b>animate=Name|...|revert|layer|queue|target</b></td><td>Optional layer (override, effect, show), queue mode (queue, replace) and target such as <code>@rim</code></td></tr>
+<tr><td><b>stop_layer=effect</b></td><td>Stop a layer (<code>effect_all</code> also clears the effect queue)</td></tr>
+<tr><td><b>sequence=play|Name</b></td><td>Play a sequence; also <code>pause</code>, <code>resume</code>, <code>stop</code></td></tr>
+<tr><td><b>status_json</b></td><td>Layers, sequence position, and each light's layer and approximate colour</td></tr>
 </table>
-<p>POST to <code>/NeewerLux/batch</code> for multi-light JSON commands, or to
-<code>/NeewerLux/animate</code> for JSON animation control.</p>
+<p>POST to <code>/NeewerLux/batch</code> for multi-light JSON commands, to
+<code>/NeewerLux/animate</code> for JSON animation control, to <code>/NeewerLux/sequence</code>
+for sequences (list, reload, play, pause, resume, stop, seek, set_position, status, validate,
+save, render), or to <code>/NeewerLux/settings</code> for light and show preferences (get,
+set_light, set_global). The web dashboard has the same Sequences, Stage and Settings panels
+as this window.</p>
 
 <hr>
 

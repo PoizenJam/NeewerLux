@@ -2,18 +2,23 @@
 
 Changes relative to upstream [NeewerLite-Python v0.12d](https://github.com/taburineagle/NeewerLite-Python).
 
-## v1.3.2 - 2026-11-10
+## v1.3.2 - 2026-11-11
 
 ### Added
 - **Simulated lights.** A rig of 1 to 4 virtual lights (key, fill, rim, ambient), plus an optional CCT-only light, set in Global Preferences or for one run with `--simulate` / `--simulate=N`. They take the same Bluetooth packets as real lights (including the split packets older CCT-only lights use), answer power and channel queries, get their own saved preferences with roles and IDs 91 to 95, and work alongside real lights. `--simulate-faults` makes them drop about 2% of writes and disconnect every few minutes, for testing reconnects.
 - **Stage window** (toolbar button): one tile per light in sweep order with its approximate current colour, mode and brightness, and an outline showing which layer drives it. A colour swatch beside each light in the table, and `color`, `mode`, `bri`, `linked` and `simulated` per light in `status_json`.
 - **Sequence render.** `render` on `POST /NeewerLux/sequence` plays a sequence on a simulated clock against the current lights, with brightness limits, Locked lights and the CCT-only fallback applied, and returns each light's colour changes and the cue list as JSON, or an image strip with `"format": "png"`. A Render button on the Sequences panel shows the strip.
+- **Web dashboard parity.** The dashboard gets a Sequences panel (list, play, pause and resume, seek by clicking the progress bar, stop, render drawn in the browser so it works without the desktop window, reload), a live Stage view, colour swatches, roles and layers in the light table, the animation status, and Settings panels for each light's preferences (name, preferred ID, colour temperature range, CCT-only, role, side, sweep order, eye line, brightness limits, Locked) and the show-related global preferences (brightness limits, sequence frame rate, effect time limit, global CCT range, CCT-only handling, simulated lights). New `POST /NeewerLux/settings` (`get`, `set_light`, `set_global`) and a `reload` action on `/NeewerLux/sequence`. Network access, keyboard shortcuts and startup options stay desktop-only. Settings changed from the browser show up in the desktop window straight away. `tests/test_webui.py` drives the real dashboard in a headless browser (Qt WebEngine, part of PySide6).
 - **Packet tests** (`tests/test_wire.py`): fixed byte vectors for every packet NeewerLux sends, and the simulator's decoder checked against the encoder. The test harness now runs on simulated lights, so status polling and notification subscriptions are tested too.
 
 ### Fixed
 - **The default state for a newly found light had a wrong checksum** (`[120, 135, 2, 20, 56, 157]`; 157 belongs to 100% brightness, 20% needs 77). A light ignores such a packet, so reverting a light that had never been sent anything else did nothing. Also corrected in the initial slider value.
 - **Status polling blocked the worker for about two seconds per round**: it waited a fixed 250 ms after each query although lights reply in a few milliseconds. It now checks for the reply every 25 ms (same timeout), and skips the power and channel reads as soon as a sequence or effect starts mid-round, so a show's first frames no longer wait behind the poll.
 - A Bluetooth scan that fails (no adapter, or Bluetooth off) no longer stops the background thread; it is logged and simulated lights carry on.
+- The Stage, swatches, `status_json` and renders show what each light was actually sent: a CCT-only light asked for a colour shows the white it was converted to, and a render's starting state goes through the same conversion and brightness limits. Requested values are still what presets and reverts use.
+- Dim lights no longer look black or grey on screen: any lit light keeps at least 40% of its colour; 0% and off still show as dark.
+- The shipped example sequence now gives a practical (CCT-only) light two colour cues, so it no longer sits still through the demo.
+- The Info tab and the HTTP help page list sequence, layer and status commands.
 
 ## v1.3.1 - 2026-11-03
 

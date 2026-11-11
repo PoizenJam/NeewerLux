@@ -248,6 +248,8 @@ showEngine = None              # neewerlux_show.ShowCompositor, created by initS
 savedSequences = {}            # dict of {name: sequence_dict} loaded from disk
 sequencesDir = os.path.dirname(os.path.abspath(sys.argv[0])) + os.sep + "light_prefs" + os.sep + "sequences"
 lightShowPrefs = {}            # {MAC: {"role", "side", "order", "eyeline", "maxBri", "minBri", "locked"}}
+_lastWritten = {}              # {MAC: bytes last actually written, after CCT-only conversion and limits}, for display
+_lightsOff = set()             # MACs whose last power command was OFF
 SHOW_PREF_DEFAULTS = {"role": "ambient", "side": "centre", "order": 0, "eyeline": False,
                       "maxBri": -1, "minBri": -1, "locked": False} # -1 brightness = use the global default
 LIGHT_ROLES = ["key", "fill", "rim", "ambient", "practical"]
@@ -422,6 +424,8 @@ try: # try to load the GUI
         _logSignal = QtSignal(str)
         # Thread-safe signal for refreshing the sequence list after an HTTP save
         _sequenceListSignal = QtSignal()
+        # Thread-safe signal after the web dashboard changes settings (-1 = global, else a light index)
+        _settingsChangedSignal = QtSignal(int)
 
         def __init__(self):
             QMainWindow.__init__(self)
@@ -436,6 +440,7 @@ try: # try to load the GUI
 
             # Sequences panel, and a GUI-thread timer that mirrors show engine state into the labels
             self._sequenceListSignal.connect(self.seqRefreshList)
+            self._settingsChangedSignal.connect(self._settingsChangedRemotely)
             self._lastShowLabels = None
             self._stageWindow = None
             self._swatches = {}
@@ -1319,6 +1324,29 @@ try: # try to load the GUI
         # ================================================================
         # SEQUENCE PANEL HANDLERS
         # ================================================================
+
+        def _settingsChangedRemotely(self, lightIdx):
+            """The web dashboard changed settings: show the new values, so a later Save here
+            doesn't write the old ones back. Only the fields the dashboard can change are touched."""
+            if lightIdx < 0:
+                self.envMaxBriSpin.setValue(envMaxBri)
+                self.envMinBriSpin.setValue(envMinBri)
+                self.seqFrameRateSpin.setValue(seqFrameRate)
+                self.effectMaxSecondsSpin.setValue(effectMaxSeconds)
+                self.globalCCTMinSpin.setValue(globalCCTMin)
+                self.globalCCTMaxSpin.setValue(globalCCTMax)
+                self.simulatedLightsCombo.setCurrentIndex(simulatedLights)
+                self.simulatedCCTOnlyCheck.setChecked(simulatedCCTOnly)
+                self.cctFallbackCombo.setCurrentIndex(0 if cctFallbackMode == "convert" else 1)
+                return
+            changedMAC = availableLights[lightIdx][0].address if lightIdx < len(availableLights) else None
+            selected = [availableLights[i][0].address for i in self.selectedLights() if i < len(availableLights)]
+            self.updateLights(False)  # may reorder lights (preferred IDs) and clears the selection
+            for i, light in enumerate(availableLights):
+                if light[0].address in selected:
+                    self.lightTable.selectRow(i)
+            if len(selected) == 1 and selected[0] == changedMAC and self.selectedLights():
+                self.setupLightPrefsTab(self.selectedLights()[0])
 
         def seqRefreshList(self):
             self.seqList.clear()
@@ -4885,6 +4913,7 @@ async def writeToLight(selectedLights=0, updateGUI=True, useGlobalValue=True, fr
                                         if mainWindow is not None: mainWindow._tableUpdateSignal.emit(["", "", "", modeName + " mode ignored (CCT-only)"], int(selectedLights[a]))
                             else: # we're using a "newer" Neewer light, so just send the original calculated value
                                 await availableLights[int(selectedLights[a])][1].write_gatt_char(setLightUUID, bytearray(currentSendValue), False)
+                            _recordWritten(int(selectedLights[a]), currentSendValue)
 
                             if updateGUI == True:
                                 # if we're not looking at an old light, or if we are, we're not in either HSI or ANM modes, then update the status of that light
@@ -4954,6 +4983,22 @@ async def connectToOneLight(MACAddress):
         printDebugString("Error finding the Neewer light with MAC address " + MACAddress)
         print(e)
 
+def _recordWritten(lightIdx, byteVal):
+    """Remember what a light was actually sent, for the Stage window, swatches and status.
+    availableLights[i][3] keeps the requested value (before the CCT-only conversion), which
+    is what presets and reverts need, so display can't use it directly."""
+    mac = availableLights[lightIdx][0].address
+    if byteVal[1] == 129:
+        if byteVal[3] == 2:
+            _lightsOff.add(mac)
+        else:
+            _lightsOff.discard(mac)
+        return
+    if availableLights[lightIdx][5] and byteVal[1] in (134, 136):
+        return  # a CCT-only light was sent a converted value, or nothing ("ignore"), never this
+    _lastWritten[mac] = list(byteVal)
+    _lightsOff.discard(mac) # assumed: a colour command wakes the light (as neewerlux_sim does)
+
 async def parallelWriteToLights(lightIndices, fromShow=False):
     """Write stored byte values to multiple lights simultaneously using asyncio.gather.
     Used by HTTP commands, batches, hotkeys and (with fromShow=True) the show engine."""
@@ -4990,6 +5035,7 @@ async def parallelWriteToLights(lightIndices, fromShow=False):
                         await availableLights[int(idx)][1].write_gatt_char(setLightUUID, bytearray(splitCmds[1]), False)
                     else:
                         await availableLights[int(idx)][1].write_gatt_char(setLightUUID, bytearray(sendVal), False)
+                    _recordWritten(int(idx), sendVal)
         except Exception as e:
             printDebugString("Parallel write error on light " + str(idx + 1) + ": " + str(e))
 
@@ -6364,7 +6410,9 @@ def renderSequence(nameOrData, stepMs=None, startMs=0, endMs=None):
                        "role": getLightShowPref(idx, "role"), "side": getLightShowPref(idx, "side"),
                        "locked": bool(getLightShowPref(idx, "locked")), "simulated": sim.isSimulated(light[0])})
         changes[lightID] = []
-        baseShown[idx] = _sequenceBaseCommand(idx)
+        intent = showEngine.baseStates.get(idx) if showEngine is not None else None
+        output = _outputBytes(idx, intent if intent is not None else light[3])
+        baseShown[idx] = show.bytesToCommand(output) if output is not None else getLightDisplayState(idx)[0]
 
     for t in range(startMs, endMs, step):
         out, _ = player.frame(float(t))
@@ -6414,7 +6462,16 @@ def renderSequencePNG(result, width=1600):
     if QGuiApplication.instance() is None:
         raise RuntimeError("the image strip needs the NeewerLux window running; use format json")
 
-    labelW, rowH, rulerH, pad = 220, 26, 26, 36
+    try:
+        from PySide6.QtGui import QFontMetrics as _QFM, QFont as _QFont
+    except ImportError:
+        from PySide2.QtGui import QFontMetrics as _QFM, QFont as _QFont
+    fm = _QFM(_QFont())
+    labels = [meta["name"] + "  (" + meta["role"] + ")" for meta in result["lights"]]
+    labelW = min(420, max([fm.horizontalAdvance(t) if hasattr(fm, "horizontalAdvance") else fm.width(t) for t in labels] + [80]) + 20)
+    rowH = max(26, fm.height() + 10)
+    rulerH = max(26, fm.height() + 10)
+    pad = max(36, fm.height() * 3)
     rows = result["lights"]
     span = max(1, result["end_ms"] - result["start_ms"])
     img = QImage(labelW + width + pad, rulerH + len(rows) * rowH + pad, QImage.Format_RGB32)
@@ -6427,7 +6484,7 @@ def renderSequencePNG(result, width=1600):
     for r, meta in enumerate(rows):
         y = rulerH + r * rowH
         p.setPen(_QColor(225, 225, 225))
-        p.drawText(QRectF(6, y, labelW - 12, rowH), _Qt.AlignLeft | _Qt.AlignVCenter, meta["name"] + "  (" + meta["role"] + ")")
+        p.drawText(QRectF(6, y, labelW - 12, rowH), _Qt.AlignLeft | _Qt.AlignVCenter, labels[r])
         segs = result["changes"].get(meta["id"], [])
         for i, (t, colour, bri, mode, source) in enumerate(segs):
             tEnd = segs[i + 1][0] if i + 1 < len(segs) else result["end_ms"]
@@ -6442,7 +6499,7 @@ def renderSequencePNG(result, width=1600):
         if t >= result["start_ms"]:
             x = xAt(t)
             p.drawLine(int(x), rulerH - 6, int(x), rulerH)
-            p.drawText(QRectF(x + 2, 2, 60, rulerH - 6), _Qt.AlignLeft, "%d:%02d" % (t // 60000, (t // 1000) % 60))
+            p.drawText(QRectF(x + 2, 2, fm.height() * 4, rulerH - 6), _Qt.AlignLeft, "%d:%02d" % (t // 60000, (t // 1000) % 60))
         t += tick * 1000
     p.setPen(_QPen(_QColor(255, 255, 255, 70), 1))
     for cue in result["cues"]:
@@ -6491,12 +6548,28 @@ def getLightDisplayState(lightIdx):
     the last value sent to them."""
     light = availableLights[lightIdx]
     simulated = sim.isSimulated(light[0])
-    cmd = light[0].state.toCommand() if simulated else show.bytesToCommand(light[3])
+    if simulated:
+        cmd = light[0].state.toCommand()
+    elif light[0].address in _lightsOff:
+        cmd = {"mode": "OFF"}
+    elif light[0].address in _lastWritten:
+        cmd = show.bytesToCommand(_lastWritten[light[0].address])
+    else:
+        cmd = show.bytesToCommand(_outputBytes(lightIdx, light[3])) # nothing sent yet this session
     try:
         linked = light[1] != "" and bool(light[1].is_connected)
     except Exception:
         linked = False
     return cmd, show.commandToRGB(cmd), linked, simulated
+
+
+def _outputBytes(lightIdx, byteVal):
+    """The bytes a light would actually receive for a requested value: CCT-only conversion,
+    then the brightness limits. None when the CCT-only setting is "ignore"."""
+    if not isinstance(byteVal, (list, tuple)) or len(byteVal) < 5 or byteVal[0] == 0 or byteVal[1] == 129:
+        return byteVal
+    converted = applyCCTFallback(lightIdx, byteVal)
+    return applyBrightnessEnvelope(lightIdx, converted) if converted is not None else None
 
 
 def getStageTiles():
@@ -6531,6 +6604,198 @@ def getShowStatus():
                        "mode": cmd["mode"] if cmd else None, "bri": cmd.get("bri") if cmd else None,
                        "color": show.rgbHex(rgb)})
     return {"layers": st["layers"], "sequence": st["sequence"], "lights": lights}
+
+
+# ============================================================================
+# SETTINGS OVER HTTP (web dashboard)
+# ============================================================================
+# Global preferences the web dashboard can change: {name: (default, minimum, maximum)}, or a
+# tuple of choices for text values. Security-related ones (allowed IPs, the MAC whitelist,
+# the port) and keyboard shortcuts stay desktop-only, so a browser on the LAN can't widen access.
+WEB_GLOBAL_PREFS = {"envMaxBri": (100, 1, 100), "envMinBri": (0, 0, 100), "seqFrameRate": (20, 1, 30),
+                    "effectMaxSeconds": (30, 1, 600), "globalCCTMin": (3200, 2700, 8500),
+                    "globalCCTMax": (5600, 2700, 8500), "simulatedLights": (0, 0, len(sim.RIG_LIGHTS)),
+                    "simulatedCCTOnly": (False, None, None), "cctFallbackMode": ("convert", "ignore")}
+
+
+def _lightIndexFromWeb(value):
+    """A light from the web dashboard: its table index (0-based, from settings), or failing that
+    an ID, name or MAC as the other HTTP commands accept."""
+    try:
+        idx = int(value)
+        if 0 <= idx < len(availableLights):
+            return idx
+    except (TypeError, ValueError):
+        pass
+    found = returnLightIndexesFromMacAddress(str(value))
+    return found[0] if found else None
+
+
+def getWebSettings():
+    """Everything the dashboard's settings panels show."""
+    lights = []
+    for idx, light in enumerate(availableLights):
+        prefID = light[8] if len(light) > 8 else 0
+        defaults = getLightSpecs(light[0].name)
+        entry = {"index": idx, "id": prefID if prefID > 0 else idx + 1, "model": light[0].name, "mac": light[0].address,
+                 "customName": light[2], "preferredID": prefID, "tempRange": list(light[4]),
+                 "defaultTempRange": list(defaults[1]), "cctOnly": bool(light[5]),
+                 "simulated": sim.isSimulated(light[0])}
+        for key in SHOW_PREF_DEFAULTS:
+            entry[key] = getLightShowPref(idx, key)
+        lights.append(entry)
+    current = {name: globals()[name] for name in WEB_GLOBAL_PREFS}
+    return {"success": True, "global": current, "lights": lights, "roles": LIGHT_ROLES, "sides": LIGHT_SIDES,
+            "simulatedRigs": ["Off"] + [", ".join(r["role"] for r in sim.RIG_LIGHTS[:n]) for n in range(1, len(sim.RIG_LIGHTS) + 1)]}
+
+
+def _updatePrefsFile(updates):
+    """Change some keys of NeewerLux.prefs without touching the rest. A value of None removes
+    the key (back to its default). Deletes the file if nothing is left, as the desktop does."""
+    lines = []
+    if os.path.exists(globalPrefsFile):
+        with open(globalPrefsFile, mode="r", encoding="utf-8") as f:
+            lines = [ln.rstrip("\n") for ln in f if ln.strip()]
+    kept = [ln for ln in lines if ln.split("=", 1)[0].strip() not in updates]
+    kept += [k + "=" + v for k, v in updates.items() if v is not None]
+    createLightPrefsFolder()
+    if kept:
+        with open(globalPrefsFile, mode="w", encoding="utf-8") as f:
+            f.write("\n".join(kept))
+    elif os.path.exists(globalPrefsFile):
+        os.remove(globalPrefsFile)
+
+
+def setWebGlobalSettings(changes):
+    """Apply global preferences from the dashboard. All are checked before any is applied."""
+    if not isinstance(changes, dict):
+        return {"success": False, "errors": ["settings must be an object"]}
+    errors, new = [], {}
+    for name, value in changes.items():
+        spec = WEB_GLOBAL_PREFS.get(name)
+        if spec is None:
+            errors.append(name + " can't be changed from the web dashboard")
+        elif isinstance(spec[0], bool):
+            new[name] = value in (True, 1, "1", "true", "True")
+        elif isinstance(spec[0], str):
+            if value not in spec:
+                errors.append(name + " must be one of " + ", ".join(spec))
+            else:
+                new[name] = value
+        else:
+            try:
+                v = int(value)
+            except (TypeError, ValueError):
+                errors.append(name + " must be a whole number")
+                continue
+            if not spec[1] <= v <= spec[2]:
+                errors.append("%s must be %d to %d" % (name, spec[1], spec[2]))
+            else:
+                new[name] = v
+    merged = {name: new.get(name, globals()[name]) for name in WEB_GLOBAL_PREFS}
+    if merged["envMinBri"] > merged["envMaxBri"]:
+        errors.append("envMinBri can't be above envMaxBri")
+    if merged["globalCCTMin"] > merged["globalCCTMax"]:
+        errors.append("globalCCTMin can't be above globalCCTMax")
+    if errors:
+        return {"success": False, "errors": errors}
+    fileUpdates = {}
+    for name, value in new.items():
+        globals()[name] = value
+        default = WEB_GLOBAL_PREFS[name][0]
+        if value == default:
+            fileUpdates[name] = None
+        else:
+            fileUpdates[name] = "1" if value is True else str(value)
+    if fileUpdates:
+        _updatePrefsFile(fileUpdates)
+    if mainWindow is not None:
+        mainWindow._settingsChangedSignal.emit(-1)
+    result = getWebSettings()
+    result["changed"] = sorted(new)
+    if "simulatedLights" in new or "simulatedCCTOnly" in new:
+        result["note"] = "Simulated lights change at the next start"
+    return result
+
+
+def setWebLightSettings(lightIdx, changes):
+    """Apply one light's preferences from the dashboard, the same fields and the same sidecar
+    file as the desktop Light Preferences tab."""
+    global availableLights
+    if lightIdx is None or not 0 <= lightIdx < len(availableLights):
+        return {"success": False, "errors": ["no such light"]}
+    if not isinstance(changes, dict):
+        return {"success": False, "errors": ["settings must be an object"]}
+    light = availableLights[lightIdx]
+    defaults = getLightSpecs(light[0].name)
+    errors = []
+    name = str(changes.get("customName", light[2]))[:64].replace("|", "")
+    tempRange = changes.get("tempRange", light[4])
+    if tempRange is None:
+        tempRange = list(defaults[1])
+    try:
+        tempRange = [int(tempRange[0]), int(tempRange[1])]
+        if not (1000 <= tempRange[0] <= 5600 and 1000 <= tempRange[1] <= 10000 and tempRange[0] < tempRange[1]):
+            errors.append("tempRange must be [min, max] with min 1000 to 5600, max up to 10000, min below max")
+    except (TypeError, ValueError, IndexError):
+        errors.append("tempRange must be [min, max] in kelvin")
+    cctOnly = changes.get("cctOnly", light[5]) in (True, 1, "1", "true", "True")
+    try:
+        prefID = int(changes.get("preferredID", light[8] if len(light) > 8 else 0))
+        if not 0 <= prefID <= 99:
+            errors.append("preferredID must be 0 (automatic) to 99")
+    except (TypeError, ValueError):
+        errors.append("preferredID must be a whole number")
+    mac = light[0].address.upper()
+    newShow = dict(lightShowPrefs.get(mac, SHOW_PREF_DEFAULTS))
+    for key, default in SHOW_PREF_DEFAULTS.items():
+        if key not in changes:
+            continue
+        value = changes[key]
+        if key == "role" and value not in LIGHT_ROLES:
+            errors.append("role must be one of " + ", ".join(LIGHT_ROLES))
+        elif key == "side" and value not in LIGHT_SIDES:
+            errors.append("side must be one of " + ", ".join(LIGHT_SIDES))
+        elif isinstance(default, bool):
+            newShow[key] = value in (True, 1, "1", "true", "True")
+            continue
+        elif key in ("order", "maxBri", "minBri"):
+            try:
+                value = int(value)
+            except (TypeError, ValueError):
+                errors.append(key + " must be a whole number")
+                continue
+            low = 0 if key == "order" else -1
+            high = 99 if key == "order" else 100
+            if not low <= value <= high:
+                errors.append("%s must be %d to %d" % (key, low, high))
+                continue
+        else:
+            pass
+        newShow[key] = value
+    if errors:
+        return {"success": False, "errors": errors}
+
+    light[2] = name
+    light[4] = tempRange
+    light[5] = cctOnly
+    if len(light) > 8:
+        light[8] = prefID
+    else:
+        light.append(prefID)
+    if newShow == SHOW_PREF_DEFAULTS:
+        lightShowPrefs.pop(mac, None)
+    else:
+        lightShowPrefs[mac] = newShow
+    allDefault = (name == defaults[0] or name == "") and tempRange == list(defaults[1]) and cctOnly == defaults[2] \
+        and prefID == 0 and newShow == SHOW_PREF_DEFAULTS
+    saveLightPrefs(lightIdx, allDefault)
+    loadLightAliases()
+    if mainWindow is not None:
+        mainWindow._settingsChangedSignal.emit(lightIdx)
+    result = getWebSettings()
+    result["light"] = lightIdx
+    return result
 
 
 # ============================================================================
@@ -7221,8 +7486,8 @@ class NLPythonServer(BaseHTTPRequestHandler):
             return
 
         # ONLY ACCEPT REQUESTS TO SUPPORTED POST ENDPOINTS
-        if self.path not in ("/NeewerLux/batch", "/NeewerLux/animate", "/NeewerLux/sequence", "/NeewerLite-Python/batch", "/NeewerLite-Python/animate"):
-            self.send_error(404, "POST requests are supported at /NeewerLux/batch, /NeewerLux/animate and /NeewerLux/sequence")
+        if self.path not in ("/NeewerLux/batch", "/NeewerLux/animate", "/NeewerLux/sequence", "/NeewerLux/settings", "/NeewerLite-Python/batch", "/NeewerLite-Python/animate"):
+            self.send_error(404, "POST requests are supported at /NeewerLux/batch, /NeewerLux/animate, /NeewerLux/sequence and /NeewerLux/settings")
             return
 
         # READ AND PARSE THE JSON BODY
@@ -7348,8 +7613,12 @@ class NLPythonServer(BaseHTTPRequestHandler):
                 resultData["action"] = "play"
             elif action in ("pause", "resume", "stop", "seek", "set_position", "position", "status"):
                 resultData = sequenceControl(action, body.get("ms", body.get("position_ms")))
-            elif action == "list":
-                resultData = {"success": True, "sequences": [
+            elif action in ("list", "reload"):
+                if action == "reload":
+                    loadAllSequences()
+                    if mainWindow is not None:
+                        mainWindow._sequenceListSignal.emit()
+                resultData = {"success": True, "action": action, "sequences": [
                     {"name": n, "duration_ms": d.get("duration_ms"), "cues": len(d.get("cues", [])),
                      "description": d.get("description", "")} for n, d in sorted(savedSequences.items())]}
             elif action == "render":
@@ -7386,6 +7655,19 @@ class NLPythonServer(BaseHTTPRequestHandler):
                             mainWindow._sequenceListSignal.emit()
             else:
                 resultData = {"success": False, "error": "Unknown action: " + action}
+
+        elif self.path == "/NeewerLux/settings":
+            action = str(body.get("action", "get")).lower()
+            printDebugString("POST settings request from " + clientIP + ": " + action)
+            if action == "get":
+                resultData = getWebSettings()
+            elif action == "set_global":
+                resultData = setWebGlobalSettings(body.get("settings"))
+            elif action == "set_light":
+                resultData = setWebLightSettings(_lightIndexFromWeb(body.get("light")), body.get("settings"))
+            else:
+                resultData = {"success": False, "errors": ["Unknown action: " + action]}
+            resultData["action"] = action
 
         # SEND JSON RESPONSE
         responseBody = json.dumps(resultData).encode("utf-8")
@@ -7480,6 +7762,11 @@ def writeHTMLSections(self, theSection, errorMsg = ""):
         self.wfile.write(bytes("&nbsp;&nbsp;Actions: play, stop, list, create, status<BR>\n", "utf-8"))
         self.wfile.write(bytes("&nbsp;&nbsp;Play: <EM>{\"action\": \"play\", \"name\": \"Police Flash\", \"speed\": 1.0, \"loop\": true, \"rate\": 5}</EM><BR>\n", "utf-8"))
         self.wfile.write(bytes("&nbsp;&nbsp;Create: <EM>{\"action\": \"create\", \"animation\": {\"name\": \"...\", \"loop\": true, \"keyframes\": [...]}}</EM><BR>\n", "utf-8"))
+        self.wfile.write(bytes("<STRONG>sequence=</STRONG> - play|Name, pause, resume or stop a sequence<BR>\n", "utf-8"))
+        self.wfile.write(bytes("&nbsp;&nbsp;&nbsp;&nbsp;Example: <EM>http://(server address)/NeewerLux/doAction?sequence=play|Example%20-%20Four%20Light%20Demo</EM><BR>\n", "utf-8"))
+        self.wfile.write(bytes("<STRONG>status_json</STRONG> - layers, sequence position, and each light's layer and approximate colour<BR>\n", "utf-8"))
+        self.wfile.write(bytes("<STRONG>POST /NeewerLux/sequence</STRONG> - list, reload, play, pause, resume, stop, seek, set_position, status, validate, save, render<BR>\n", "utf-8"))
+        self.wfile.write(bytes("<STRONG>POST /NeewerLux/settings</STRONG> - get, set_light, set_global (light and show preferences)<BR>\n", "utf-8"))
     elif theSection == "quicklinks" or theSection == "quicklinks-timer":
         footerLinks = "Shortcut links: "
         footerLinks = footerLinks + "<A HREF='doAction?discover'>Scan for New Lights</A> | "

@@ -112,13 +112,13 @@ While a sequence or effect is driving a light, moving a slider or recalling a pr
 
 Global Preferences can add a simulated rig of 1 to 4 lights (key, fill, rim, ambient), plus an optional CCT-only light, for trying sequences, effects, HTTP commands and Stream Deck buttons without hardware. Simulated lights take the same Bluetooth packets as real ones, answer status queries, and can be renamed, given roles and limits, and used alongside real lights. The setting takes effect at the next start; launching with `--simulate` (or `--simulate=2` and so on) does the same for one run, and `--simulate-faults` makes them drop the odd write and disconnect now and then, for testing reconnects.
 
-The **Stage** button opens a window with one tile per light, in sweep order, showing roughly what each light is showing and which layer is driving it. Simulated lights show what they actually received; real lights show what was last sent to them. The light table also shows a colour swatch beside each light. Colours on screen are approximations of the real output.
+The **Stage** button opens a window with one tile per light, in sweep order, showing roughly what each light is showing and which layer is driving it. Simulated lights show what they actually received; real lights show what was last sent to them, so a CCT-only light asked for a colour shows the white it was converted to. The light table also shows a colour swatch beside each light. Colours on screen are approximations of the real output, and dim lights are drawn brighter than a literal scale would (a panel at 5% is still obviously lit in a room); only 0% or off shows as dark. Tiles size themselves to the system font and display scaling; hover a tile for a name too long to fit.
 
 The **Render** button on the Sequences panel draws a whole sequence as a strip, one row per light with time running left to right, without playing it. It applies each light's brightness limits, Locked flag and CCT-only fallback, so it shows what the lights would really do.
 
 ## Remote control
 
-Turn on the HTTP server from the toolbar, or have it start with the app in Global Preferences. The dashboard is at `http://localhost:8080/` (the port is configurable), and the toolbar's WebUI button opens it.
+Turn on the HTTP server from the toolbar, or have it start with the app in Global Preferences. The dashboard is at `http://localhost:8080/` (the port is configurable), and the toolbar's WebUI button opens it. The dashboard covers what the desktop window does, apart from the editors for animations and presets: lights with colour swatches, roles and layers, presets, manual control, animations, a Sequences panel (play, pause, resume, seek by clicking the progress bar, stop, render, reload), a live Stage view, and Settings for each light's preferences and the show-related global preferences. Network access, keyboard shortcuts and startup options can only be changed in the desktop app.
 
 Every action is also a plain URL, which is how a Stream Deck or a script drives NeewerLux:
 
@@ -141,7 +141,7 @@ http://localhost:8080/NeewerLux/doAction?sequence=pause
 http://localhost:8080/NeewerLux/doAction?status_json
 ```
 
-For richer control, POST JSON to `/NeewerLux/batch` (several lights in one request), `/NeewerLux/animate` or `/NeewerLux/sequence`:
+For richer control, POST JSON to `/NeewerLux/batch` (several lights in one request), `/NeewerLux/animate`, `/NeewerLux/sequence` or `/NeewerLux/settings` (`get`, `set_light`, `set_global`):
 
 ```json
 { "action": "play", "name": "Concert Sweep", "speed": 1.0, "loop": true, "maxLoops": 3, "revert": true }

@@ -374,7 +374,9 @@ def t_docExamplesValidate(rig):
     ex = rig.nl.savedSequences.get("Example - Four Light Demo")
     check(ex is not None, "shipped example sequence missing")
     seq, errors, warnings = rig.nl.buildSequence(ex)
-    check(seq is not None and not warnings, "shipped example: %s %s" % (errors, warnings))
+    # the harness rig has no practical light, so only the @practical cues may warn
+    others = [w for w in warnings if "'@practical' matches no light" not in w]
+    check(seq is not None and not others, "shipped example: %s %s" % (errors, others))
 
 
 def t_guidSidecar(rig):
@@ -544,6 +546,47 @@ def t_cctOnlySplitPackets(rig):
         nl.availableLights[AMB][5] = False
 
 
+def t_cctOnlyDisplayAndRender(rig):
+    """A CCT-only light is asked for colour but shows white: the Stage, swatches, status and
+    render must show what it was sent, not what was asked for. Uses the real-light display
+    path (last written bytes), since only simulated lights report their own state."""
+    nl = rig.nl
+    nl.availableLights[AMB][5] = True
+    try:
+        rig.get("light=4&mode=HSI&hue=0&sat=100&bri=50", 0.5)
+        mac = nl.availableLights[AMB][0].address
+        check(nl._lastWritten[mac][1] == 135, "recorded output should be the converted CCT value: " + str(nl._lastWritten.get(mac)))
+        check(nl.availableLights[AMB][3][1] == 134, "the requested HSI value stays in [3] for presets and reverts")
+        dev = nl.availableLights[AMB][0]
+        real = nl.sim.isSimulated
+        nl.sim.isSimulated = lambda d: False if d is dev else real(d)
+        try:
+            cmd, rgb = nl.getLightDisplayState(AMB)[:2]
+            check(cmd["mode"] == "CCT" and cmd["bri"] == 50, "display state of a CCT-only light: " + str(cmd))
+            check(abs(rgb[0] - rgb[2]) < 120 and rgb[1] > 60, "a CCT-only light should look white-ish, not red: " + str(rgb))
+            del nl._lastWritten[mac]
+            check(nl.getLightDisplayState(AMB)[0]["mode"] == "CCT", "before anything is recorded, display converts [3]")
+        finally:
+            nl.sim.isSimulated = real
+        r = nl.renderSequence(stepSequence("cctonly", [240], 300, target="@fill"))
+        byRole = {l["role"]: l["id"] for l in r["lights"]}
+        ambBase = [c for c in r["changes"][byRole["ambient"]] if c[4] == "base"]
+        check(ambBase and ambBase[0][3] == "CCT", "render base of a CCT-only light should be CCT: " + str(ambBase[:1]))
+        r = nl.renderSequence(stepSequence("cctonly2", [240], 300, target="@ambient"))
+        seqCh = [c for c in r["changes"][byRole["ambient"]] if c[4] == "sequence"]
+        check(seqCh and all(c[3] == "CCT" for c in seqCh), "render of colour cues on a CCT-only light: " + str(seqCh[:2]))
+    finally:
+        nl.availableLights[AMB][5] = False
+
+
+def t_dimColoursStayVisible(rig):
+    show = rig.nl.show
+    dim = show.commandToRGB({"mode": "HSI", "hue": 0, "sat": 100, "bri": 3})
+    check(dim[0] >= 100, "a light at 3% should still read as lit: " + str(dim))
+    check(show.commandToRGB({"mode": "HSI", "hue": 0, "sat": 100, "bri": 0}) == (0, 0, 0), "0% is dark")
+    check(show.commandToRGB({"mode": "HSI", "hue": 0, "sat": 100, "bri": 100})[0] == 255, "100% is full colour")
+
+
 def t_stageTilesAndStatusColours(rig):
     rig.get("light=*&mode=HSI&hue=0&sat=100&bri=100", 0.5)
     tiles = rig.nl.getStageTiles()
@@ -639,6 +682,7 @@ TESTS = [t_maxBrightnessHTTP, t_maxBrightnessAnimationAndSequence, t_minBrightne
          t_manualCommandStopsAnimationAndReverts, t_postBatchDelivers, t_postPlayEmptyName,
          t_sequenceValidateSaveListPlay, t_clipStretchAndTarget, t_docExamplesValidate, t_guidSidecar, t_statusShape, t_driftVirtualClock,
          t_simStateFollowsCommands, t_statusPollThroughNotifications, t_cctOnlySplitPackets,
+         t_cctOnlyDisplayAndRender, t_dimColoursStayVisible,
          t_stageTilesAndStatusColours, t_renderMatchesPlayback, t_renderRespectsLimitsAndLocks, t_renderPNG,
          t_addSimulatedRig]
 

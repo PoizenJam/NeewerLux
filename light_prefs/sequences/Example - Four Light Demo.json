@@ -1,7 +1,7 @@
 {
   "format": 1,
   "name": "Example - Four Light Demo",
-  "description": "40 s demo: warm intro, colour build, chase, rim pulses, calm ending",
+  "description": "40 s demo: warm intro, colour build, chase, rim pulses, calm ending. A practical light (CCT-only) gets colour cues too, so you can see them converted to white.",
   "duration_ms": 40000,
   "fps": 20,
   "end": "revert",
@@ -50,6 +50,17 @@
       }
     },
     {
+      "at_ms": 4000,
+      "target": "@practical",
+      "state": {
+        "mode": "HSI",
+        "hue": 200,
+        "sat": 90,
+        "bri": 40,
+        "fade_ms": 3000
+      }
+    },
+    {
       "at_ms": 6000,
       "target": "@rim",
       "state": {
@@ -80,6 +91,17 @@
         "hue": 30,
         "sat": 100,
         "bri": 50,
+        "fade_ms": 1500
+      }
+    },
+    {
+      "at_ms": 22000,
+      "target": "@practical",
+      "state": {
+        "mode": "HSI",
+        "hue": 30,
+        "sat": 100,
+        "bri": 35,
         "fade_ms": 1500
       }
     },

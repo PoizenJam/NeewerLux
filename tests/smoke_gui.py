@@ -63,6 +63,24 @@ def main():
     shot = os.path.join(rig.workdir, "stage.png")
     stage.grab().save(shot)
     print("stage screenshot:", shot)
+    # Large font (like 150% Windows scaling) with long simulated names: tiles must grow, not clip
+    from PySide6.QtGui import QFont, QFontMetrics
+    big = QFont(stage.font())
+    big.setPointSizeF(max(14.0, big.pointSizeF() * 1.6))
+    stage.view.setFont(big)
+    longTiles = [dict(t, name=n, simulated=True) for t, n in zip(stage.view.tiles, ["SIM-RGB660-Fill", "SIM-RGB660-Ambient", "NEEWER-RGB660 PRO", "A very long custom light name"])]
+    stage.view.setTiles(longTiles)
+    stage.resize(200, 100)  # smaller than it can be: the minimum size must win
+    app.processEvents()
+    tileW, swatchH, gap, line, sline = stage.view._geometry()
+    assert stage.view.height() >= swatchH + line + 2 * sline, "Stage view is shorter than one tile"
+    fm = QFontMetrics(stage.view._smallFont())
+    assert tileW >= fm.horizontalAdvance("Ambient  HSI 100%"), "detail line doesn't fit the tile"
+    stage.resize(stage.view.sizeHint().width() + 20, stage.view.sizeHint().height() + 60)
+    app.processEvents()
+    shotBig = os.path.join(rig.workdir, "stage_bigfont.png")
+    stage.grab().save(shotBig)
+    print("stage screenshot (large font):", shotBig)
     win._updateShowStatus()
     swatch = win.lightTable.item(0, 0).data(nl.Qt.DecorationRole)
     assert swatch is not None, "no swatch on the first light row"
@@ -110,6 +128,23 @@ def main():
     assert nl.envMaxBri == 80 and nl.seqFrameRate == 15 and nl.simulatedLights == 3 and nl.simulatedCCTOnly is True
     win.setupGlobalLightPrefsTab(True)
     assert win.envMaxBriSpin.value() == 100 and win.effectMaxSecondsSpin.value() == 30 and win.simulatedLightsCombo.currentIndex() == 0
+
+    # Settings changed from the web dashboard show up in the window, and the window's next
+    # Save keeps them (the file isn't overwritten with stale widget values)
+    r = nl.setWebGlobalSettings({"envMaxBri": 70, "effectMaxSeconds": 45})
+    assert r["success"], r
+    app.processEvents()
+    assert win.envMaxBriSpin.value() == 70 and win.effectMaxSecondsSpin.value() == 45, (win.envMaxBriSpin.value(), win.effectMaxSecondsSpin.value())
+    win.saveGlobalPrefs()
+    text = open(nl.globalPrefsFile, encoding="utf-8").read()
+    assert "envMaxBri=70" in text and "effectMaxSeconds=45" in text, text
+    win.lightTable.selectRow(1)
+    app.processEvents()
+    win.setupLightPrefsTab(1)
+    r = nl.setWebLightSettings(1, {"role": "rim", "maxBri": 33})
+    assert r["success"], r
+    app.processEvents()
+    assert win.lightRoleCombo.currentText() == "Rim" and win.lightMaxBriSpin.value() == 33, (win.lightRoleCombo.currentText(), win.lightMaxBriSpin.value())
     print("GUI smoke test: PASS")
     return 0
 

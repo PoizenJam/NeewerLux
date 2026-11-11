@@ -111,6 +111,23 @@ a:hover { text-decoration: underline; }
 }
 .card-body { padding: 14px; }
 .card.full-width { grid-column: 1 / -1; }
+.swatch { display:inline-block; width:14px; height:14px; border-radius:3px; border:1px solid var(--border); vertical-align:middle; }
+.stage-grid { display:flex; flex-wrap:wrap; gap:12px; }
+.stage-tile { width:150px; text-align:center; font-size:12px; }
+.stage-box { position:relative; height:84px; border-radius:10px; border:4px solid #5a5a5a; margin-bottom:4px; }
+.stage-box .sim { position:absolute; top:5px; left:5px; background:rgba(0,0,0,.6); color:#e6e6e6; font-size:10px; padding:1px 5px; border-radius:4px; }
+.stage-box .unknown { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#ccc; font-size:20px; }
+.stage-name { color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.stage-detail { color:var(--muted); }
+.layer-base { border-color:#5a5a5a; } .layer-show { border-color:#468cff; } .layer-effect { border-color:#ffa028; } .layer-override { border-color:#eb4646; }
+.seq-progress { height:8px; background:var(--bg3); border-radius:4px; cursor:pointer; margin:8px 0 4px; }
+.seq-progress > div { height:100%; width:0; background:var(--accent); border-radius:4px; }
+.form-grid { display:grid; grid-template-columns: 170px 1fr; gap:6px 10px; align-items:center; font-size:13px; }
+.form-grid input[type=number] { width:80px; }
+.form-grid .hint { grid-column: 2; color:var(--muted); font-size:11px; margin-top:-4px; }
+.modal-bg { position:fixed; inset:0; background:rgba(0,0,0,.7); display:none; align-items:center; justify-content:center; z-index:50; }
+.modal-bg.open { display:flex; }
+.modal { background:var(--bg2); border:1px solid var(--border); border-radius:8px; padding:14px; max-width:95vw; max-height:90vh; overflow:auto; }
 
 /* LIGHT TABLE */
 .light-table {
@@ -172,7 +189,7 @@ a:hover { text-decoration: underline; }
     font-size: 13px;
     color: var(--accent);
 }
-select, input[type="number"] {
+select, input[type="number"], input[type="text"] {
     background: var(--bg);
     color: var(--text);
     border: 1px solid var(--border);
@@ -263,6 +280,7 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
 }
 .anim-item:hover { background: rgba(145, 0, 255, 0.1); }
 .anim-item.selected { background: var(--accent); color: white; }
+.anim-item.selected span { color: rgba(255,255,255,.85) !important; }
 .anim-item:last-child { border-bottom: none; }
 
 /* MODE TABS */
@@ -344,9 +362,19 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
         <div class="card-header">Lights</div>
         <div class="card-body" style="padding:0">
             <table class="light-table">
-                <thead><tr><th>#</th><th>Light Name</th><th>MAC Address</th><th>Status</th><th>Current</th><th>Actions</th></tr></thead>
-                <tbody id="lightTableBody"><tr><td colspan="6" style="text-align:center;padding:20px;color:#888">Loading lights...</td></tr></tbody>
+                <thead><tr><th>#</th><th></th><th>Light Name</th><th>MAC Address</th><th>Status</th><th>Role</th><th>Layer</th><th>Current</th><th>Actions</th></tr></thead>
+                <tbody id="lightTableBody"><tr><td colspan="9" style="text-align:center;padding:20px;color:#888">Loading lights...</td></tr></tbody>
             </table>
+        </div>
+    </div>
+
+    <!-- STAGE -->
+    <div class="card full-width">
+        <div class="card-header" style="cursor:pointer" onclick="toggleStage(this)">Stage <span style="float:right;color:var(--muted);font-size:11px;font-weight:normal">click to hide/show</span></div>
+        <div class="card-body" id="stageBody">
+            <div class="stage-grid" id="stageGrid"><div style="color:var(--muted)">Loading...</div></div>
+            <div style="color:var(--muted);font-size:11px;margin-top:8px">Approximate colours. Outline: grey = manual/preset, blue = sequence, orange = effect, red = override animation.
+            Simulated lights show what they received; real lights show what was last sent to them.</div>
         </div>
     </div>
 
@@ -488,6 +516,68 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
         </div>
     </div>
 
+    <!-- SEQUENCES -->
+    <div class="card">
+        <div class="card-header">Sequences</div>
+        <div class="card-body">
+            <div class="anim-list" id="seqList"><div class="anim-item" style="color:#888">Loading...</div></div>
+            <div id="seqStatus" style="padding:6px 8px;font-size:12px;color:var(--accent);font-weight:600;text-align:center;border-top:1px solid var(--border);">No sequence playing</div>
+            <div class="seq-progress" id="seqProgress" title="Click to seek" onclick="seqSeek(event)"><div id="seqProgressFill"></div></div>
+            <div class="btn-row">
+                <button class="btn success" onclick="seqPlay()" title="Play the selected sequence from the start">&#x25B6; Play</button>
+                <button class="btn" id="seqPauseBtn" onclick="seqPauseResume()" title="Pause returns the lights to where they were; Resume carries on">Pause</button>
+                <button class="btn danger" onclick="seqCmd('stop')">&#x25A0; Stop</button>
+            </div>
+            <div class="btn-row" style="margin-top:6px">
+                <button class="btn" onclick="seqRender()" title="Show what the selected sequence does to each light, without playing it">Render</button>
+                <button class="btn" onclick="seqReload()" title="Reload sequence files from light_prefs/sequences">Reload</button>
+            </div>
+            <div style="color:var(--muted);font-size:11px;margin-top:8px">Sliders and presets don't interrupt a playing sequence: they become what the lights return to when it ends.</div>
+        </div>
+    </div>
+
+    <!-- SETTINGS -->
+    <div class="card full-width">
+        <div class="card-header" style="cursor:pointer" onclick="toggleSettings(this)">Settings</div>
+        <div class="card-body" id="settingsBody" style="display:none">
+            <div class="container" style="padding:0;gap:16px">
+                <div>
+                    <h3 style="margin-top:0;color:var(--accent)">Light Preferences</h3>
+                    <div class="form-grid">
+                        <label>Light</label><select id="lpLight" onchange="fillLightPrefs()"></select>
+                        <label>Custom name</label><input type="text" id="lpName" maxlength="64" placeholder="(model name)">
+                        <label>Preferred ID</label><input type="number" id="lpID" min="0" max="99"><div class="hint">0 = automatic. Used in URLs and batch commands.</div>
+                        <label>Colour temperature range</label><span><input type="number" id="lpTempMin" min="1000" max="5600" step="100"> to <input type="number" id="lpTempMax" min="1000" max="10000" step="100"> K <button class="btn" style="padding:2px 8px;font-size:11px" onclick="resetTempRange()">Default</button></span>
+                        <label>CCT-only light</label><label style="text-transform:none"><input type="checkbox" id="lpCCTOnly"> Only accepts CCT (older lights)</label>
+                        <label>Role</label><select id="lpRole"></select>
+                        <label>Side</label><select id="lpSide"></select>
+                        <label>Sweep order</label><input type="number" id="lpOrder" min="0" max="99"><div class="hint">0 = automatic (by side).</div>
+                        <label>Eye line</label><label style="text-transform:none"><input type="checkbox" id="lpEyeline"> At eye level (@eyeline)</label>
+                        <label>Max brightness</label><input type="number" id="lpMaxBri" min="-1" max="100"><div class="hint">-1 = use the global limit.</div>
+                        <label>Min brightness</label><input type="number" id="lpMinBri" min="-1" max="100"><div class="hint">-1 = use the global limit.</div>
+                        <label>Locked</label><label style="text-transform:none"><input type="checkbox" id="lpLocked"> Ignore sequences and effects</label>
+                    </div>
+                    <div class="btn-row" style="margin-top:10px"><button class="btn primary" onclick="saveLightPrefs()">Save Light Preferences</button></div>
+                </div>
+                <div>
+                    <h3 style="margin-top:0;color:var(--accent)">Global Preferences</h3>
+                    <div class="form-grid">
+                        <label>Max brightness</label><input type="number" id="gpEnvMax" min="1" max="100"><div class="hint">Presets, URLs, animations and sequences. Sliders are exempt.</div>
+                        <label>Min brightness</label><input type="number" id="gpEnvMin" min="0" max="100">
+                        <label>Sequence frame rate</label><input type="number" id="gpSeqFps" min="1" max="30"><div class="hint">Updates per second for sequences without their own.</div>
+                        <label>Effect time limit (s)</label><input type="number" id="gpEffectMax" min="1" max="600"><div class="hint">Forever-looping effects stop after this.</div>
+                        <label>Global CCT range</label><span><input type="number" id="gpCCTMin" min="2700" max="8500" step="100"> to <input type="number" id="gpCCTMax" min="2700" max="8500" step="100"> K</span>
+                        <label>Colour on CCT-only lights</label><select id="gpFallback"><option value="convert">Convert to white</option><option value="ignore">Ignore</option></select>
+                        <label>Simulated lights</label><select id="gpSim"></select><div class="hint">Takes effect at the next start.</div>
+                        <label>Simulated CCT-only light</label><label style="text-transform:none"><input type="checkbox" id="gpSimCCT"> Add one (takes effect at the next start)</label>
+                    </div>
+                    <div class="btn-row" style="margin-top:10px"><button class="btn primary" onclick="saveGlobalPrefs()">Save Global Preferences</button></div>
+                    <div style="color:var(--muted);font-size:11px;margin-top:8px">Network access, keyboard shortcuts and startup options are only changed in the desktop app.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- COMMAND LOG (collapsible) -->
     <div class="card full-width">
         <div class="card-header" style="cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
@@ -557,6 +647,24 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
                 <div class="api-code">POST /NeewerLux/animate {"action":"stop"}</div>
             </div>
             <div class="api-section">
+                <h3>Sequences</h3>
+                <div class="api-desc">Play, pause, resume, stop, seek (GET)</div>
+                <div class="api-code">GET /NeewerLux/doAction?sequence=play|Example%20-%20Four%20Light%20Demo</div>
+                <div class="api-desc">JSON API: list, reload, play, pause, resume, stop, seek, set_position, status, validate, save, render</div>
+                <div class="api-code">POST /NeewerLux/sequence {"action":"play","name":"Example - Four Light Demo"}</div>
+                <div class="api-code">POST /NeewerLux/sequence {"action":"seek","ms":12000}</div>
+                <div class="api-code">POST /NeewerLux/sequence {"action":"render","name":"Example - Four Light Demo","format":"png"}</div>
+                <div class="api-desc">Live status of layers, the sequence and every light (with approximate colour)</div>
+                <div class="api-code">GET /NeewerLux/doAction?status_json</div>
+            </div>
+            <div class="api-section">
+                <h3>Settings</h3>
+                <div class="api-desc">Light and show preferences, as on this page's Settings panel</div>
+                <div class="api-code">POST /NeewerLux/settings {"action":"get"}</div>
+                <div class="api-code">POST /NeewerLux/settings {"action":"set_light","light":0,"settings":{"role":"key","maxBri":60}}</div>
+                <div class="api-code">POST /NeewerLux/settings {"action":"set_global","settings":{"envMaxBri":80}}</div>
+            </div>
+            <div class="api-section">
                 <h3>Utility</h3>
                 <div class="api-code">GET /NeewerLux/doAction?list</div>
                 <div class="api-code">GET /NeewerLux/doAction?discover</div>
@@ -564,6 +672,18 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
                 <div class="api-code">GET /NeewerLux/doAction?nopage (suppress HTML response)</div>
             </div>
         </div>
+    </div>
+</div>
+
+<div class="modal-bg" id="renderModal" onclick="if(event.target===this)closeRender()">
+    <div class="modal">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+            <b id="renderTitle">Render</b><span style="flex:1"></span>
+            <button class="btn" onclick="saveRenderPNG()">Save PNG</button>
+            <button class="btn" onclick="closeRender()">Close</button>
+        </div>
+        <canvas id="renderCanvas"></canvas>
+        <div id="renderCues" style="font-size:11px;color:var(--muted);max-height:160px;overflow:auto;margin-top:6px;font-family:monospace"></div>
     </div>
 </div>
 
@@ -710,6 +830,8 @@ function stopAutoRefresh() {
 // REFRESH / LOAD
 async function refreshAll() {
     loadLights();
+    loadSequences();
+    if (!settingsData) loadSettings();
 }
 
 async function loadLights() {
@@ -722,7 +844,7 @@ async function loadLights() {
         loadAnimationsJSON(data);
     } catch(e) {
         document.getElementById('lightTableBody').innerHTML =
-            '<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--muted)">Could not load light data. <a href="#" onclick="refreshAll();return false;">Retry</a></td></tr>';
+            '<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--muted)">Could not load light data. <a href="#" onclick="refreshAll();return false;">Retry</a></td></tr>';
         logMsg('Load error: ' + e.message, 'err');
     }
 }
@@ -734,21 +856,27 @@ function renderLightsJSON(data) {
 
     if (lights.length === 0) {
         document.getElementById('lightTableBody').innerHTML =
-            '<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--muted)">No lights discovered. <a href="#" onclick="scanForLights();return false;">Click to Scan</a></td></tr>';
+            '<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--muted)">No lights discovered. <a href="#" onclick="scanForLights();return false;">Click to Scan</a></td></tr>';
         document.getElementById('connStatus').textContent = '0 lights';
         return;
     }
 
     let html2 = '', linkedCount = 0;
+    const byId = {};
+    (lastStatus && lastStatus.lights || []).forEach(s => byId[s.id] = s);
     lights.forEach(l => {
         if (l.linked) linkedCount++;
         const displayName = l.name || l.model || l.mac;
+        const st = byId[l.id] || {};
         select.innerHTML += `<option value="${l.id}">${l.id} - ${displayName}</option>`;
         html2 += `<tr>
             <td class="light-id">${l.id}</td>
+            <td><span class="swatch" data-swatch="${l.id}" style="background:${st.color || '#464646'}"></span></td>
             <td>${displayName}${l.model && l.name !== l.model ? ' <span style="color:var(--muted);font-size:11px">(' + l.model + ')</span>' : ''}</td>
             <td style="font-family:monospace;font-size:11px">${l.mac}</td>
             <td class="${l.linked ? 'linked' : 'not-linked'}">${l.linked ? '● LINKED' : '○ Not linked'}</td>
+            <td style="font-size:11px" data-role="${l.id}">${esc(cap(st.role || ''))}${st.locked ? ' (locked)' : ''}</td>
+            <td style="font-size:11px" data-layer="${l.id}">${esc(st.layer || '')}</td>
             <td style="font-size:11px">${l.status}</td>
             <td>${l.linked
                 ? '<button class="btn" style="padding:3px 8px;font-size:11px" onclick="apiCall(\''+BASE+'light='+l.id+'&mode=CCT&temp=5600&bri=100&nopage\',\'Send: light '+l.id+'\')">Send</button>'
@@ -905,10 +1033,305 @@ async function loadAnimations() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// LIVE STATUS: stage tiles, table swatches, sequence and animation status
+let lastStatus = null;
+let stageVisible = true;
+function esc(t) { return String(t == null ? '' : t).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function cap(t) { return t ? t.charAt(0).toUpperCase() + t.slice(1) : ''; }
+function fmtMs(ms) { ms = Math.max(0, ms || 0); const s = Math.floor(ms / 1000); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
+
+async function pollStatus() {
+    if (document.visibilityState === 'hidden') return;
+    try {
+        const r = await fetch(BASE + 'status_json');
+        if (!r.ok) return;
+        lastStatus = await r.json();
+    } catch(e) { return; }
+    renderStage();
+    renderSeqStatus();
+    renderAnimStatus();
+    (lastStatus.lights || []).forEach(l => {
+        const sw = document.querySelector('[data-swatch="' + l.id + '"]');
+        if (sw) sw.style.background = l.color || '#464646';
+        const ly = document.querySelector('[data-layer="' + l.id + '"]');
+        if (ly) ly.textContent = l.layer || '';
+        const ro = document.querySelector('[data-role="' + l.id + '"]');
+        if (ro) ro.textContent = cap(l.role) + (l.locked ? ' (locked)' : '');
+    });
+}
+
+function toggleStage(hdr) {
+    const b = document.getElementById('stageBody');
+    stageVisible = b.style.display === 'none';
+    b.style.display = stageVisible ? 'block' : 'none';
+}
+
+function renderStage() {
+    if (!stageVisible || !lastStatus) return;
+    const lights = lastStatus.lights || [];
+    const grid = document.getElementById('stageGrid');
+    if (!lights.length) { grid.innerHTML = '<div style="color:var(--muted)">No lights yet</div>'; return; }
+    let html = '';
+    lights.forEach(l => {
+        let fill = l.color || '#373737';
+        let detail = cap(l.role);
+        if (l.mode) detail += '  ' + l.mode + (l.mode === 'OFF' || l.bri == null ? '' : ' ' + l.bri + '%');
+        html += '<div class="stage-tile" title="' + esc(l.name) + '">'
+            + '<div class="stage-box layer-' + esc(l.layer || 'base') + '" style="background:' + fill + ';' + (l.linked ? '' : 'filter:brightness(.4);') + '">'
+            + (l.simulated ? '<span class="sim">SIM</span>' : '')
+            + (l.color ? '' : '<span class="unknown">?</span>') + '</div>'
+            + '<div class="stage-name">' + esc(l.name) + '</div>'
+            + '<div class="stage-detail">' + esc(detail) + '</div>'
+            + '<div class="stage-detail">' + esc(l.linked ? (l.layer || 'base') : 'not linked') + '</div></div>';
+    });
+    if (grid._last !== html) { grid.innerHTML = html; grid._last = html; }
+}
+
+function renderAnimStatus() {
+    const ov = lastStatus && lastStatus.layers && lastStatus.layers.override;
+    const fx = lastStatus && lastStatus.layers && lastStatus.layers.effect;
+    const el = document.getElementById('selectedAnimLabel');
+    if (ov) el.textContent = 'Playing: ' + ov.name + ' (frame ' + Math.max(1, ov.keyframe || 0) + '/' + (ov.keyframes || '?') + ')';
+    else if (fx) el.textContent = 'Effect: ' + fx.name;
+    else el.textContent = selectedAnim ? 'Selected: ' + selectedAnim : 'No animation selected';
+}
+
+// ---------------------------------------------------------------------------
+// SEQUENCES
+let selectedSeq = '';
+let seqNames = [];
+async function seqPost(body) {
+    const r = await fetch('/NeewerLux/sequence', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    return r.json();
+}
+function renderSeqList(list) {
+    const div = document.getElementById('seqList');
+    const names = list.map(s => s.name).join('|');
+    if (div._last === names) return;
+    div._last = names;
+    seqNames = list.map(s => s.name);
+    if (!list.length) { div.innerHTML = '<div class="anim-item" style="color:var(--muted)">No sequences in light_prefs/sequences</div>'; return; }
+    div.innerHTML = '';
+    list.forEach(s => {
+        const item = document.createElement('div');
+        item.className = 'anim-item' + (s.name === selectedSeq ? ' selected' : '');
+        item.innerHTML = '<strong>' + esc(s.name) + '</strong> <span style="float:right;color:var(--muted);font-size:11px">' + fmtMs(s.duration_ms) + ', ' + s.cues + ' cues</span>'
+            + (s.description ? '<br><span style="color:var(--muted);font-size:11px">' + esc(s.description) + '</span>' : '');
+        item.onclick = () => {
+            div.querySelectorAll('.anim-item').forEach(i => i.classList.remove('selected'));
+            item.classList.add('selected');
+            selectedSeq = s.name;
+        };
+        div.appendChild(item);
+    });
+}
+async function loadSequences() {
+    try { const d = await seqPost({action:'list'}); if (d.success) renderSeqList(d.sequences); } catch(e) {}
+}
+async function seqReload() {
+    try {
+        const d = await seqPost({action:'reload'});
+        document.getElementById('seqList')._last = null;
+        renderSeqList(d.sequences || []);
+        logMsg('Reloaded ' + (d.sequences || []).length + ' sequence(s)', 'ok');
+    } catch(e) { logMsg('Reload failed: ' + e.message, 'err'); }
+}
+function seqResult(label, d) {
+    if (d.success === false) logMsg(label + ' failed: ' + ((d.errors || []).join('; ') || d.error || 'unknown error'), 'err');
+    else logMsg(label, 'ok');
+}
+async function seqPlay() {
+    if (!selectedSeq) { logMsg('No sequence selected', 'err'); return; }
+    try { seqResult('▶ Sequence: ' + selectedSeq, await seqPost({action:'play', name:selectedSeq})); } catch(e) { logMsg('Sequence error: ' + e.message, 'err'); }
+    pollStatus();
+}
+async function seqCmd(action, ms) {
+    try { seqResult('Sequence ' + action, await seqPost({action:action, ms:ms})); } catch(e) { logMsg('Sequence error: ' + e.message, 'err'); }
+    pollStatus();
+}
+function seqPauseResume() {
+    const seq = lastStatus && lastStatus.sequence;
+    if (!seq) { logMsg('No sequence playing', 'err'); return; }
+    seqCmd(seq.state === 'paused' ? 'resume' : 'pause');
+}
+function seqSeek(ev) {
+    const seq = lastStatus && lastStatus.sequence;
+    if (!seq || !seq.duration_ms) return;
+    const bar = document.getElementById('seqProgress').getBoundingClientRect();
+    const frac = Math.min(1, Math.max(0, (ev.clientX - bar.left) / bar.width));
+    seqCmd('seek', Math.round(frac * seq.duration_ms));
+}
+function renderSeqStatus() {
+    const seq = lastStatus && lastStatus.sequence;
+    const label = document.getElementById('seqStatus');
+    const fill = document.getElementById('seqProgressFill');
+    const btn = document.getElementById('seqPauseBtn');
+    if (!seq) { label.textContent = 'No sequence playing'; fill.style.width = '0'; btn.textContent = 'Pause'; return; }
+    label.textContent = cap(seq.state) + ': ' + seq.name + '  ' + fmtMs(seq.position_ms) + ' / ' + fmtMs(seq.duration_ms);
+    fill.style.width = (seq.duration_ms ? Math.min(100, 100 * seq.position_ms / seq.duration_ms) : 0) + '%';
+    btn.textContent = seq.state === 'paused' ? 'Resume' : 'Pause';
+}
+
+// Render: drawn here from the JSON render, so it also works when NeewerLux runs without its window
+let lastRender = null;
+async function seqRender() {
+    if (!selectedSeq) { logMsg('No sequence selected', 'err'); return; }
+    let d;
+    try { d = await seqPost({action:'render', name:selectedSeq}); } catch(e) { logMsg('Render error: ' + e.message, 'err'); return; }
+    if (!d.success) { seqResult('Render', d); return; }
+    lastRender = d;
+    drawRender(d);
+    document.getElementById('renderModal').classList.add('open');
+}
+function drawRender(d) {
+    const cv = document.getElementById('renderCanvas');
+    const ctx = cv.getContext('2d');
+    ctx.font = '13px sans-serif';
+    const labels = d.lights.map(l => l.name + '  (' + l.role + ')');
+    const labelW = Math.min(420, Math.max(80, ...labels.map(t => ctx.measureText(t).width)) + 20);
+    const rowH = 26, rulerH = 24, pad = 30;
+    const width = Math.min(1600, Math.max(700, Math.floor(window.innerWidth * 0.95) - 40));
+    cv.width = width; cv.height = rulerH + rowH * d.lights.length + pad;
+    const plotW = width - labelW - 12, t0 = d.start_ms, t1 = d.end_ms, span = Math.max(1, t1 - t0);
+    const x = t => labelW + (t - t0) / span * plotW;
+    ctx.fillStyle = '#181818'; ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.font = '13px sans-serif'; ctx.textBaseline = 'middle';
+    d.lights.forEach((l, r) => {
+        const y = rulerH + r * rowH;
+        ctx.fillStyle = '#e6e6e6'; ctx.fillText(labels[r], 6, y + rowH / 2);
+        const ch = d.changes[l.id] || [];
+        ch.forEach((c, i) => {
+            const end = i + 1 < ch.length ? ch[i + 1][0] : t1;
+            ctx.fillStyle = c[1] || '#373737';
+            ctx.fillRect(x(c[0]), y + 3, Math.max(1, x(end) - x(c[0])), rowH - 6);
+        });
+    });
+    const stepS = span > 120000 ? 30000 : span > 30000 ? 5000 : 1000;
+    ctx.fillStyle = '#aaa'; ctx.font = '11px sans-serif'; ctx.textBaseline = 'top';
+    for (let t = Math.ceil(t0 / stepS) * stepS; t <= t1; t += stepS) {
+        ctx.fillRect(x(t), rulerH - 6, 1, 6);
+        const lbl = fmtMs(t), w = ctx.measureText(lbl).width;
+        ctx.fillText(lbl, x(t) + 2 + w > width ? x(t) - w - 2 : x(t) + 2, 4);
+    }
+    ctx.strokeStyle = 'rgba(255,255,255,.35)';
+    (d.cues || []).forEach(c => { ctx.beginPath(); ctx.moveTo(x(c.at_ms) + .5, rulerH); ctx.lineTo(x(c.at_ms) + .5, rulerH + rowH * d.lights.length); ctx.stroke(); });
+    document.getElementById('renderTitle').textContent = 'Render: ' + d.sequence + ' (' + fmtMs(d.duration_ms) + ')';
+    document.getElementById('renderCues').innerHTML = (d.cues || []).map(c => fmtMs(c.at_ms) + '  ' + esc(c.target) + '  ' + esc(c.what) + (c.label ? '  [' + esc(c.label) + ']' : '')).join('<br>')
+        + ((d.warnings || []).length ? '<br><span style="color:var(--red)">' + d.warnings.map(esc).join('<br>') + '</span>' : '');
+}
+function closeRender() { document.getElementById('renderModal').classList.remove('open'); }
+function saveRenderPNG() {
+    const a = document.createElement('a');
+    a.href = document.getElementById('renderCanvas').toDataURL('image/png');
+    a.download = (lastRender ? lastRender.sequence : 'render') + ' - render.png';
+    a.click();
+}
+
+// ---------------------------------------------------------------------------
+// SETTINGS
+let settingsData = null;
+async function settingsPost(body) {
+    const r = await fetch('/NeewerLux/settings', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    return r.json();
+}
+function toggleSettings(hdr) {
+    const b = document.getElementById('settingsBody');
+    const open = b.style.display === 'none';
+    b.style.display = open ? 'block' : 'none';
+    if (open) loadSettings();
+}
+async function loadSettings() {
+    try { const d = await settingsPost({action:'get'}); if (d.success) applySettings(d); } catch(e) {}
+}
+function fillSelect(id, values, labels) {
+    const sel = document.getElementById(id);
+    const keep = sel.value;
+    sel.innerHTML = values.map((v, i) => '<option value="' + esc(v) + '">' + esc(labels ? labels[i] : cap(v)) + '</option>').join('');
+    if (values.map(String).includes(keep)) sel.value = keep;
+}
+function applySettings(d) {
+    settingsData = d;
+    fillSelect('lpRole', d.roles);
+    fillSelect('lpSide', d.sides);
+    fillSelect('gpSim', d.simulatedRigs.map((_, i) => i), d.simulatedRigs.map((r, i) => i ? i + ' (' + r + ')' : r));
+    fillSelect('lpLight', d.lights.map(l => l.index), d.lights.map(l => l.id + ' - ' + (l.customName || l.model) + (l.simulated ? ' (simulated)' : '')));
+    fillLightPrefs();
+    const g = d.global;
+    document.getElementById('gpEnvMax').value = g.envMaxBri;
+    document.getElementById('gpEnvMin').value = g.envMinBri;
+    document.getElementById('gpSeqFps').value = g.seqFrameRate;
+    document.getElementById('gpEffectMax').value = g.effectMaxSeconds;
+    document.getElementById('gpCCTMin').value = g.globalCCTMin;
+    document.getElementById('gpCCTMax').value = g.globalCCTMax;
+    document.getElementById('gpFallback').value = g.cctFallbackMode;
+    document.getElementById('gpSim').value = g.simulatedLights;
+    document.getElementById('gpSimCCT').checked = !!g.simulatedCCTOnly;
+}
+function currentLightPrefs() {
+    if (!settingsData) return null;
+    const idx = parseInt(document.getElementById('lpLight').value);
+    return settingsData.lights.find(l => l.index === idx) || null;
+}
+function fillLightPrefs() {
+    const l = currentLightPrefs();
+    if (!l) return;
+    document.getElementById('lpName').value = l.customName;
+    document.getElementById('lpName').placeholder = l.model;
+    document.getElementById('lpID').value = l.preferredID;
+    document.getElementById('lpTempMin').value = l.tempRange[0];
+    document.getElementById('lpTempMax').value = l.tempRange[1];
+    document.getElementById('lpCCTOnly').checked = l.cctOnly;
+    document.getElementById('lpRole').value = l.role;
+    document.getElementById('lpSide').value = l.side;
+    document.getElementById('lpOrder').value = l.order;
+    document.getElementById('lpEyeline').checked = !!l.eyeline;
+    document.getElementById('lpMaxBri').value = l.maxBri;
+    document.getElementById('lpMinBri').value = l.minBri;
+    document.getElementById('lpLocked').checked = !!l.locked;
+}
+function resetTempRange() {
+    const l = currentLightPrefs();
+    if (!l) return;
+    document.getElementById('lpTempMin').value = l.defaultTempRange[0];
+    document.getElementById('lpTempMax').value = l.defaultTempRange[1];
+}
+function num(id) { return parseInt(document.getElementById(id).value); }
+async function saveLightPrefs() {
+    const l = currentLightPrefs();
+    if (!l) { logMsg('No light selected', 'err'); return; }
+    const settings = {customName: document.getElementById('lpName').value, preferredID: num('lpID'),
+        tempRange: [num('lpTempMin'), num('lpTempMax')], cctOnly: document.getElementById('lpCCTOnly').checked,
+        role: document.getElementById('lpRole').value, side: document.getElementById('lpSide').value, order: num('lpOrder'),
+        eyeline: document.getElementById('lpEyeline').checked, maxBri: num('lpMaxBri'), minBri: num('lpMinBri'),
+        locked: document.getElementById('lpLocked').checked};
+    try {
+        const d = await settingsPost({action:'set_light', light:l.index, settings:settings});
+        if (!d.success) { logMsg('Light preferences not saved: ' + (d.errors || []).join('; '), 'err'); return; }
+        applySettings(d);
+        logMsg('Saved preferences for light ' + l.id, 'ok');
+        loadLights();
+    } catch(e) { logMsg('Save failed: ' + e.message, 'err'); }
+}
+async function saveGlobalPrefs() {
+    const settings = {envMaxBri: num('gpEnvMax'), envMinBri: num('gpEnvMin'), seqFrameRate: num('gpSeqFps'),
+        effectMaxSeconds: num('gpEffectMax'), globalCCTMin: num('gpCCTMin'), globalCCTMax: num('gpCCTMax'),
+        cctFallbackMode: document.getElementById('gpFallback').value, simulatedLights: num('gpSim'),
+        simulatedCCTOnly: document.getElementById('gpSimCCT').checked};
+    try {
+        const d = await settingsPost({action:'set_global', settings:settings});
+        if (!d.success) { logMsg('Global preferences not saved: ' + (d.errors || []).join('; '), 'err'); return; }
+        applySettings(d);
+        logMsg('Saved global preferences' + (d.note ? ' (' + d.note + ')' : ''), 'ok');
+    } catch(e) { logMsg('Save failed: ' + e.message, 'err'); }
+}
+
 // INIT
 window.addEventListener('load', () => {
     refreshAll();
     startAutoRefresh();
+    pollStatus();
+    setInterval(pollStatus, 500);
 });
 </script>
 <div style="text-align:center;padding:16px 0 8px;font-size:11px;color:var(--muted);">

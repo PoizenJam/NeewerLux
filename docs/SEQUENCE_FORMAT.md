@@ -281,6 +281,7 @@ POST `/NeewerLux/sequence` (body up to 256 KB):
 {"action": "set_position", "ms": 65120}                             reply says "slew" or "jump"
 {"action": "status"}
 {"action": "list"}
+{"action": "reload"}                                                re-reads light_prefs/sequences, then lists
 {"action": "validate", "sequence": {...}}
 {"action": "save", "sequence": {...}, "overwrite": false}
 {"action": "render", "name": "...", "step_ms": 50, "start_ms": 0, "end_ms": 60000}

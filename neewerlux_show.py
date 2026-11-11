@@ -99,14 +99,16 @@ def kelvinToRGB(kelvin):
 
 def commandToRGB(cmd):
     """Approximate on-screen colour of a light command, brightness included, as an (r, g, b)
-    tuple of ints, or None when the colour isn't known (a bare ON). Brightness goes through a
-    2.2 gamma so a light at 20% still reads as clearly lit, roughly as it looks in a room."""
+    tuple of ints, or None when the colour isn't known (a bare ON). Brightness is compressed
+    into the upper part of the range: an LED panel at 5% is still obviously lit in a room,
+    so any lit light keeps at least 40% of its colour on screen and only 0% shows as dark."""
     if not cmd:
         return None
     mode = str(cmd.get("mode", "")).upper()
     if mode == "OFF":
         return (0, 0, 0)
-    level = (max(0, min(100, cmd.get("bri", 100))) / 100.0) ** (1 / 2.2)
+    bri = max(0, min(100, cmd.get("bri", 100)))
+    level = 0.0 if bri == 0 else 0.4 + 0.6 * (bri / 100.0) ** 0.5
     if mode == "HSI":
         h = (cmd.get("hue", 0) % 360) / 60.0
         sat = max(0, min(100, cmd.get("sat", 100))) / 100.0
