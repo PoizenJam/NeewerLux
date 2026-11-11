@@ -390,9 +390,11 @@ class StageWindow(QWidget):
     """Floating window around a StageView. provider() returns the tile list; it is polled
     20 times a second while the window is visible and not at all while it's hidden."""
 
-    def __init__(self, provider, parent=None):
+    def __init__(self, provider, parent=None, view="plan", geometry="", remember=None):
         super().__init__(parent, Qt.Window)
         self.provider = provider
+        self.remember = remember   # remember(view, "x,y,w,h") keeps them for next time
+        self._userSized = False
         self.setWindowTitle("NeewerLux Stage")
         lay = QVBoxLayout(self)
         lay.setContentsMargins(6, 6, 6, 6)
@@ -417,28 +419,63 @@ class StageWindow(QWidget):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.refresh)
         self._legendH = legend.sizeHint().height()
-        self._fit()
+        self._restoring = True
+        self.viewCombo.setCurrentIndex(VIEW_MODES.index(view) if view in VIEW_MODES else 0)
+        self.view.setViewMode(view if view in VIEW_MODES else "plan")
+        try:
+            x, y, w, h = [int(v) for v in str(geometry).split(",")]
+            self.setGeometry(x, y, w, h)
+            self._userSized = True
+        except ValueError:
+            self.refreshTiles()  # size to the lights, not to an empty view
+            self._fit()
+        self._restoring = False
+
+    def refreshTiles(self):
+        tiles = self.provider()
+        if tiles and "camera" in tiles[0]:
+            self.view.setCamera(tiles[0]["camera"])
+        self.view.setTiles(tiles)
 
     def _fit(self):
         """Size the window to the view (the grid views have a natural size)."""
         hint = self.view.sizeHint()
+        self._restoring, was = True, self._restoring
         self.resize(max(hint.width() + 12, 520), hint.height() + self._legendH + 30)
+        self._restoring = was
 
     def _setView(self, mode):
         self.view.setViewMode(mode)
-        self._fit()
+        if not self._restoring:
+            self._userSized = False
+            self._fit()
+            self._save()
+
+    def _save(self):
+        if self.remember is not None and not self._restoring:
+            g = self.geometry()
+            self.remember(self.view.viewMode, "%d,%d,%d,%d" % (g.x(), g.y(), g.width(), g.height()) if self._userSized else "")
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if not self._restoring and self.isVisible():
+            self._userSized = True
+
+    def moveEvent(self, event):
+        super().moveEvent(event)
+
+    def closeEvent(self, event):
+        self._save()
+        super().closeEvent(event)
 
     def _setOnTop(self, on):
         self.setWindowFlag(Qt.WindowStaysOnTopHint, on)
         self.show()  # changing window flags hides the window until it's shown again
 
     def refresh(self):
-        tiles = self.provider()
-        if tiles and "camera" in tiles[0]:
-            self.view.setCamera(tiles[0]["camera"])
         before = self.view.sizeHint()
-        self.view.setTiles(tiles)
-        if self.view.viewMode != "strip" and self.view.sizeHint() != before and not self.isMaximized():
+        self.refreshTiles()
+        if self.view.viewMode != "strip" and self.view.sizeHint() != before and not self.isMaximized() and not self._userSized:
             self._fit()
 
     def showEvent(self, event):
@@ -448,6 +485,7 @@ class StageWindow(QWidget):
 
     def hideEvent(self, event):
         self.timer.stop()
+        self._save()
         super().hideEvent(event)
 
 

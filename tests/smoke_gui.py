@@ -124,6 +124,46 @@ def main():
     assert seeks and abs(seeks[0] - (a["start_ms"] + a["end_ms"]) / 2) < 100, "clicking the strip seeks: %r" % seeks
     dlg.close()
 
+    # The Stage remembers its view and size; a fresh one sizes itself to the lights
+    from neewerlux_stage import StageWindow
+    remembered = []
+    fresh = StageWindow(nl.getStageTiles, win, remember=lambda v, g: remembered.append((v, g)))
+    hint = fresh.view.sizeHint()
+    assert fresh.view.tiles and fresh.height() >= hint.height(), "a new Stage window fits its lights: %s vs %s" % (fresh.size(), hint)
+    fresh.show(); app.processEvents()
+    fresh.viewCombo.setCurrentIndex(1)
+    app.processEvents()
+    assert remembered and remembered[-1][0] == "height", "changing the view is remembered: %r" % remembered
+    fresh.resize(900, 700); app.processEvents()
+    fresh.close(); app.processEvents()
+    assert remembered[-1][0] == "height" and remembered[-1][1].endswith("900,700"), "closing remembers the size: %r" % remembered
+    again = StageWindow(nl.getStageTiles, win, view=remembered[-1][0], geometry=remembered[-1][1])
+    assert again.view.viewMode == "height" and again.width() == 900 and again.height() == 700, "reopens the same way"
+    again.close()
+    nl._rememberStageWindow("height", "10,10,800,600")
+    assert nl.stageView == "height" and "stageView=height" in open(nl.globalPrefsFile, encoding="utf-8").read(), "kept in the prefs file"
+    nl._rememberStageWindow("plan", "")
+
+    # Editors: fades and a tall default size
+    from neewerlux_anim_editor import AnimationEditorDialog
+    ed = AnimationEditorDialog(win, {"name": "Fade Test", "loop": True, "fade_in_ms": 300, "keyframes": []}, "Fade Test")
+    assert ed.height() >= 680, "the animation editor opens tall: %d" % ed.height()
+    assert ed._fadeInSpin.value() == 300 and ed._fadeOutSpin.value() == -1
+    ed._fadeOutSpin.setValue(700)
+    r = ed.getResult()
+    assert r.get("fade_in_ms") == 300 and r.get("handback_fade_ms") == 700, r
+    ed._fadeInSpin.setValue(-1)
+    assert "fade_in_ms" not in ed.getResult(), "Global removes the field"
+    ed.close()
+    from neewerlux_timeline import SequenceSettingsDialog
+    sd = SequenceSettingsDialog({"name": "x", "fade_in_ms": 250}, 8, win)
+    assert sd.fadeIn.value() == 250 and sd.fadeOut.value() == -1
+    sd.fadeOut.setValue(900)
+    seqOut = {"name": "x", "fade_in_ms": 250}
+    sd.apply(seqOut)
+    assert seqOut.get("fade_in_ms") == 250 and seqOut.get("handback_fade_ms") == 900, seqOut
+    assert win.fadeInSpin.value() == nl.fadeInMs and win.handbackFadeSpin.value() == nl.handbackFadeMs
+
     # Light Prefs round trip through the sidecar file
     win.lightTable.selectRow(0)
     win.ColorModeTabWidget.setCurrentIndex(win.TAB_LIGHTPREFS)

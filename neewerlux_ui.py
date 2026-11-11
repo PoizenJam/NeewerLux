@@ -1149,7 +1149,12 @@ class Ui_MainWindow(object):
         self.handbackFadeSpin.setSuffix(" ms"); self.handbackFadeSpin.setSpecialValueText("Off (cut)"); self.handbackFadeSpin.setValue(500)
         self.handbackFadeSpin.setToolTip("When an effect ends and the sequence takes back over, a sequence ends and reverts,\n"
                                          "or an animation stops: fade to what comes next instead of cutting.\n"
-                                         "Starts and manual commands stay instant. A sequence can set its own.")
+                                         "Each animation and sequence can set its own; the slider tabs stay instant.")
+        self.fadeInSpin = QSpinBox(); self.fadeInSpin.setRange(0, 5000); self.fadeInSpin.setSingleStep(100)
+        self.fadeInSpin.setSuffix(" ms"); self.fadeInSpin.setSpecialValueText("Off (cut)"); self.fadeInSpin.setValue(0)
+        self.fadeInSpin.setToolTip("When a preset is recalled, or an animation or sequence takes lights over (including\n"
+                                   "one animation replacing another): fade into it instead of cutting.\n"
+                                   "Each preset, animation and sequence can set its own; the slider tabs stay instant.")
 
         general = _gpPage("General")
         general.addRow(QLabel("<strong>Startup and connection</strong>"))
@@ -1183,7 +1188,8 @@ class Ui_MainWindow(object):
         shows.addRow("Default max brightness:", self.envMaxBriSpin)
         shows.addRow("Default min brightness:", self.envMinBriSpin)
         shows.addRow(QLabel("<br><strong>Playback</strong>"))
-        shows.addRow("Hand-back fade:", self.handbackFadeSpin)
+        shows.addRow("Fade in (presets, animations, sequences):", self.fadeInSpin)
+        shows.addRow("Fade back (when they let go):", self.handbackFadeSpin)
         shows.addRow("Sequence frame rate:", self.seqFrameRateSpin)
         shows.addRow("Looping effect time limit:", self.effectMaxSecondsSpin)
         shows.addRow(QLabel("<br><strong>Your rig</strong>"))

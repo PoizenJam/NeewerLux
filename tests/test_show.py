@@ -312,6 +312,73 @@ def t_handbackFade(rig):
         nl.handbackFadeMs = 0
 
 
+def t_fadeInEverywhere(rig):
+    """1.3.3: fades into presets, animations (including one replacing another) and sequences,
+    from the global Fade in or each item's own; the item overrides the global."""
+    nl = rig.nl
+    A = "/NeewerLux/animate"
+    try:
+        rig.get("light=*&mode=CCT&temp=56&bri=20", 0.4)
+        # a preset with its own fade, global off
+        nl.fadeInMs = 0
+        idx = 1  # preset 2
+        rig.post("/NeewerLux/presets", {"action": "save", "index": idx + 1, "fade_ms": 600,
+                                        "entries": [{"light": "*", "mode": "CCT", "temp": 3200, "bri": 20}]})
+        check(nl.presetFades.get(idx) == 600, "preset fade saved: %r" % nl.presetFades)
+        t0 = time.monotonic()
+        rig.get("use_preset=2", 0.9)
+        w = [(t - t0, list(d)) for t, d in writesFor(rig, FILL, t0) if d[1] == 135]
+        temps = [d[4] for _, d in w]
+        check(len(temps) >= 6 and temps == sorted(temps, reverse=True) and temps[-1] == 32, "preset fades from 5600K to 3200K: " + str(temps))
+        check(0.45 <= w[-1][0] <= 0.75, "over about 0.6 s: %.0f ms" % (w[-1][0] * 1000))
+        # a preset without its own fade follows the global
+        rig.post("/NeewerLux/presets", {"action": "save", "index": idx + 1, "fade_ms": None,
+                                        "entries": [{"light": "*", "mode": "CCT", "temp": 5600, "bri": 20}]})
+        check(idx not in nl.presetFades, "fade cleared")
+        t1 = time.monotonic()
+        rig.get("use_preset=2", 0.3)
+        w = [d for t, d in writesFor(rig, FILL, t1) if d[1] == 135]
+        check(len(w) <= 2 and w[-1][4] == 56, "global 0: the preset cuts: " + str(w))
+        # an animation's own fade in from its file, overridden by the URL
+        anim = {"name": "Harness Fade", "loop": True, "fade_in_ms": 500, "keyframes": [
+            {"hold_ms": 1000, "fade_ms": 0, "lights": {"*": {"mode": "HSI", "hue": 120, "sat": 100, "bri": 60}}}]}
+        rig.post(A, {"action": "save", "animation": anim, "overwrite": True})
+        t2 = time.monotonic()
+        rig.get("animate=Harness%20Fade|1|10|100|true|||effect", 0.8)
+        w = [list(d) for t, d in writesFor(rig, FILL, t2) if d[1] == 134]
+        sats = [d[5] for d in w]
+        check(len(sats) >= 5 and sats[0] < 50 and sats[-1] == 100, "the animation fades in (saturation rises from white): " + str(sats))
+        rig.get("stop_layer=effect", 0.3)
+        rig.get("light=*&mode=CCT&temp=56&bri=20", 0.3)
+        t3 = time.monotonic()
+        rig.get("animate=Harness%20Fade|1|10|100|true|||effect|||0", 0.3)
+        w = [list(d) for t, d in writesFor(rig, FILL, t3) if d[1] == 134]
+        check(w and w[0][5] == 100, "the URL's fade in 0 overrides the file: " + str(w[:3]))
+        # one animation replacing another blends with the global fade in
+        nl.fadeInMs = 400
+        anim2 = dict(anim, name="Harness Fade 2", keyframes=[{"hold_ms": 1000, "fade_ms": 0, "lights": {"*": {"mode": "HSI", "hue": 240, "sat": 100, "bri": 60}}}])
+        anim2.pop("fade_in_ms")
+        rig.post(A, {"action": "save", "animation": anim2, "overwrite": True})
+        t4 = time.monotonic()
+        rig.get("animate=Harness%20Fade%202|1|10|100|true|||effect|replace", 0.6)
+        hues = [hueOf(d) for t, d in writesFor(rig, FILL, t4) if d[1] == 134]
+        check(len(hues) >= 4 and hues[-1] == 240 and any(120 < h < 240 for h in hues), "replacing blends hue 120 to 240: " + str(hues))
+        rig.get("stop_layer=effect", 0.6)
+        # a sequence's own fade in
+        nl.fadeInMs = 0
+        rig.get("light=*&mode=CCT&temp=56&bri=20", 0.6)
+        seq = stepSequence("fin", [200], 800, fade_in_ms=400)
+        t5 = time.monotonic()
+        rig.post("/NeewerLux/sequence", {"action": "play", "sequence": seq}, 0.6)
+        w = [list(d) for t, d in writesFor(rig, FILL, t5) if d[1] == 134]
+        check(len(w) >= 4 and w[0][5] < 60 and w[-1][5] == 100, "the sequence fades in: " + str([d[5] for d in w]))
+    finally:
+        nl.fadeInMs = 0
+        nl.presetFades.pop(1, None)
+        for n in ("Harness Fade", "Harness Fade 2"):
+            rig.post(A, {"action": "delete", "name": n})
+
+
 def t_blendCommands(rig):
     """Pure checks of the fade maths."""
     b = rig.nl.show.blendCommands
@@ -574,7 +641,7 @@ def t_guidSidecar(rig):
 
 def t_statusShape(rig):
     st = rig.getJSON("status_json")
-    check(set(st) == {"apiVersion", "layers", "sequence", "lights", "flashGuard", "stage", "handbackFadeMs"}, "status keys: " + str(sorted(st)))
+    check(set(st) == {"apiVersion", "layers", "sequence", "lights", "flashGuard", "stage", "handbackFadeMs", "fadeInMs"}, "status keys: " + str(sorted(st)))
     check([l["role"] for l in st["lights"]] == ["key", "fill", "rim", "ambient"], "roles in status")
     check(all(l["layer"] == "base" for l in st["lights"]), "idle lights are on base")
 
@@ -1180,7 +1247,7 @@ TESTS = [t_maxBrightnessHTTP, t_maxBrightnessAnimationAndSequence, t_minBrightne
          t_batchDuringSequenceBecomesRevertTarget, t_listJsonStructured,
          t_presetEditAPI, t_animationEditAPI, t_sequenceEditAPI, t_commandsDontWaitForStatusPoll,
          t_flashGuardLimitsOutput, t_flashGuardRedFlashes, t_shippedContentUnderFlashLimit,
-         t_positionTargetsAndSweep, t_animationModeValidation, t_exactAnimationTiming, t_handbackFade, t_blendCommands,
+         t_positionTargetsAndSweep, t_animationModeValidation, t_exactAnimationTiming, t_handbackFade, t_blendCommands, t_fadeInEverywhere,
          t_addSimulatedRig]
 
 

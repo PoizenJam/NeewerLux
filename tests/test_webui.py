@@ -296,9 +296,10 @@ def main():
         js(page, """const rows = document.querySelectorAll('#peRows tr'); const last = rows[rows.length - 1];
                     last.querySelector('.pe-hue').value = '275'; last.querySelector('.pe-bri').value = '35';
                     document.querySelectorAll('#peRows tr')[0].querySelector('.pe-target').value = '1';
-                    document.getElementById('peName').value = 'Web Preset'; peSave();""")
+                    document.getElementById('peName').value = 'Web Preset'; document.getElementById('peFade').value = '450'; peSave();""")
         spin(700)
         got = rig.post(P, {"action": "get", "index": 2})["preset"]
+        check(got.get("fade_ms") == 450 and nl.presetFades.get(1) == 450, "preset fade from the web editor: " + str(got.get("fade_ms")))
         check(got["name"] == "Web Preset" and {"target": "2", "mode": "HSI", "bri": 35, "hue": 275, "sat": 100} in got["entries"], "saved from the web editor: " + str(got))
         check(not js(page, "document.getElementById('presetModal').classList.contains('open')"), "editor closes after saving")
         waitFor(page, "[...document.querySelectorAll('#presetGrid .preset-btn')].some(b => b.textContent.includes('Web Preset'))", "preset button shows the name")
@@ -306,18 +307,21 @@ def main():
         js(page, "presetAction('duplicate', 2, 'dup')")
         spin(500)
         check(len(nl.customLightPresets) == count + 1 and nl.presetNames.get(2) == "Web Preset (copy)", "duplicate from the web")
+        check(nl.presetFades.get(2) == 450, "the copy keeps the fade")
         js(page, "presetAction('move', 3, 'moved', {direction: 'left'})")
         spin(500)
         check(nl.presetNames.get(1) == "Web Preset (copy)", "move from the web")
         js(page, "presetAction('delete', 2, 'deleted')")
         spin(500)
         check(len(nl.customLightPresets) == count, "delete from the web")
+        nl.presetFades.clear()
 
     def animationEditor():
         A = "/NeewerLux/animate"
         js(page, "animNew()")
         waitFor(page, "document.getElementById('animModal').classList.contains('open')", "animation editor")
         js(page, """document.getElementById('aeName').value = 'Web Built';
+                    document.getElementById('aeFadeIn').value = '250';
                     aeAddFrame();
                     document.getElementById('aeHold').value = '750'; aeFrameField();
                     aeAddLight();""")
@@ -329,6 +333,7 @@ def main():
         spin(700)
         anim = nl.savedAnimations.get("Web Built")
         check(anim is not None and len(anim["keyframes"]) == 2, "saved from the web editor: " + str(anim))
+        check(anim.get("fade_in_ms") == 250 and "handback_fade_ms" not in anim, "fades from the web editor: " + str(anim))
         kf = anim["keyframes"][1]
         check(kf["hold_ms"] == 750 and "*" not in kf["lights"] and kf["lights"]["1"] == {"mode": "CCT", "temp": 41, "bri": 60}, "frame 2: " + str(kf))
         # edit through the JSON tab, rename
@@ -405,8 +410,9 @@ def main():
         js(page, "tlDelete()")
         check(js(page, "tl.seq.cues.length") == n0 + 1, "delete")
         # settings, save under a new name (renames)
-        js(page, "tlSettingsToggle(); document.getElementById('tlEnd').value = 'hold'; tlSettingsApply();")
+        js(page, "tlSettingsToggle(); document.getElementById('tlEnd').value = 'hold'; document.getElementById('tlFadeOut').value = '800'; tlSettingsApply();")
         check(js(page, "tl.seq.end") == "hold", "settings")
+        check(js(page, "tl.seq.handback_fade_ms") == 800 and js(page, "tl.seq.fade_in_ms === undefined"), "fade settings")
         js(page, "document.getElementById('tlName').value = 'Web Timeline'; tlNameEdited(); tlSave(false)")
         spin(800)
         check("Web Timeline" in nl.savedSequences and EXAMPLE not in nl.savedSequences, "save renames: " + str(list(nl.savedSequences)))

@@ -23,6 +23,8 @@ LAYER_EFFECT = 2
 LAYER_OVERRIDE = 3
 LAYER_BY_NAME = {"base": LAYER_BASE, "show": LAYER_SHOW, "effect": LAYER_EFFECT, "override": LAYER_OVERRIDE}
 LAYER_NAMES = {v: k for k, v in LAYER_BY_NAME.items()}
+LAYER_FADE = 4  # a light fading to a newly recalled preset; reported as base, not a layer you can play on
+LAYER_NAMES[LAYER_FADE] = "base"
 
 SEQUENCE_FORMAT = 1
 DEFAULT_SEQUENCE_FPS = 20
@@ -533,8 +535,10 @@ class AnimationPlayer:
     kind = "animation"
 
     def __init__(self, name, timeline, resolver, target=None, revert=None, maxMs=None,
-                 parallel=True, legacy=False):
+                 parallel=True, legacy=False, fadeInMs=None, fadeOutMs=None):
         self.name = name
+        self.fadeInMs = fadeInMs      # fade when it takes a light; None = the global setting
+        self.fadeOutMs = fadeOutMs    # fade when it lets go of one; None = the global setting
         self.timeline = timeline
         self.resolver = resolver
         self.target = target          # target string, or None for the animation's own keys
@@ -636,7 +640,7 @@ class Cue:
 
 
 class Sequence:
-    __slots__ = ("name", "duration", "fps", "end", "pausemode", "oninterrupt", "handbackMs", "cues", "raw")
+    __slots__ = ("name", "duration", "fps", "end", "pausemode", "oninterrupt", "handbackMs", "fadeInMs", "cues", "raw")
 
 
 class SequencePlayer:
@@ -646,6 +650,8 @@ class SequencePlayer:
 
     def __init__(self, seq, resolver, clipLookup, baseCmd):
         self.seq = seq
+        self.fadeInMs = seq.fadeInMs     # from the file; the play request can override both
+        self.fadeOutMs = seq.handbackMs
         self.name = seq.name
         self.resolver = resolver
         self.clipLookup = clipLookup
@@ -847,6 +853,9 @@ def parseSequence(data, clipExists, defaultFps=DEFAULT_SEQUENCE_FPS, resolveTarg
     # how long the lights take to fade back when this sequence lets go of them (None = the global setting)
     seq.handbackMs = None if data.get("handback_fade_ms") is None else \
         _num(data.get("handback_fade_ms"), "handback_fade_ms", 0, 10000, errors, "sequence")
+    # how long the lights take to fade in when this sequence takes them (None = the global setting)
+    seq.fadeInMs = None if data.get("fade_in_ms") is None else \
+        _num(data.get("fade_in_ms"), "fade_in_ms", 0, 10000, errors, "sequence")
 
     rawCues = data.get("cues")
     if not isinstance(rawCues, list) or not rawCues:
@@ -987,7 +996,7 @@ class ShowCompositor:
         self.released = {}   # idx -> base bytes just restored, until a base write replaces them
         self.fades = {}      # idx -> (start ms, duration ms, command faded from, layer handed to; 0 = base)
         self._absorbUntil = 0.0  # a sequence ending on a preset: its recall becomes the fade's target, not a cut
-        self._endedFade = {} # layer -> hand-back ms asked for by the player that ended this tick
+        self.ownerPlayer = {} # idx -> the player driving it (to tell a replacement from the same player)
         self._deferred = []
         self._lightCount = None
         self._thread = None
@@ -1164,6 +1173,7 @@ class ShowCompositor:
                 # fading back to its base state and a manual command arrives: that's instant
                 del self.fades[idx]
                 self.owner.pop(idx, None)
+                self.ownerPlayer.pop(idx, None)
                 self.lastCmd.pop(idx, None)
                 self.lastSent.pop(idx, None)
                 self.baseStates.pop(idx, None)
@@ -1182,6 +1192,37 @@ class ShowCompositor:
 
     def hasPending(self):
         return bool(self.mailbox)
+
+    def fadeBase(self, indexes, durMs, now=None):
+        """A preset was just recalled (each light's stored value is already the preset's):
+        fade the lights no layer is driving from what they show to it, and make it the revert
+        target for those a layer is driving. Returns the indexes handled; the caller sends
+        the rest the usual way."""
+        def run(nowMs):
+            done = []
+            for idx in indexes:
+                to = self.hooks.currentBytes(idx)
+                if not isinstance(to, (list, tuple)) or len(to) < 4:
+                    continue
+                to = list(OFF_BYTES) if to[0] == 0 else list(to)
+                fade = self.fades.get(idx)
+                driven = self.owner.get(idx, 0) in (LAYER_SHOW, LAYER_EFFECT, LAYER_OVERRIDE) and not (fade and fade[3] == 0)
+                if driven:
+                    self.baseStates[idx] = to
+                    done.append(idx)
+                    continue
+                fromCmd = self.lastCmd.get(idx) if fade else None
+                fromCmd = fromCmd or self.hooks.shownCommand(idx)
+                if durMs <= 0 or fromCmd is None or bytesToCommand(to) is None:
+                    continue
+                self.baseStates[idx] = to
+                self.owner[idx] = LAYER_FADE
+                self.ownerPlayer.pop(idx, None)
+                self.lastCmd[idx] = fromCmd
+                self.fades[idx] = (nowMs, float(durMs), fromCmd, 0)
+                done.append(idx)
+            return done
+        return self._command(run, now)
 
     def anyActive(self):
         with self.lock:
@@ -1235,9 +1276,6 @@ class ShowCompositor:
                 b = self.hooks.encode(idx, cmd)
                 if b is not None:
                     self.baseStates[idx] = list(b)
-        own = getattr(getattr(player, "seq", None), "handbackMs", None)
-        if own is not None:
-            self._endedFade[layer] = own
         self._status("end", layer, player, reason=reason)
         if layer == LAYER_EFFECT and self.effectQueue and self.layers[LAYER_EFFECT] is None:
             nxt = self.effectQueue.pop(0)
@@ -1284,7 +1322,8 @@ class ShowCompositor:
         for out, _ in frames.values():
             lights.update(out)
         queued = False
-        handback = self.hooks.handbackMs() if hasattr(self.hooks, "handbackMs") else 0
+        globalIn = self.hooks.fadeInMs() if hasattr(self.hooks, "fadeInMs") else 0
+        globalBack = self.hooks.handbackMs() if hasattr(self.hooks, "handbackMs") else 0
         stepMs = 1000.0 / HANDBACK_FPS
         for idx in lights:
             win = 0
@@ -1294,17 +1333,34 @@ class ShowCompositor:
                         win = layer
                         break
             prev = self.owner.get(idx, 0)
+            player = self.layers[win] if win > 0 else None
+            oldPlayer = self.ownerPlayer.get(idx)
             fade = self.fades.get(idx)
-            # A layer letting go of a light (to a lower layer, or back to its base state)
-            # starts a hand-back fade from what the light was showing. Taking over is instant.
-            if prev > 0 and win < prev and fade is None:
-                dur = self._endedFade.get(prev, handback)
+            if win > 0 and prev == 0 and idx not in self.baseStates:
+                # A revert queued moments ago may not have reached the light's stored value yet
+                cur = self.released.pop(idx, None) or self.hooks.currentBytes(idx)
+                if isinstance(cur, (list, tuple)) and len(cur) > 3:
+                    self.baseStates[idx] = list(cur)
+            # Who drives the light now, against who did (a fade in progress counts as heading for its target)
+            was = fade[3] if fade is not None else (0 if prev == LAYER_FADE else prev)
+            changed = win != was or (win > 0 and player is not oldPlayer)
+            if changed:
+                taking = win > 0 and (win > was or player is not oldPlayer)
+                if taking:   # a preset, animation or sequence taking over: its fade in
+                    dur = player.fadeInMs if getattr(player, "fadeInMs", None) is not None else globalIn
+                else:        # a layer letting go: its hand-back fade
+                    dur = oldPlayer.fadeOutMs if getattr(oldPlayer, "fadeOutMs", None) is not None else globalBack
                 fromCmd = self.lastCmd.get(idx)
+                if fromCmd is None and prev == 0:
+                    fromCmd = self.hooks.shownCommand(idx) if hasattr(self.hooks, "shownCommand") else None
+                self.fades.pop(idx, None)
+                fade = None
                 if dur > 0 and fromCmd is not None and not (win == 0 and self.baseStates.get(idx) is None):
                     fade = self.fades[idx] = (nowMs, float(dur), fromCmd, win)
-            elif fade is not None and win > fade[3]:
-                del self.fades[idx]  # a layer took the light again: starts are instant
-                fade = None
+                if win > 0:
+                    self.ownerPlayer[idx] = player
+                else:
+                    self.ownerPlayer.pop(idx, None)
             if fade is not None:
                 start, dur, fromCmd, _ = fade
                 k = int((nowMs - start) // stepMs) + 1
@@ -1313,10 +1369,11 @@ class ShowCompositor:
                 if t >= 1.0 or target is None:
                     del self.fades[idx]
                     fade = None
+                    if win > 0:
+                        self.lastCmd.pop(idx, None)  # make sure the layer's own frame goes out next
                 else:
                     cmd = blendCommands(fromCmd, target, t)
-                    if win > 0:
-                        self.owner[idx] = win
+                    self.owner[idx] = win if win > 0 else (prev or LAYER_FADE)
                     if cmd != self.lastCmd.get(idx):
                         self.lastCmd[idx] = cmd
                         b = self.hooks.encode(idx, cmd)
@@ -1324,14 +1381,10 @@ class ShowCompositor:
                             self.mailbox[idx] = (list(b), True)
                             self.lastSent[idx] = list(b)
                             queued = True
-                    continue  # while fading back to base the light stays owned, so base writes become the target
+                    continue  # while fading to base the light stays owned, so base writes become the target
             if win > 0:
-                if prev == 0 and idx not in self.baseStates:
-                    # A revert queued moments ago may not have reached the light's stored value yet
-                    cur = self.released.pop(idx, None) or self.hooks.currentBytes(idx)
-                    if isinstance(cur, (list, tuple)) and len(cur) > 3:
-                        self.baseStates[idx] = list(cur)
                 self.owner[idx] = win
+                self.ownerPlayer[idx] = player
                 out, parallel = frames[win]
                 cmd = out[idx]
                 if cmd != self.lastCmd.get(idx) or prev != win:
@@ -1343,6 +1396,7 @@ class ShowCompositor:
                         queued = True
             elif prev > 0:
                 del self.owner[idx]
+                self.ownerPlayer.pop(idx, None)
                 self.lastCmd.pop(idx, None)
                 sent = self.lastSent.pop(idx, None)
                 b = self.baseStates.pop(idx, None)
@@ -1353,6 +1407,5 @@ class ShowCompositor:
                     queued = True
                 elif b is None:
                     self.mailbox.pop(idx, None)
-        self._endedFade = {}
         if queued:
             self._deferred.append(self.hooks.wake)

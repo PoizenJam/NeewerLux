@@ -233,6 +233,29 @@ factoryDefaultPresets = [
 
 numOfPresets = 8 # how many presets are active (can grow beyond 8)
 presetNames = {} # dict of {preset_index: "custom name"} for user-assigned names
+presetFades = {} # {preset_index: ms}: how long recalling that preset fades in (unset = the global Fade in)
+
+
+def _presetFadesSwap(a, b):
+    fa, fb = presetFades.pop(a, None), presetFades.pop(b, None)
+    if fa is not None:
+        presetFades[b] = fa
+    if fb is not None:
+        presetFades[a] = fb
+
+
+def _presetFadesDelete(idx):
+    shifted = {(k if k < idx else k - 1): v for k, v in presetFades.items() if k != idx}
+    presetFades.clear()
+    presetFades.update(shifted)
+
+
+def _presetFadesDuplicate(idx):
+    shifted = {(k if k <= idx else k + 1): v for k, v in presetFades.items()}
+    if idx in presetFades:
+        shifted[idx + 1] = presetFades[idx]
+    presetFades.clear()
+    presetFades.update(shifted)
 
 # ============================================================================
 # CUSTOM ANIMATION SYSTEM
@@ -328,6 +351,9 @@ effectMaxSeconds = 30 # cap for looping effect-layer animations that have no loo
 cameraPosition = "front"  # where the main camera is, from the streamer's seat (drawn on the Stage plan)
 eyelineFlash = "same"     # flashes on eye-line lights: "same", "gentler" (1 a second) or "calm" (one change per 2 s)
 handbackFadeMs = 500      # fade when a layer hands a light back (effect ends, sequence reverts, animation stops); 0 = cut
+stageView = "plan"        # the desktop Stage window's view, and its size and place ("x,y,w,h"), remembered
+stageGeometry = ""
+fadeInMs = 0              # fade when a preset, animation or sequence takes lights over; 0 = cut (each can set its own)
 simulatedLights = 0 # simulated lights to add at startup (rig preset 0-4); --simulate overrides for one run
 simulatedCCTOnly = False # also add a simulated CCT-only light, to exercise the CCT-only fallback
 simulateFaults = False # --simulate-faults: simulated lights drop some writes and disconnect now and then
@@ -633,6 +659,7 @@ try: # try to load the GUI
                 presetNames[a] = nameB
             else:
                 presetNames.pop(a, None)
+            _presetFadesSwap(a, b)
             self.createPresetButtons()
             printDebugString("Swapped presets " + str(a + 1) + " and " + str(b + 1))
 
@@ -658,6 +685,7 @@ try: # try to load the GUI
                 # k == idx is deleted
             presetNames.clear()
             presetNames.update(newNames)
+            _presetFadesDelete(idx)
             numOfPresets -= 1
             self.createPresetButtons()
             printDebugString("Deleted preset " + str(idx + 1) + ", " + str(numOfPresets) + " remaining")
@@ -683,6 +711,7 @@ try: # try to load the GUI
                 newNames[newIdx] = copyName[:20]
             presetNames.clear()
             presetNames.update(newNames)
+            _presetFadesDuplicate(idx)
             numOfPresets += 1
             self.createPresetButtons()
             self._savePresetsQuick()
@@ -757,16 +786,22 @@ try: # try to load the GUI
             # === DIALOG ===
             dlg = QDialog(self)
             dlg.setWindowTitle("Edit Preset " + str(idx + 1))
-            dlg.setMinimumSize(600, 480)
-            dlg.resize(680, 560)
+            dlg.setMinimumSize(640, 640)
+            dlg.resize(*editorDefaultSize(dlg, 760))
             mainLay = QVBoxLayout(dlg)
 
-            # Name
+            # Name and fade in
             nameRow = QHBoxLayout()
             nameRow.addWidget(QLabel("Name:"))
             nameField = QLineEdit(presetNames.get(idx, ""))
             nameField.setPlaceholderText("Preset name (optional)")
             nameRow.addWidget(nameField, 1)
+            nameRow.addWidget(QLabel("Fade in:"))
+            fadeSpin = QSpinBox(); fadeSpin.setRange(-1, 10000); fadeSpin.setSingleStep(100); fadeSpin.setSuffix(" ms")
+            fadeSpin.setSpecialValueText("Global (" + str(fadeInMs) + " ms)")
+            fadeSpin.setValue(presetFades.get(idx, -1))
+            fadeSpin.setToolTip("How long recalling this preset fades in. Global = the Fade in setting in Global Preferences.")
+            nameRow.addWidget(fadeSpin)
             mainLay.addLayout(nameRow)
 
             # === TABLE ===
@@ -1133,7 +1168,7 @@ try: # try to load the GUI
                     with open(geometryPrefsFile, "r", encoding="utf-8") as f:
                         geo = json.load(f)
                     if "presetEditorW" in geo and "presetEditorH" in geo:
-                        dlg.resize(geo["presetEditorW"], geo["presetEditorH"])
+                        dlg.resize(geo["presetEditorW"], max(geo["presetEditorH"], dlg.minimumHeight()))
             except Exception:
                 pass
 
@@ -1168,6 +1203,10 @@ try: # try to load the GUI
                     presetNames[idx] = newName
                 else:
                     presetNames.pop(idx, None)
+                if fadeSpin.value() < 0:
+                    presetFades.pop(idx, None)
+                else:
+                    presetFades[idx] = fadeSpin.value()
 
                 self.refreshPresetButtonDisplay(idx)
                 self._savePresetsQuick()
@@ -1337,6 +1376,7 @@ try: # try to load the GUI
                 self.cameraPositionCombo.setCurrentIndex(CAMERA_POSITIONS.index(cameraPosition))
                 self.eyelineFlashCombo.setCurrentIndex(EYELINE_FLASH_CHOICES.index(eyelineFlash))
                 self.handbackFadeSpin.setValue(handbackFadeMs)
+                self.fadeInSpin.setValue(fadeInMs)
                 self.globalCCTMinSpin.setValue(globalCCTMin)
                 self.globalCCTMaxSpin.setValue(globalCCTMax)
                 self.simulatedLightsCombo.setCurrentIndex(simulatedLights)
@@ -1517,7 +1557,8 @@ try: # try to load the GUI
         def openStage(self):
             from neewerlux_stage import StageWindow
             if self._stageWindow is None:
-                self._stageWindow = StageWindow(getStageTiles, self)
+                self._stageWindow = StageWindow(getStageTiles, self, view=stageView, geometry=stageGeometry,
+                                                remember=_rememberStageWindow)
             self._stageWindow.show()
             self._stageWindow.raise_()
             self._stageWindow.activateWindow()
@@ -1735,7 +1776,7 @@ try: # try to load the GUI
                     with open(geometryPrefsFile, "r", encoding="utf-8") as f:
                         geo = json.load(f)
                     if "animEditorW" in geo and "animEditorH" in geo:
-                        dlg.resize(geo["animEditorW"], geo["animEditorH"])
+                        dlg.resize(geo["animEditorW"], max(geo["animEditorH"], dlg.minimumHeight()))
             except Exception:
                 pass
 
@@ -1791,6 +1832,12 @@ try: # try to load the GUI
             form.addRow("Name:", nameField)
             descField = QLE(anim.get("description", ""))
             form.addRow("Description:", descField)
+            jsonFadeIn = QSpinBox(); jsonFadeIn.setRange(-1, 10000); jsonFadeIn.setSingleStep(100); jsonFadeIn.setSuffix(" ms")
+            jsonFadeIn.setSpecialValueText("Global"); jsonFadeIn.setValue(int(anim.get("fade_in_ms", -1)))
+            jsonFadeOut = QSpinBox(); jsonFadeOut.setRange(-1, 10000); jsonFadeOut.setSingleStep(100); jsonFadeOut.setSuffix(" ms")
+            jsonFadeOut.setSpecialValueText("Global"); jsonFadeOut.setValue(int(anim.get("handback_fade_ms", -1)))
+            form.addRow("Fade in:", jsonFadeIn)
+            form.addRow("Fade back:", jsonFadeOut)
             loopCheck = QCK("Loop")
             loopCheck.setChecked(anim.get("loop", True))
             form.addRow(loopCheck)
@@ -1834,6 +1881,11 @@ try: # try to load the GUI
 
                 anim["name"] = newName
                 anim["description"] = descField.text().strip()
+                for key, spin in (("fade_in_ms", jsonFadeIn), ("handback_fade_ms", jsonFadeOut)):
+                    if spin.value() < 0:
+                        anim.pop(key, None)
+                    else:
+                        anim[key] = spin.value()
                 anim["loop"] = loopCheck.isChecked()
                 anim["keyframes"] = newKeyframes
 
@@ -2579,6 +2631,7 @@ try: # try to load the GUI
                 self.cameraPositionCombo.setCurrentIndex(CAMERA_POSITIONS.index(cameraPosition))
                 self.eyelineFlashCombo.setCurrentIndex(EYELINE_FLASH_CHOICES.index(eyelineFlash))
                 self.handbackFadeSpin.setValue(handbackFadeMs)
+                self.fadeInSpin.setValue(fadeInMs)
                 self.simulatedLightsCombo.setCurrentIndex(simulatedLights)
                 self.simulatedCCTOnlyCheck.setChecked(simulatedCCTOnly)
                 self.maxNumOfAttempts_field.setText(str(maxNumOfAttempts))
@@ -2636,6 +2689,7 @@ try: # try to load the GUI
                 self.cameraPositionCombo.setCurrentIndex(CAMERA_POSITIONS.index("front"))
                 self.eyelineFlashCombo.setCurrentIndex(0)
                 self.handbackFadeSpin.setValue(500)
+                self.fadeInSpin.setValue(0)
                 self.simulatedLightsCombo.setCurrentIndex(0)
                 self.simulatedCCTOnlyCheck.setChecked(False)
                 self.maxNumOfAttempts_field.setText("6")
@@ -2668,7 +2722,7 @@ try: # try to load the GUI
 
         def saveGlobalPrefs(self):
             # change these global values to the new values in Prefs
-            global customKeys, autoConnectToLights, printDebug, rememberLightsOnExit, rememberPresetsOnExit, autoReconnectOnDisconnect, maxNumOfAttempts, acceptable_HTTP_IPs, whiteListedMACs, hideConsoleOnLaunch, minimizeToTrayOnClose, httpAutoStart, httpPort, cctFallbackMode, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, globalCCTMin, globalCCTMax, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, cctFallbackMode, envMaxBri, envMinBri, seqFrameRate, effectMaxSeconds, simulatedLights, simulatedCCTOnly, flashGuardEnabled, cameraPosition, eyelineFlash, handbackFadeMs
+            global customKeys, autoConnectToLights, printDebug, rememberLightsOnExit, rememberPresetsOnExit, autoReconnectOnDisconnect, maxNumOfAttempts, acceptable_HTTP_IPs, whiteListedMACs, hideConsoleOnLaunch, minimizeToTrayOnClose, httpAutoStart, httpPort, cctFallbackMode, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, globalCCTMin, globalCCTMax, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, cctFallbackMode, envMaxBri, envMinBri, seqFrameRate, effectMaxSeconds, simulatedLights, simulatedCCTOnly, flashGuardEnabled, cameraPosition, eyelineFlash, handbackFadeMs, fadeInMs
 
             finalPrefs = [] # list of final prefs to merge together at the end
 
@@ -2807,6 +2861,13 @@ try: # try to load the GUI
             handbackFadeMs = self.handbackFadeSpin.value()
             if handbackFadeMs != 500:
                 finalPrefs.append("handbackFadeMs=" + str(handbackFadeMs))
+            fadeInMs = self.fadeInSpin.value()
+            if fadeInMs != 0:
+                finalPrefs.append("fadeInMs=" + str(fadeInMs))
+            if stageView != "plan":  # set from the Stage window, kept when saving here
+                finalPrefs.append("stageView=" + stageView)
+            if stageGeometry:
+                finalPrefs.append("stageGeometry=" + stageGeometry)
 
             # Simulated lights take effect at the next start (the light list isn't rebuilt live)
             simulatedLights = self.simulatedLightsCombo.currentIndex()
@@ -3759,10 +3820,12 @@ try: # try to load the GUI
                     if customLightPresets[i] != defaultLightPresets[i]:
                         customPresetsToWrite.append(customPresetToString(i))
 
-                # SAVE ANY CUSTOM PRESET NAMES
+                # SAVE ANY CUSTOM PRESET NAMES AND FADE TIMES
                 for idx, name in presetNames.items():
                     if name:
                         customPresetsToWrite.append("presetName" + str(idx) + "=" + name)
+                for idx, ms in sorted(presetFades.items()):
+                    customPresetsToWrite.append("presetFade" + str(idx) + "=" + str(ms))
 
                 # Determine if there's anything non-default to save
                 hasNonDefaultContent = len(customPresetsToWrite) > 1 or numOfPresets != 8
@@ -4246,8 +4309,16 @@ def recallCustomPreset(numOfPreset, updateGUI=True, loop=None):
             mainWindow.lightTable.setFocus() # set the focus to the light table, in order to show which rows are selected
             mainWindow.selectRows(changedLights) # select those rows affected by the lights above
 
-        # Always use the threadAction approach, this is safe from both GUI and HTTP threads
-        threadAction = "send|" + "|".join(map(str, changedLights))
+        # Fade in (the preset's own time, else the global Fade in): the compositor fades the lights
+        # it can; the rest go the usual way. Always use the threadAction approach for those, it is
+        # safe from both GUI and HTTP threads.
+        fade = presetFades.get(numOfPreset, fadeInMs)
+        if fade > 0:
+            initShowEngine()
+            handled = showEngine.fadeBase(changedLights, fade)
+            changedLights = [i for i in changedLights if i not in handled]
+        if changedLights:
+            threadAction = "send|" + "|".join(map(str, changedLights))
 
 def savePresetsToFile():
     """Save custom presets and their names to customLights.prefs, as the desktop's quick save
@@ -4262,6 +4333,8 @@ def savePresetsToFile():
         for idx, name in presetNames.items():
             if name:
                 customPresetsToWrite.append("presetName" + str(idx) + "=" + name)
+        for idx, ms in sorted(presetFades.items()):
+            customPresetsToWrite.append("presetFade" + str(idx) + "=" + str(ms))
 
         hasNonDefaultContent = len(customPresetsToWrite) > 1 or numOfPresets != 8
         if hasNonDefaultContent:
@@ -4337,7 +4410,7 @@ def presetEditAction(action, body):
 
     def info(i):
         isCustom = customLightPresets[i] != defaultLightPresets[i]
-        return {"index": i + 1, "name": presetNames.get(i, ""), "custom": isCustom,
+        return {"index": i + 1, "name": presetNames.get(i, ""), "custom": isCustom, "fade_ms": presetFades.get(i),
                 "global": bool(customLightPresets[i]) and customLightPresets[i][0][0] == -1,
                 "entries": presetToEntries(i)}
 
@@ -4373,6 +4446,12 @@ def presetEditAction(action, body):
                 presetNames[idx] = name
             else:
                 presetNames.pop(idx, None)
+        if "fade_ms" in body:
+            f = _fadeValue(body.get("fade_ms"))
+            if f is None:
+                presetFades.pop(idx, None)
+            else:
+                presetFades[idx] = f
     elif action == "rename":
         name = str(body.get("name") or "").strip()[:20].replace("=", "")
         if name:
@@ -4390,6 +4469,7 @@ def presetEditAction(action, body):
             presetNames[other] = nameA
         if nameB:
             presetNames[idx] = nameB
+        _presetFadesSwap(idx, other)
         idx = other
     elif action == "duplicate":
         newIdx = idx + 1
@@ -4401,6 +4481,7 @@ def presetEditAction(action, body):
             shifted[newIdx] = ((orig[:14] + " (copy)") if len(orig) > 14 else (orig + " (copy)"))[:20]
         presetNames.clear()
         presetNames.update(shifted)
+        _presetFadesDuplicate(idx)
         numOfPresets += 1
         idx = newIdx
     elif action == "delete":
@@ -4411,6 +4492,7 @@ def presetEditAction(action, body):
         shifted = {(k if k < idx else k - 1): v for k, v in presetNames.items() if k != idx}
         presetNames.clear()
         presetNames.update(shifted)
+        _presetFadesDelete(idx)
         numOfPresets -= 1
         _presetsChanged()
         return {"success": True, "presets": [info(i) for i in range(numOfPresets)]}
@@ -4602,6 +4684,14 @@ def loadCustomPresets(presetsFilePath):
                         customLightPresets.append(getDefaultPreset(len(customLightPresets)))
             except ValueError:
                 pass
+        elif line.startswith("presetFade"):
+            try:
+                keyVal = line.split("=", 1)
+                f = _fadeValue(keyVal[1])
+                if f is not None:
+                    presetFades[int(keyVal[0].replace("presetFade", ""))] = f
+            except (ValueError, IndexError):
+                pass
         elif line.startswith("presetName"):
             # Parse lines like "presetName0=My Cool Preset"
             try:
@@ -4619,7 +4709,7 @@ def loadCustomPresets(presetsFilePath):
     # Filter out non-matching lines (and the numOfPresets/presetName lines)
     filteredPresets = []
     for line in customPresets:
-        if line.startswith("numOfPresets=") or line.startswith("presetName"):
+        if line.startswith("numOfPresets=") or line.startswith("presetName") or line.startswith("presetFade"):
             continue
         if any(x in line for x in acceptable_arguments):
             filteredPresets.append("--" + line)
@@ -6123,6 +6213,11 @@ def processHTMLCommands(paramsList, loop):
                     if parts[9].strip():
                         animTarget = parts[9].strip()
                 except IndexError: pass
+                # Fades (ms): in when it takes the lights, back when it lets go; empty = the animation's or global
+                fadeInArg = _fadeValue(parts[10]) if len(parts) > 10 else None
+                fadeOutArg = _fadeValue(parts[11]) if len(parts) > 11 else None
+            else:
+                fadeInArg = fadeOutArg = None
             if layerName not in ("override", "effect", "show"):
                 printDebugString("HTTP: unknown layer '" + layerName + "', using override")
                 layerName = "override"
@@ -6130,10 +6225,12 @@ def processHTMLCommands(paramsList, loop):
                 # v1.3.0 behaviour: the revert field sets the global "Revert on finish"
                 if revertOverride is not None:
                     animRevertOnFinish = revertOverride
-                startAnimation(animName, loop, speedMult, loopOverride=loopOverride, fps=fps, briScale=briScale, maxLoops=maxLoops, target=animTarget)
+                startAnimation(animName, loop, speedMult, loopOverride=loopOverride, fps=fps, briScale=briScale, maxLoops=maxLoops,
+                               target=animTarget, fadeIn=fadeInArg, fadeOut=fadeOutArg)
             else:
                 startAnimation(animName, loop, speedMult, loopOverride=loopOverride, fps=fps, briScale=briScale, maxLoops=maxLoops,
-                               layer=layerName, revert=revertOverride, queueMode=queueMode, target=animTarget)
+                               layer=layerName, revert=revertOverride, queueMode=queueMode, target=animTarget,
+                               fadeIn=fadeInArg, fadeOut=fadeOutArg)
         else:
             printDebugString("HTTP: no animation name specified")
 
@@ -6758,6 +6855,14 @@ class _ShowHooks:
     def handbackMs(self):
         return handbackFadeMs
 
+    def fadeInMs(self):
+        return fadeInMs
+
+    def shownCommand(self, lightIdx):
+        if 0 <= lightIdx < len(availableLights):
+            return getLightDisplayState(lightIdx)[0]
+        return None
+
     def recallPreset(self, presetNumber):
         if 1 <= presetNumber <= numOfPresets:
             printDebugString("Sequence finished, recalling preset " + str(presetNumber))
@@ -6787,7 +6892,7 @@ def initShowEngine():
 
 
 def startAnimation(animName, loop, speedMultiplier=1.0, loopOverride=None, fps=5, briScale=1.0, maxLoops=0,
-                   layer="override", revert=None, queueMode="queue", target=None):
+                   layer="override", revert=None, queueMode="queue", target=None, fadeIn=None, fadeOut=None):
     """Start an animation by name on a layer.
 
     layer "override" (the default, and what every v1.3.0 caller gets) keeps the old
@@ -6796,6 +6901,8 @@ def startAnimation(animName, loop, speedMultiplier=1.0, loopOverride=None, fps=5
     the first one. "effect" queues (or replaces, queueMode="replace") above sequences;
     "show" plays under effects as a background look. revert applies per request on those
     layers. target ("@rim", "1;2", ...) remaps the animation's numbered lights onto it.
+    fadeIn and fadeOut (ms) override the animation file's fade_in_ms and handback_fade_ms,
+    which override the global fade settings.
     Returns "playing", "queued", or False when the name is unknown or the queue is full.
     """
     initShowEngine()
@@ -6821,9 +6928,10 @@ def startAnimation(animName, loop, speedMultiplier=1.0, loopOverride=None, fps=5
         playerRevert = None
     else:
         playerRevert = True if revert is None else bool(revert)
+    fades = [_fadeValue(fadeIn, animation.get("fade_in_ms")), _fadeValue(fadeOut, animation.get("handback_fade_ms"))]
     player = show.AnimationPlayer(resolvedName, timeline, _showResolve, target=target or None,
                                   revert=playerRevert, maxMs=maxMs, parallel=animParallelWrites,
-                                  legacy=(layerNum == show.LAYER_OVERRIDE))
+                                  legacy=(layerNum == show.LAYER_OVERRIDE), fadeInMs=fades[0], fadeOutMs=fades[1])
 
     printDebugString("Animation '" + resolvedName + "' starting on the " + show.LAYER_NAMES[layerNum] + " layer (" + str(len(timeline.keyframes)) + " keyframes, loop=" + str(timeline.loop) + ", speed=" + str(speedMultiplier) + "x, rate=" + str(fps) + "/s, bri=" + str(int(briScale * 100)) + "%" + (", target=" + target if target else "") + ")")
     result = showEngine.playAnimation(player, layerNum, queueMode)
@@ -6831,6 +6939,29 @@ def startAnimation(animName, loop, speedMultiplier=1.0, loopOverride=None, fps=5
         printDebugString("Effect queue is full (" + str(show.EFFECT_QUEUE_MAX) + "), '" + resolvedName + "' was not queued")
         return False
     return result
+
+
+def editorDefaultSize(widget, width):
+    """A tall default size for an editor window: most of the screen's height (capped at 1000),
+    so the light list and keyframes are visible without resizing."""
+    try:
+        screen = widget.screen() if hasattr(widget, "screen") else None
+        avail = screen.availableGeometry().height() if screen is not None else 900
+    except Exception:
+        avail = 900
+    return width, int(max(widget.minimumHeight(), min(1000, avail * 0.85)))
+
+
+def _fadeValue(*candidates):
+    """The first fade time given (ms, 0 to 10000), or None for "use the global setting"."""
+    for c in candidates:
+        if c is None or c == "":
+            continue
+        try:
+            return max(0, min(10000, int(float(c))))
+        except (TypeError, ValueError):
+            continue
+    return None
 
 
 def stopAnimation(layer="override", clearQueue=False):
@@ -6954,8 +7085,9 @@ def _sequenceBaseCommand(lightIdx):
     return show.bytesToCommand(base)
 
 
-def startSequence(nameOrData, startMs=0):
-    """Play a saved sequence by name, or an inline sequence dict (never saved).
+def startSequence(nameOrData, startMs=0, fadeIn=None, fadeOut=None):
+    """Play a saved sequence by name, or an inline sequence dict (never saved). fadeIn and
+    fadeOut (ms) override the file's fade_in_ms and handback_fade_ms for this play.
     Returns a dict with success, sequence name, errors and warnings."""
     initShowEngine()
     if isinstance(nameOrData, dict):
@@ -6971,6 +7103,10 @@ def startSequence(nameOrData, startMs=0):
         return {"success": False, "errors": errors, "warnings": seqWarnings}
     player = show.SequencePlayer(seq, _showResolve, lambda n: savedAnimations.get(resolveAnimationName(n)),
                                  _sequenceBaseCommand)
+    if _fadeValue(fadeIn) is not None:
+        player.fadeInMs = _fadeValue(fadeIn)
+    if _fadeValue(fadeOut) is not None:
+        player.fadeOutMs = _fadeValue(fadeOut)
     try:
         startMs = max(0, int(startMs or 0))
     except (TypeError, ValueError):
@@ -7301,7 +7437,7 @@ def getShowStatus():
                        "color": show.rgbHex(rgb)})
     return {"apiVersion": API_VERSION, "layers": st["layers"], "sequence": st["sequence"], "lights": lights,
             "flashGuard": {"enabled": flashGuardEnabled, "held": flashGuard.held, "eyeline": eyelineFlash},
-            "stage": {"camera": cameraPosition}, "handbackFadeMs": handbackFadeMs}
+            "stage": {"camera": cameraPosition}, "handbackFadeMs": handbackFadeMs, "fadeInMs": fadeInMs}
 
 
 def _commandJSON(cmd):
@@ -7351,7 +7487,7 @@ WEB_GLOBAL_PREFS = {"envMaxBri": (100, 1, 100), "envMinBri": (0, 0, 100), "seqFr
                     "globalCCTMax": (5600, 2700, 8500), "simulatedLights": (0, 0, len(sim.RIG_LIGHTS)),
                     "simulatedCCTOnly": (False, None, None), "cctFallbackMode": ("convert", "ignore"),
                     "flashGuardEnabled": (True, None, None), "cameraPosition": tuple(["front"] + [c for c in CAMERA_POSITIONS if c != "front"]),
-                    "eyelineFlash": EYELINE_FLASH_CHOICES, "handbackFadeMs": (500, 0, 5000)}
+                    "eyelineFlash": EYELINE_FLASH_CHOICES, "handbackFadeMs": (500, 0, 5000), "fadeInMs": (0, 0, 5000)}
 
 
 def _lightIndexFromWeb(value):
@@ -7385,6 +7521,18 @@ def getWebSettings():
             "depths": LIGHT_DEPTHS, "heights": LIGHT_HEIGHTS, "aims": LIGHT_AIMS, "cameraPositions": CAMERA_POSITIONS,
             "eyelineFlashChoices": list(EYELINE_FLASH_CHOICES),
             "simulatedRigs": ["Off"] + [", ".join(r["role"] for r in sim.RIG_LIGHTS[:n]) for n in range(1, len(sim.RIG_LIGHTS) + 1)]}
+
+
+def _rememberStageWindow(view, geometry):
+    """The Stage window's view and its size and place, kept in NeewerLux.prefs for next time."""
+    global stageView, stageGeometry
+    if (view, geometry) == (stageView, stageGeometry):
+        return
+    stageView, stageGeometry = view, geometry
+    try:
+        _updatePrefsFile({"stageView": None if view == "plan" else view, "stageGeometry": geometry or None})
+    except OSError as e:
+        printDebugString("Couldn't remember the Stage window (" + str(e) + ")")
 
 
 def _updatePrefsFile(updates):
@@ -8305,11 +8453,13 @@ class NLPythonServer(BaseHTTPRequestHandler):
                         if "revert" in body:
                             animRevertOnFinish = bool(body.get("revert", True))
                         started = startAnimation(animName, asyncioEventLoop, speed, loop, fps=int(fps), briScale=briScale,
-                                                 maxLoops=maxLoops, target=body.get("target"))
+                                                 maxLoops=maxLoops, target=body.get("target"),
+                                                 fadeIn=body.get("fade_in_ms"), fadeOut=body.get("handback_fade_ms"))
                     else:
                         started = startAnimation(animName, asyncioEventLoop, speed, loop, fps=int(fps), briScale=briScale,
                                                  maxLoops=maxLoops, layer=layerName, revert=body.get("revert"),
-                                                 queueMode=str(body.get("mode", "queue")).lower(), target=body.get("target"))
+                                                 queueMode=str(body.get("mode", "queue")).lower(), target=body.get("target"),
+                                                 fadeIn=body.get("fade_in_ms"), fadeOut=body.get("handback_fade_ms"))
                     resultData = {"success": bool(started), "action": "play", "animation": animName,
                                   "layer": layerName, "result": started if started else "queue_full"}
                 else:
@@ -8362,7 +8512,8 @@ class NLPythonServer(BaseHTTPRequestHandler):
                 printDebugString("POST sequence request from " + clientIP + ": " + action)
             if action == "play":
                 source = body.get("sequence") if isinstance(body.get("sequence"), dict) else body.get("name", "")
-                resultData = startSequence(source, body.get("start_ms", 0))
+                resultData = startSequence(source, body.get("start_ms", 0), fadeIn=body.get("fade_in_ms"),
+                                           fadeOut=body.get("handback_fade_ms"))
                 resultData["action"] = "play"
             elif action in ("pause", "resume", "stop", "seek", "set_position", "position", "status"):
                 resultData = sequenceControl(action, body.get("ms", body.get("position_ms")))
@@ -8638,7 +8789,7 @@ def loadPrefsFile(globalPrefsFile = ""):
            rememberLightsOnExit, acceptable_HTTP_IPs, customKeys, enableTabsOnLaunch, \
            whiteListedMACs, rememberPresetsOnExit, autoReconnectOnDisconnect, livePreview, hideConsoleOnLaunch, minimizeToTrayOnClose, httpAutoStart, httpPort, cctFallbackMode, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, \
            envMaxBri, envMinBri, seqFrameRate, effectMaxSeconds, simulatedLights, simulatedCCTOnly, flashGuardEnabled, \
-           cameraPosition, eyelineFlash, handbackFadeMs
+           cameraPosition, eyelineFlash, handbackFadeMs, fadeInMs, stageView, stageGeometry
 
     if globalPrefsFile != "":
         printDebugString("Loading global preferences from file...")
@@ -8653,7 +8804,7 @@ def loadPrefsFile(globalPrefsFile = ""):
             "SC_Dec_1_Large", "SC_Inc_1_Large", "SC_Dec_2_Large", "SC_Inc_2_Large", "SC_Dec_3_Large", "SC_Inc_3_Large", \
             "enableTabsOnLaunch", "whiteListedMACs", "rememberPresetsOnExit", "autoReconnectOnDisconnect", "hideConsoleOnLaunch", "minimizeToTrayOnClose", "livePreview", "httpAutoStart", "httpPort", "cctFallbackMode", "enableLogTab", "logToFile", "logHeartbeat", "globalCCTMin", "globalCCTMax", \
             "envMaxBri", "envMinBri", "seqFrameRate", "effectMaxSeconds", "simulatedLights", "simulatedCCTOnly", "flashGuard", \
-            "cameraPosition", "eyelineFlash", "handbackFadeMs"]
+            "cameraPosition", "eyelineFlash", "handbackFadeMs", "fadeInMs", "stageView", "stageGeometry"]
 
         # KICK OUT ANY PARAMETERS THAT AREN'T IN THE "ACCEPTABLE ARGUMENTS" LIST ABOVE
         # THIS SECTION OF CODE IS *SLIGHTLY* DIFFERENT THAN THE CLI KICK OUT CODE
@@ -8697,6 +8848,9 @@ def loadPrefsFile(globalPrefsFile = ""):
     prefsParser.add_argument("--cameraPosition", default="front")
     prefsParser.add_argument("--eyelineFlash", default="same")
     prefsParser.add_argument("--handbackFadeMs", default=500)
+    prefsParser.add_argument("--fadeInMs", default=0)
+    prefsParser.add_argument("--stageView", default="plan")
+    prefsParser.add_argument("--stageGeometry", default="")
     prefsParser.add_argument("--seqFrameRate", default=20)
     prefsParser.add_argument("--effectMaxSeconds", default=30)
     prefsParser.add_argument("--simulatedLights", default=0)
@@ -8776,6 +8930,9 @@ def loadPrefsFile(globalPrefsFile = ""):
     cameraPosition = mainPrefs.cameraPosition if mainPrefs.cameraPosition in CAMERA_POSITIONS else "front"
     eyelineFlash = mainPrefs.eyelineFlash if mainPrefs.eyelineFlash in EYELINE_FLASH_CHOICES else "same"
     handbackFadeMs = _intPref(mainPrefs.handbackFadeMs, 500, 0, 5000)
+    fadeInMs = _intPref(mainPrefs.fadeInMs, 0, 0, 5000)
+    stageView = mainPrefs.stageView if mainPrefs.stageView in ("plan", "height", "strip") else "plan"
+    stageGeometry = str(mainPrefs.stageGeometry or "")
 
     if type(mainPrefs.acceptableIPs) is not list: # we have a string in the return, so we need to post-process it
         acceptable_HTTP_IPs = mainPrefs.acceptableIPs.replace(" ", "").split(";") # split the IP addresses into a list for acceptable IPs

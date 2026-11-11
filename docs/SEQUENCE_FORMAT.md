@@ -29,7 +29,8 @@ rejected with an error message naming the cue and field.
 | `fps` | no | integer, 1 to 30 | Updates per second during fades and clips. Default: the Sequence frame rate in Global Preferences (20). Cue starts are not rounded to frames. |
 | `end` | no | `"revert"`, `"hold"` or `"preset:N"` | What the lights do at the end. `revert` (default): back to the state they were in before the sequence started, usually a preset. `hold`: stay on the last frame. `preset:3`: recall preset 3. |
 | `pause_mode` | no | `"revert"` or `"freeze"` | While paused: `revert` (default) puts the lights back to their pre-sequence state and resumes the show exactly where it stopped; `freeze` holds the current frame. |
-| `handback_fade_ms` | no | integer, 0 to 10000 | How long the lights take to fade back when this sequence lets go of them (when it ends, stops or pauses with `revert`). Default: Hand-back fade in Global Preferences (500 ms). 0 cuts. |
+| `fade_in_ms` | no | integer, 0 to 10000 | How long the lights take to fade into the sequence when it starts. Default: Fade in in Global Preferences (0, a cut). |
+| `handback_fade_ms` | no | integer, 0 to 10000 | How long the lights take to fade back when this sequence lets go of them (when it ends, stops or pauses with `revert`). Default: Fade back in Global Preferences (500 ms). 0 cuts. |
 | `on_interrupt` | no | `"continue"` or `"pause"` | While an effect or override animation is playing: `continue` (default) keeps the sequence clock running underneath, so lights rejoin in sync with the song; `pause` stops the clock until the interruption ends. |
 | `description`, `artist`, `song`, `notes` | no | string | Shown in lists or ignored. |
 | `tempo` | no | `{"bpm": number, "offset_ms": integer}` | Written by the timeline editor so it can draw beat lines and snap cues to beats (`offset_ms` is when the first beat falls). Playback ignores it: cue times are always plain milliseconds. |
@@ -89,6 +90,8 @@ CCT (HSI cues are converted or skipped for those lights, per Global Preferences)
 The list of animation names comes from `POST /NeewerLux/animate` with
 `{"action": "list"}`, or `GET /NeewerLux/doAction?list_animations`. Inside sequences, clips
 play with exact keyframe timing and continuous fades sampled at the sequence `fps`.
+Animation files can also set `fade_in_ms` and `handback_fade_ms` (the same meanings, for when the
+animation takes lights and lets them go); clips inside a sequence use the sequence's fades instead.
 Animations played on their own also use exact keyframe timing (since 1.3.3; before, holds
 were rounded down to 50 ms), with fades moving in steps at the animation's rate.
 
@@ -173,6 +176,7 @@ renumbered or replaced.
     "end": {"type": "string", "pattern": "^(revert|hold|preset:[1-9][0-9]*)$"},
     "pause_mode": {"enum": ["revert", "freeze"]},
     "on_interrupt": {"enum": ["continue", "pause"]},
+    "fade_in_ms": {"type": "integer", "minimum": 0, "maximum": 10000},
     "handback_fade_ms": {"type": "integer", "minimum": 0, "maximum": 10000},
     "description": {"type": "string"},
     "artist": {"type": "string"},

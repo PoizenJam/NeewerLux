@@ -575,6 +575,14 @@ class SequenceSettingsDialog(QDialog):
         self.interrupt.addItem("Pause until the interruption ends", "pause")
         self.interrupt.setCurrentIndex(max(0, self.interrupt.findData(seq.get("on_interrupt", "continue"))))
         form.addRow("During effects", self.interrupt)
+        self.fadeIn = QSpinBox(); self.fadeIn.setRange(-1, 10000); self.fadeIn.setSingleStep(100); self.fadeIn.setSuffix(" ms")
+        self.fadeIn.setSpecialValueText("Global"); self.fadeIn.setValue(int(seq.get("fade_in_ms", -1)))
+        self.fadeIn.setToolTip("Fade into the sequence when it starts. Global = Global Preferences, Fade in.")
+        form.addRow("Fade in", self.fadeIn)
+        self.fadeOut = QSpinBox(); self.fadeOut.setRange(-1, 10000); self.fadeOut.setSingleStep(100); self.fadeOut.setSuffix(" ms")
+        self.fadeOut.setSpecialValueText("Global"); self.fadeOut.setValue(int(seq.get("handback_fade_ms", -1)))
+        self.fadeOut.setToolTip("Fade back when the sequence ends, stops or pauses with revert. Global = Global Preferences, Fade back.")
+        form.addRow("Fade back", self.fadeOut)
         self.artist = QLineEdit(str(seq.get("artist", "")))
         form.addRow("Artist", self.artist)
         self.song = QLineEdit(str(seq.get("song", "")))
@@ -598,6 +606,11 @@ class SequenceSettingsDialog(QDialog):
                 seq.pop(key, None)
             else:
                 seq[key] = value
+        for key, spin in (("fade_in_ms", self.fadeIn), ("handback_fade_ms", self.fadeOut)):
+            if spin.value() < 0:
+                seq.pop(key, None)
+            else:
+                seq[key] = spin.value()
         for key, widget in (("artist", self.artist), ("song", self.song), ("description", self.description)):
             text = widget.text().strip()
             if text:
@@ -646,7 +659,11 @@ class SequenceEditor(QWidget):
         self._loadingProps = False
 
         self.setWindowTitle("Sequence editor")
-        self.resize(1250, 680)
+        try:  # tall by default, so every light's track and the preview show
+            avail = self.screen().availableGeometry().height()
+        except Exception:
+            avail = 900
+        self.resize(1250, int(max(680, min(1000, avail * 0.85))))
         root = QVBoxLayout(self)
         root.setContentsMargins(6, 6, 6, 6)
 

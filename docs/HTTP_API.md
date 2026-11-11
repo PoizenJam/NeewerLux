@@ -74,7 +74,7 @@ Parameters are joined with `&`. Add `nopage` to any command to get an empty resp
 | Request | Effect |
 |---|---|
 | `animate=Name` | Play a saved animation on the override layer. Names match case-insensitively; URL-encode spaces as `%20`. |
-| `animate=Name\|speed\|rate\|bri\|loop\|maxLoops\|revert\|layer\|queue\|target` | All fields after the name are optional and positional; leave one empty to skip it. Defaults: speed `1.0`, rate `5` updates per second, brightness `100` percent, loop from the animation file, maxLoops `0` (endless), revert from Global Preferences, layer `override`, queue `queue`, target the animation's own lights. Layer is `override`, `effect` or `show`; queue is `queue` or `replace` (effect layer); target is any light form above, such as `@rim`. |
+| `animate=Name\|speed\|rate\|bri\|loop\|maxLoops\|revert\|layer\|queue\|target\|fadeIn\|fadeBack` | All fields after the name are optional and positional; leave one empty to skip it. Defaults: speed `1.0`, rate `5` updates per second, brightness `100` percent, loop from the animation file, maxLoops `0` (endless), revert from Global Preferences, layer `override`, queue `queue`, target the animation's own lights, fades from the animation file or else Global Preferences. Layer is `override`, `effect` or `show`; queue is `queue` or `replace` (effect layer); target is any light form above, such as `@rim`; fadeIn and fadeBack are milliseconds (0 cuts), for when it takes the lights and when it lets go. |
 | `stop_animate` | Stop the override animation |
 | `stop_layer=effect` | Stop a layer: `override`, `effect` (the queue moves on), `effect_all` (also clears the queue), `show`, or `all` |
 | `list_animations` | HTML list (use `list_json` from scripts) |
@@ -154,11 +154,12 @@ Per light:
               "linked": true, "simulated": false, "mode": "HSI", "bri": 45, "color": "#b04ce0"}],
   "flashGuard": {"enabled": true, "held": 0, "eyeline": "same"},
   "stage": {"camera": "front"},
-  "handbackFadeMs": 500
+  "handbackFadeMs": 500,
+  "fadeInMs": 0
 }
 ```
 
-`flashGuard` is `{"enabled": true, "held": 12, "eyeline": "same"}`: whether the flash guard is on, how many changes it has held back since NeewerLux started, and the eye-line setting. `stage.camera` is where the main camera is (for drawing a plan), and `handbackFadeMs` the global hand-back fade.
+`flashGuard` is `{"enabled": true, "held": 12, "eyeline": "same"}`: whether the flash guard is on, how many changes it has held back since NeewerLux started, and the eye-line setting. `stage.camera` is where the main camera is (for drawing a plan), and `handbackFadeMs` and `fadeInMs` the global fades.
 
 `layers` holds whatever is playing on each layer (`null` when nothing is); the override entry includes `name`, `keyframe` and `keyframes`. `sequence` is `null` when no sequence is loaded; `state` is `playing` or `paused`.
 
@@ -193,7 +194,7 @@ Response:
 
 | Body | Effect |
 |---|---|
-| `{"action": "play", "name": "Concert Sweep", "speed": 1.0, "rate": 5, "brightness": 100, "loop": true, "maxLoops": 3, "revert": true}` | Play on the override layer. Optional `"target": "@rim"`, `"parallel": false` (one light at a time, the v1.3.0 path). On the override layer `revert` sets the Global Preferences option. |
+| `{"action": "play", "name": "Concert Sweep", "speed": 1.0, "rate": 5, "brightness": 100, "loop": true, "maxLoops": 3, "revert": true}` | Play on the override layer. Optional `"target": "@rim"`, `"parallel": false` (one light at a time, the v1.3.0 path), `"fade_in_ms"` and `"handback_fade_ms"` (override the animation's and the global fades). On the override layer `revert` sets the Global Preferences option. |
 | `{"action": "play", "name": "Heartbeat", "layer": "effect", "mode": "queue", "target": "@rim"}` | Play as an effect (`mode` `queue` or `replace`) or on the `show` layer; `revert` applies to this request only. `"result": "queue_full"` when the effect queue (10) is full. |
 | `{"action": "stop"}` | Stop the override layer; `"layer": "effect"` (with `"clear_queue": true` to empty the queue), `"show"` or `"all"` |
 | `{"action": "list"}` | `{"animations": [{"name", "description", "keyframes", "loop"}], "currently_playing"}` |
@@ -209,7 +210,7 @@ Response:
 
 | Body | Effect |
 |---|---|
-| `{"action": "play", "name": "...", "start_ms": 0}` | Play a saved sequence |
+| `{"action": "play", "name": "...", "start_ms": 0}` | Play a saved sequence. Optional `"fade_in_ms"` and `"handback_fade_ms"` override the sequence's and the global fades for this play. |
 | `{"action": "play", "sequence": {...}}` | Play one sent inline, without saving it |
 | `{"action": "pause"}`, `{"action": "resume"}`, `{"action": "stop"}` | As on GET |
 | `{"action": "seek", "ms": 65000}` | Jump |
@@ -235,7 +236,7 @@ The desktop's preset menu and editor. Preset numbers are 1-based. Every reply th
 |---|---|
 | `{"action": "list"}` | `{"presets": [preset, ...]}` |
 | `{"action": "get", "index": 3}` | One preset: `{"index", "name", "custom", "global", "entries"}`. `custom` is false while it's still the factory default; `global` is true when it applies to whichever lights it's recalled on rather than to specific lights. |
-| `{"action": "save", "index": 3, "name": "Stream", "entries": [...]}` | Replace its contents (and name, if given). Each entry: `{"target": "-1" or a light, "mode": "CCT"/"HSI"/"Scene", "bri", "temp" (Kelvin or hundreds), "hue", "sat", "scene"}`. One entry with target `"-1"` makes a global preset; entries per light make a snapshot. An entry read with `"off": true` (the light was off in the snapshot) keeps that when sent back. |
+| `{"action": "save", "index": 3, "name": "Stream", "entries": [...]}` | Replace its contents (and name, if given). Each entry: `{"target": "-1" or a light, "mode": "CCT"/"HSI"/"Scene", "bri", "temp" (Kelvin or hundreds), "hue", "sat", "scene"}`. One entry with target `"-1"` makes a global preset; entries per light make a snapshot. Optional `"fade_ms"`: how long recalling it fades in (`null` = the global Fade in). `list` and `get` report `fade_ms`. An entry read with `"off": true` (the light was off in the snapshot) keeps that when sent back. |
 | `{"action": "rename", "index": 3, "name": "Stream"}` | Rename (empty clears; up to 20 characters) |
 | `{"action": "move", "index": 3, "direction": "left"}` | Swap with its neighbour (`left` or `right`) |
 | `{"action": "duplicate", "index": 3}` | Insert a copy after it, named "... (copy)" |
@@ -250,7 +251,7 @@ The desktop's preset menu and editor. Preset numbers are 1-based. Every reply th
 |---|---|
 | `{"action": "get"}` | `{"apiVersion", "global": {...}, "lights": [...], "roles", "sides", "simulatedRigs"}` |
 | `{"action": "set_light", "light": 0, "settings": {"role": "key", "maxBri": 60}}` | Change one light's preferences. `light` is the 0-based `index` from `get` (an ID, name or MAC also works). Settings: `customName`, `preferredID` (0 to 99, 0 = automatic), `tempRange` (`[min, max]` Kelvin), `cctOnly`, `role`, `side` (`left`, `centre`, `right`), `depth` (`front`, `beside`, `back`), `height` (`low`, `middle`, `high`), `aim` (where it points: `you`, or `front`, `front-right`, `right`, `back-right`, `back`, `back-left`, `left`, `front-left` on the plan), `order` (0 to 99, 0 = automatic: by position, then ID), `eyeline`, `maxBri` and `minBri` (-1 = use the global limit, else 0 to 100), `locked`. Saved to the light's preferences file, as the desktop does. |
-| `{"action": "set_global", "settings": {"envMaxBri": 80}}` | Change global preferences: `envMaxBri` (1 to 100), `envMinBri` (0 to 100), `seqFrameRate` (1 to 30), `effectMaxSeconds` (1 to 600), `globalCCTMin` and `globalCCTMax` (2700 to 8500), `cctFallbackMode` (`convert` or `ignore`), `simulatedLights` (0 to 4, next start), `simulatedCCTOnly` (next start), `flashGuardEnabled` (true or false), `eyelineFlash` (`same`, `gentler` = at most 1 flash a second, `calm` = one change every 2 seconds, for lights marked as in the eye line; applies even with the guard off), `handbackFadeMs` (0 to 5000: fade when an effect, sequence or animation lets go of a light; 0 cuts), `cameraPosition` (`front`, `front-left`, `front-right`, `left`, `right`, `back-left`, `back`, `back-right`; drawn on the Stage plan). |
+| `{"action": "set_global", "settings": {"envMaxBri": 80}}` | Change global preferences: `envMaxBri` (1 to 100), `envMinBri` (0 to 100), `seqFrameRate` (1 to 30), `effectMaxSeconds` (1 to 600), `globalCCTMin` and `globalCCTMax` (2700 to 8500), `cctFallbackMode` (`convert` or `ignore`), `simulatedLights` (0 to 4, next start), `simulatedCCTOnly` (next start), `flashGuardEnabled` (true or false), `eyelineFlash` (`same`, `gentler` = at most 1 flash a second, `calm` = one change every 2 seconds, for lights marked as in the eye line; applies even with the guard off), `handbackFadeMs` (0 to 5000: fade when an effect, sequence or animation lets go of a light; 0 cuts), `fadeInMs` (0 to 5000: fade when a preset is recalled or an animation or sequence takes lights over; 0 cuts), `cameraPosition` (`front`, `front-left`, `front-right`, `left`, `right`, `back-left`, `back`, `back-right`; drawn on the Stage plan). |
 
 Every value in a request is checked before any is applied; a request with an invalid value changes nothing and lists the problems in `errors`. Network access, keyboard shortcuts and startup options can't be changed over HTTP. Changes show up in the desktop window straight away.
 

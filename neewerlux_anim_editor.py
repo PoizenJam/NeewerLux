@@ -57,8 +57,12 @@ class AnimationEditorDialog(QDialog):
     def __init__(self, parent=None, animData=None, animName="", cctRange=None):
         super().__init__(parent)
         self.setWindowTitle("Animation Editor" + (": " + animName if animName else ""))
-        self.setMinimumSize(700, 550)
-        self.resize(780, 620)
+        self.setMinimumSize(720, 680)
+        try:  # tall by default: most of the screen, so the light list and keyframes show
+            avail = self.screen().availableGeometry().height()
+        except Exception:
+            avail = 900
+        self.resize(860, int(max(680, min(1000, avail * 0.85))))
         self._cctRange = cctRange or (32, 56)  # min/max in slider units (e.g. 32=3200K)
 
         self._animData = copy.deepcopy(animData) if animData else {
@@ -91,6 +95,22 @@ class AnimationEditorDialog(QDialog):
         self._loopCheck = QCheckBox("Loop animation")
         self._loopCheck.setChecked(self._animData.get("loop", True))
         headerForm.addRow(self._loopCheck)
+
+        # Fades: when this animation takes the lights, and when it lets go (-1 = the global settings)
+        fadeRow = QHBoxLayout()
+        self._fadeInSpin = QSpinBox(); self._fadeInSpin.setRange(-1, 10000); self._fadeInSpin.setSingleStep(100)
+        self._fadeInSpin.setSuffix(" ms"); self._fadeInSpin.setSpecialValueText("Global")
+        self._fadeInSpin.setValue(int(self._animData.get("fade_in_ms", -1)))
+        self._fadeInSpin.setToolTip("Fade into this animation when it starts or replaces another. Global = Global Preferences.")
+        self._fadeOutSpin = QSpinBox(); self._fadeOutSpin.setRange(-1, 10000); self._fadeOutSpin.setSingleStep(100)
+        self._fadeOutSpin.setSuffix(" ms"); self._fadeOutSpin.setSpecialValueText("Global")
+        self._fadeOutSpin.setValue(int(self._animData.get("handback_fade_ms", -1)))
+        self._fadeOutSpin.setToolTip("Fade back to what was underneath when it ends or stops. Global = Global Preferences.")
+        fadeRow.addWidget(QLabel("Fade in:")); fadeRow.addWidget(self._fadeInSpin)
+        fadeRow.addSpacing(12)
+        fadeRow.addWidget(QLabel("Fade back:")); fadeRow.addWidget(self._fadeOutSpin)
+        fadeRow.addStretch(1)
+        headerForm.addRow(fadeRow)
 
         mainLay.addLayout(headerForm)
 
@@ -853,9 +873,14 @@ class AnimationEditorDialog(QDialog):
 
     def getResult(self):
         """Return the edited animation data."""
-        return {
+        result = {
             "name": self._nameField.text().strip() or "Untitled",
             "description": self._descField.text().strip(),
             "loop": self._loopCheck.isChecked(),
             "keyframes": self._keyframes
         }
+        if self._fadeInSpin.value() >= 0:
+            result["fade_in_ms"] = self._fadeInSpin.value()
+        if self._fadeOutSpin.value() >= 0:
+            result["handback_fade_ms"] = self._fadeOutSpin.value()
+        return result

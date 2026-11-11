@@ -152,7 +152,8 @@ a:hover { text-decoration: underline; }
 .form-grid .hint { grid-column: 2; color:var(--muted); font-size:11px; margin-top:-4px; }
 .modal-bg { position:fixed; inset:0; background:rgba(0,0,0,.7); display:none; align-items:center; justify-content:center; z-index:50; }
 .modal-bg.open { display:flex; }
-.modal { background:var(--bg2); border:1px solid var(--border); border-radius:8px; padding:14px; max-width:95vw; max-height:90vh; overflow:auto; }
+.modal { background:var(--bg2); border:1px solid var(--border); border-radius:8px; padding:14px; max-width:95vw; max-height:94vh; overflow:auto; }
+#presetModal .modal, #animModal .modal { min-height:min(85vh, 1000px); }
 .modal.wide { width:min(1100px, 95vw); }
 .modal.full { width:97vw; height:94vh; max-height:94vh; display:flex; flex-direction:column; overflow:hidden; }
 .modal h3 { margin:0 0 10px; color:var(--accent); }
@@ -663,7 +664,8 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
                     </div>
                     <h4>Playback</h4>
                     <div class="form-grid">
-                        <label>Hand-back fade (ms)</label><input type="number" id="gpHandback" min="0" max="5000" step="100"><div class="hint">When an effect, sequence or animation lets go of a light, fade to what comes next. 0 = cut. Starts and manual commands are instant.</div>
+                        <label>Fade in (ms)</label><input type="number" id="gpFadeIn" min="0" max="5000" step="100"><div class="hint">When a preset is recalled, or an animation or sequence takes lights over (including one animation replacing another). 0 = cut.</div>
+                        <label>Fade back (ms)</label><input type="number" id="gpHandback" min="0" max="5000" step="100"><div class="hint">When an effect, sequence or animation lets go of a light, fade to what comes next. 0 = cut. Each preset, animation and sequence can set its own; the desktop sliders stay instant.</div>
                         <label>Sequence frame rate</label><input type="number" id="gpSeqFps" min="1" max="30"><div class="hint">Updates per second for sequences without their own.</div>
                         <label>Effect time limit (s)</label><input type="number" id="gpEffectMax" min="1" max="600"><div class="hint">Forever-looping effects stop after this.</div>
                     </div>
@@ -820,6 +822,7 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
             <button class="btn primary" onclick="peSave()">Save</button><button class="btn" onclick="peClose()">Cancel</button></div>
         <div class="form-grid" style="grid-template-columns:80px 1fr;margin-bottom:10px">
             <label>Name</label><input type="text" id="peName" maxlength="20" placeholder="Preset name (optional)">
+            <label>Fade in (ms)</label><span><input type="number" id="peFade" min="-1" max="10000" step="100" style="width:110px"> <span class="hint" style="display:inline">-1 = the global Fade in</span></span>
         </div>
         <div class="tl-hint">One entry for all lights makes a global preset (it applies to whichever lights you recall it on). Entries for individual lights make a snapshot.</div>
         <table class="edit-table"><thead><tr><th>#</th><th>Light</th><th>Mode</th><th>Values</th><th></th></tr></thead><tbody id="peRows"></tbody></table>
@@ -842,6 +845,7 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
             <label>Name</label><input type="text" id="aeName">
             <label>Description</label><input type="text" id="aeDesc">
             <label>Loop</label><label style="text-transform:none"><input type="checkbox" id="aeLoop"> Loop animation</label>
+            <label>Fades (ms)</label><span>in <input type="number" id="aeFadeIn" min="-1" max="10000" step="100" style="width:100px"> back <input type="number" id="aeFadeOut" min="-1" max="10000" step="100" style="width:100px"> <span class="hint" style="display:inline">-1 = the global settings</span></span>
         </div>
         <div class="tabs"><div id="aeTabVisual" class="active" onclick="aeTab('visual')">Visual editor</div><div id="aeTabJson" onclick="aeTab('json')">JSON editor</div></div>
         <div id="aeVisual">
@@ -906,6 +910,8 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
                 <label>During effects</label><select id="tlInterrupt"><option value="continue">Keep running underneath (stay in sync)</option><option value="pause">Pause until the interruption ends</option></select>
                 <label>Artist</label><input type="text" id="tlArtist">
                 <label>Song</label><input type="text" id="tlSong">
+                <label>Fade in (ms)</label><input type="number" id="tlFadeIn" min="-1" max="10000" step="100" title="-1 = the global Fade in">
+                <label>Fade back (ms)</label><input type="number" id="tlFadeOut" min="-1" max="10000" step="100" title="-1 = the global Fade back">
                 <label>Description</label><input type="text" id="tlDesc" style="grid-column: span 3">
             </div>
             <div class="toolbar" style="margin-top:6px"><button class="btn small primary" onclick="tlSettingsApply()">Apply</button></div>
@@ -1576,6 +1582,7 @@ function applySettings(d) {
     document.getElementById('gpCamera').value = g.cameraPosition || 'front';
     document.getElementById('gpEyelineFlash').value = g.eyelineFlash || 'same';
     document.getElementById('gpHandback').value = g.handbackFadeMs != null ? g.handbackFadeMs : 500;
+    document.getElementById('gpFadeIn').value = g.fadeInMs != null ? g.fadeInMs : 0;
     setGlobalPrefsDirty(false);
 }
 // Save Global Preferences is highlighted while the form has changes it hasn't saved
@@ -1692,7 +1699,7 @@ async function saveGlobalPrefs() {
         cctFallbackMode: document.getElementById('gpFallback').value, simulatedLights: num('gpSim'),
         simulatedCCTOnly: document.getElementById('gpSimCCT').checked, flashGuardEnabled: document.getElementById('gpFlashGuard').checked,
         cameraPosition: document.getElementById('gpCamera').value, eyelineFlash: document.getElementById('gpEyelineFlash').value,
-        handbackFadeMs: num('gpHandback')};
+        handbackFadeMs: num('gpHandback'), fadeInMs: num('gpFadeIn')};
     try {
         const d = await settingsPost({action:'set_global', settings:settings});
         if (!d.success) { logMsg('Global preferences not saved: ' + (d.errors || []).join('; '), 'err'); return; }
@@ -1776,6 +1783,7 @@ async function peOpen(idx) {
     pe = {index: idx, entries: JSON.parse(JSON.stringify(d.preset.entries)), sel: 0};
     document.getElementById('peTitle').textContent = 'Edit preset ' + idx;
     document.getElementById('peName').value = d.preset.name || '';
+    document.getElementById('peFade').value = d.preset.fade_ms == null ? -1 : d.preset.fade_ms;
     peRender();
     document.getElementById('presetModal').classList.add('open');
 }
@@ -1829,7 +1837,9 @@ function peMove(d) {
 async function peSave() {
     peRead();
     const idx = pe.index;
-    const d = await postJSON('/NeewerLux/presets', {action: 'save', index: idx, name: document.getElementById('peName').value, entries: pe.entries});
+    const fade = parseInt(document.getElementById('peFade').value, 10);
+    const d = await postJSON('/NeewerLux/presets', {action: 'save', index: idx, name: document.getElementById('peName').value, entries: pe.entries,
+                                                    fade_ms: isNaN(fade) || fade < 0 ? null : fade});
     if (!d.success) { logMsg('Preset not saved: ' + errText(d), 'err'); return; }
     logMsg('Saved preset ' + idx, 'ok');
     peClose();
@@ -1906,6 +1916,8 @@ function aeOpen(anim, original) {
     document.getElementById('aeName').value = ae.anim.name || '';
     document.getElementById('aeDesc').value = ae.anim.description || '';
     document.getElementById('aeLoop').checked = !!ae.anim.loop;
+    document.getElementById('aeFadeIn').value = ae.anim.fade_in_ms == null ? -1 : ae.anim.fade_in_ms;
+    document.getElementById('aeFadeOut').value = ae.anim.handback_fade_ms == null ? -1 : ae.anim.handback_fade_ms;
     aeTab('visual');
     aeRender();
     document.getElementById('animModal').classList.add('open');
@@ -2061,6 +2073,10 @@ async function aeSave() {
     anim.name = document.getElementById('aeName').value.trim();
     anim.description = document.getElementById('aeDesc').value.trim();
     anim.loop = document.getElementById('aeLoop').checked;
+    [['fade_in_ms', 'aeFadeIn'], ['handback_fade_ms', 'aeFadeOut']].forEach(([k, id]) => {
+        const v = parseInt(document.getElementById(id).value, 10);
+        if (isNaN(v) || v < 0) delete anim[k]; else anim[k] = Math.min(10000, v);
+    });
     anim.keyframes.forEach(k => {
         // a frame mixing * with specific lights would be ambiguous: specific lights win, as on the desktop
         if (k.lights && Object.keys(k.lights).length > 1 && '*' in k.lights) delete k.lights['*'];
@@ -2740,6 +2756,8 @@ function tlSettingsToggle() {
     document.getElementById('tlArtist').value = s.artist || '';
     document.getElementById('tlSong').value = s.song || '';
     document.getElementById('tlDesc').value = s.description || '';
+    document.getElementById('tlFadeIn').value = s.fade_in_ms == null ? -1 : s.fade_in_ms;
+    document.getElementById('tlFadeOut').value = s.handback_fade_ms == null ? -1 : s.handback_fade_ms;
 }
 function tlSettingsApply() {
     tlPushUndo();
@@ -2748,6 +2766,7 @@ function tlSettingsApply() {
     if (fps) s.fps = Math.min(30, fps); else delete s.fps;
     [['end', 'tlEnd', 'revert'], ['pause_mode', 'tlPause', 'revert'], ['on_interrupt', 'tlInterrupt', 'continue']].forEach(([k, id, def]) => { if (g(id).value === def) delete s[k]; else s[k] = g(id).value; });
     [['artist', 'tlArtist'], ['song', 'tlSong'], ['description', 'tlDesc']].forEach(([k, id]) => { const v = g(id).value.trim(); if (v) s[k] = v; else delete s[k]; });
+    [['fade_in_ms', 'tlFadeIn'], ['handback_fade_ms', 'tlFadeOut']].forEach(([k, id]) => { const v = parseInt(g(id).value, 10); if (isNaN(v) || v < 0) delete s[k]; else s[k] = Math.min(10000, v); });
     document.getElementById('tlSettings').style.display = 'none';
     tlChanged();
 }
