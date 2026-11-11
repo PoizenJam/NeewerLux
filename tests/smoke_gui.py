@@ -87,14 +87,21 @@ def main():
     planTiles = [dict(t, side=sd, depth=dp, height=h) for t, (sd, dp, h) in zip(stage.view.tiles,
                  [("right", "front", "middle"), ("left", "front", "low"), ("right", "back", "high"), ("left", "back", "middle")])]
     stage.view.setTiles(planTiles)
-    stage.planCheck.setChecked(True)
+    assert stage.view.viewMode == "plan", "plan is the default view"
     app.processEvents()
     pos = {stage.view.tiles[n]["side"] + "/" + stage.view.tiles[n]["depth"]: (x, y) for n, x, y in stage.view._layout()}
     assert pos["left/front"][0] < pos["right/front"][0] and pos["left/front"][1] < pos["left/back"][1], pos
     shotPlan = os.path.join(rig.workdir, "stage_plan.png")
     stage.grab().save(shotPlan)
     print("stage plan screenshot:", shotPlan)
-    stage.planCheck.setChecked(False)
+    stage.viewCombo.setCurrentIndex(1)  # height view: high row above low
+    app.processEvents()
+    hy = {stage.view.tiles[n]["height"]: y for n, x, y in stage.view._layout()}
+    assert hy["high"] < hy["middle"] < hy["low"], hy
+    shotH = os.path.join(rig.workdir, "stage_height.png")
+    stage.grab().save(shotH)
+    print("stage height screenshot:", shotH)
+    stage.viewCombo.setCurrentIndex(0)
     stage.timer.start(50)
     win._updateShowStatus()
     swatch = win.lightTable.item(0, 0).data(nl.Qt.DecorationRole)
@@ -104,13 +111,22 @@ def main():
     nl.sequenceControl("stop")
     from neewerlux_stage import RenderDialog
     result = nl.renderSequence("Example - Four Light Demo")
-    dlg = RenderDialog(nl.renderSequencePNG(result), result["sequence"], win)
+    png = nl.renderSequencePNG(result)
+    seeks = []
+    dlg = RenderDialog(png, result["sequence"], win, axis=result["axis"], position=lambda: 10000, seek=seeks.append)
     dlg.show()
     app.processEvents()
+    assert dlg.strip.positionMs == 10000, "play marker follows the position"
+    a = result["axis"]
+    mid = a["x0"] + a["width"] // 2
+    assert abs(dlg.strip.msAt(mid) - (a["start_ms"] + a["end_ms"]) / 2) < 100, "strip x maps to time"
+    dlg._clicked(dlg.strip.msAt(mid))
+    assert seeks and abs(seeks[0] - (a["start_ms"] + a["end_ms"]) / 2) < 100, "clicking the strip seeks: %r" % seeks
     dlg.close()
 
     # Light Prefs round trip through the sidecar file
     win.lightTable.selectRow(0)
+    win.ColorModeTabWidget.setCurrentIndex(win.TAB_LIGHTPREFS)
     app.processEvents()
     win.setupLightPrefsTab(0)
     assert win.lightRoleCombo.currentText() == "Key"
@@ -123,12 +139,17 @@ def main():
     assert picker.value() == ("left", "back", "high") and picker.cells[("left", "back")].text().startswith("This light")
     win.lightMaxBriSpin.setValue(45)
     win.lightLockedCheck.setChecked(True)
+    picker.aimButtons["back-right"].click()
+    savedMac = nl.availableLights[win.selectedLights()[0]][0].address
     win.checkLightPrefs()
+    app.processEvents()
+    assert win.ColorModeTabWidget.currentIndex() == win.TAB_LIGHTPREFS, "saving stays on Light Preferences"
+    assert win.selectedLights() and nl.availableLights[win.selectedLights()[0]][0].address == savedMac, "saving keeps the light selected"
     mac = rig.mac(0)
     sidecar = os.path.join(rig.workdir, "light_prefs", mac.replace(":", ""))
     assert os.path.exists(sidecar), "sidecar not written"
     fields = open(sidecar, encoding="utf-8").read().split("|")
-    assert fields[5:14] == ["practical", "left", "4", "", "45", "-1", "True", "back", "high"], fields
+    assert fields[5:15] == ["practical", "left", "4", "", "45", "-1", "True", "back", "high", "back-right"], fields
     nl.lightShowPrefs.clear()
     nl.loadLightAliases()
     assert nl.lightShowPrefs[mac]["maxBri"] == 45 and nl.lightShowPrefs[mac]["locked"] is True
@@ -140,6 +161,7 @@ def main():
     assert win.lightPositionPicker.value() == ("left", "back", "high"), "position reloads into the picker"
     picker.cells[("centre", "beside")].click()
     picker.heightButtons["middle"].click()
+    picker.aimButtons["you"].click()
     win.checkLightPrefs()
     fields = open(sidecar, encoding="utf-8").read().split("|")
     assert len(fields) == 12 and fields[6] == "centre", "no position fields when the position is the default: %r" % fields

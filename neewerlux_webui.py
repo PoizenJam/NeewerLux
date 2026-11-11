@@ -118,7 +118,16 @@ a:hover { text-decoration: underline; }
 .stage-box .sim { position:absolute; top:5px; left:5px; background:rgba(0,0,0,.6); color:#e6e6e6; font-size:10px; padding:1px 5px; border-radius:4px; }
 .stage-box .unknown { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#ccc; font-size:20px; }
 .stage-name { color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.stage-box .hb { position:absolute; top:5px; right:5px; background:rgba(0,0,0,.6); color:#e6e6e6; font-size:10px; padding:1px 5px; border-radius:4px; }
+.stage-box .hb { position:absolute; top:5px; right:5px; background:rgba(0,0,0,.6); border-radius:4px; padding:3px 4px; display:flex; flex-direction:column; gap:2px; }
+.stage-box .hb i { display:block; width:10px; height:3px; background:#555; }
+.stage-box .hb i.on { background:#ebebeb; }
+.stage-box .aim { position:absolute; bottom:4px; right:6px; color:#fff; font-size:13px; text-shadow:0 0 3px #000; }
+.stage-cam { display:flex; justify-content:center; align-items:center; color:#888; font-size:11px; gap:4px; }
+.pos-aim { display:grid; grid-template-columns:repeat(3, 26px); gap:2px; margin-top:4px; }
+.pos-aim button { height:24px; padding:0; border:1px solid var(--border); background:var(--bg3); color:#bbb; border-radius:4px; cursor:pointer; }
+.pos-aim button.sel { background:var(--accent); color:#fff; border-color:#8fb0ff; }
+.settings-cols { display:grid; grid-template-columns:repeat(auto-fit, minmax(380px, 1fr)); gap:18px; }
+.settings-cols h4 { margin:12px 0 6px; color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.5px; }
 .stage-plan { display:grid; grid-template-columns:auto repeat(3, minmax(160px, auto)); gap:6px; align-items:stretch; }
 .stage-plan .ph { color:var(--muted); font-size:11px; text-align:center; }
 .stage-plan .pr { color:var(--muted); font-size:11px; display:flex; align-items:center; justify-content:flex-end; padding-right:4px; }
@@ -400,6 +409,7 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
     <span class="status-pill" id="connStatus">Loading...</span>
     <button class="refresh-btn" onclick="scanForLights()" title="Scan for new Bluetooth lights">Scan</button>
     <button class="refresh-btn" onclick="linkAllLights()" title="Link to all discovered lights">Link All</button>
+    <button class="refresh-btn" onclick="openSettings()" title="Light and global preferences">Settings</button>
     <button class="refresh-btn" onclick="refreshAll()">&#x21BB; Refresh</button>
 </div>
 
@@ -419,7 +429,8 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
     <div class="card full-width">
         <div class="card-header" style="cursor:pointer" onclick="toggleStage(this)">Stage <span style="float:right;color:var(--muted);font-size:11px;font-weight:normal">click to hide/show</span></div>
         <div class="card-body" id="stageBody">
-            <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:8px"><input type="checkbox" id="stagePlan" onchange="setStagePlan(this.checked)"> Plan view (where each light stands, from your seat facing the camera; L, M, H = height)</label>
+            <div style="font-size:12px;color:var(--muted);margin-bottom:8px">View <select id="stageView" onchange="setStageView(this.value)"><option value="plan">Plan (from above)</option><option value="height">Height (facing the camera)</option><option value="strip">Strip (sweep order)</option></select>
+            <span style="margin-left:8px">Plan: where each light stands, from your seat facing the camera; bars = height, arrow = where it points (none = at you).</span></div>
             <div class="stage-grid" id="stageGrid"><div style="color:var(--muted)">Loading...</div></div>
             <div style="color:var(--muted);font-size:11px;margin-top:8px">Approximate colours. Outline: grey = manual/preset, blue = sequence, orange = effect, red = override animation.
             Simulated lights show what they received; real lights show what was last sent to them.</div>
@@ -606,45 +617,73 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
     </div>
 
     <!-- SETTINGS -->
-    <div class="card full-width">
-        <div class="card-header" style="cursor:pointer" onclick="toggleSettings(this)">Settings</div>
+    <div class="card full-width" id="settingsCard">
+        <div class="card-header" style="cursor:pointer" onclick="toggleSettings(this)">Settings <span style="float:right;color:var(--muted);font-size:11px;font-weight:normal">light and global preferences</span></div>
         <div class="card-body" id="settingsBody" style="display:none">
-            <div class="container" style="padding:0;gap:16px">
+            <h3 style="margin-top:0;color:var(--accent)">Light Preferences</h3>
+            <div class="form-grid"><label>Light</label><select id="lpLight" onchange="fillLightPrefs()"></select></div>
+            <div class="settings-cols">
                 <div>
-                    <h3 style="margin-top:0;color:var(--accent)">Light Preferences</h3>
+                    <h4>This light</h4>
                     <div class="form-grid">
-                        <label>Light</label><select id="lpLight" onchange="fillLightPrefs()"></select>
                         <label>Custom name</label><input type="text" id="lpName" maxlength="64" placeholder="(model name)">
                         <label>Preferred ID</label><input type="number" id="lpID" min="0" max="99"><div class="hint">0 = automatic. Used in URLs and batch commands.</div>
                         <label>Colour temperature range</label><span><input type="number" id="lpTempMin" min="1000" max="5600" step="100"> to <input type="number" id="lpTempMax" min="1000" max="10000" step="100"> K <button class="btn" style="padding:2px 8px;font-size:11px" onclick="resetTempRange()">Default</button></span>
                         <label>CCT-only light</label><label style="text-transform:none"><input type="checkbox" id="lpCCTOnly"> Only accepts CCT (older lights)</label>
-                        <label>Role</label><select id="lpRole"></select>
-                        <label>Position</label><div class="pos-picker" id="lpPos"></div><div class="hint">From your seat, facing the camera: front is between you and the camera. Targets @left @front @high and combinations like @back.left.</div>
-                        <label>Sweep order</label><input type="number" id="lpOrder" min="0" max="99"><div class="hint">0 = automatic (left to right, front to back, low to high).</div>
-                        <label>Eye line</label><label style="text-transform:none"><input type="checkbox" id="lpEyeline"> In my eye line (@eyeline)</label>
+                    </div>
+                    <h4>Limits</h4>
+                    <div class="form-grid">
                         <label>Max brightness</label><input type="number" id="lpMaxBri" min="-1" max="100"><div class="hint">-1 = use the global limit.</div>
                         <label>Min brightness</label><input type="number" id="lpMinBri" min="-1" max="100"><div class="hint">-1 = use the global limit.</div>
                         <label>Locked</label><label style="text-transform:none"><input type="checkbox" id="lpLocked"> Ignore sequences and effects</label>
+                        <label>Eye line</label><label style="text-transform:none"><input type="checkbox" id="lpEyeline"> In my eye line (a light I look into; @eyeline)</label>
                     </div>
-                    <div class="btn-row" style="margin-top:10px"><button class="btn primary" onclick="saveLightPrefs()">Save Light Preferences</button></div>
                 </div>
                 <div>
-                    <h3 style="margin-top:0;color:var(--accent)">Global Preferences</h3>
+                    <h4>In sequences and effects</h4>
+                    <div class="form-grid">
+                        <label>Role</label><select id="lpRole"></select>
+                        <label>Sweep order</label><input type="number" id="lpOrder" min="0" max="99"><div class="hint">0 = automatic (left to right, front to back, low to high).</div>
+                    </div>
+                    <div style="margin-top:8px;color:var(--muted);font-size:12px">Position, height and aim (from your seat, facing the camera)</div>
+                    <div class="pos-picker" id="lpPos" style="margin-top:6px"></div>
+                </div>
+            </div>
+            <div class="btn-row" style="margin-top:10px"><button class="btn primary" onclick="saveLightPrefs()">Save Light Preferences</button></div>
+
+            <h3 style="color:var(--accent);margin-top:22px">Global Preferences</h3>
+            <div class="settings-cols">
+                <div>
+                    <h4>Safety</h4>
                     <div class="form-grid">
                         <label>Flash guard</label><label style="text-transform:none"><input type="checkbox" id="gpFlashGuard" onchange="gpFlashGuardChanged(this)"> At most 3 flashes a second per light (recommended)</label><div class="hint">The WCAG limit for photosensitive seizures. Applies to everything except the desktop's sliders.</div>
+                        <label>Eye-line lights during flashes</label><select id="gpEyelineFlash"><option value="same">Same as other lights</option><option value="gentler">Gentler: at most 1 flash a second</option><option value="calm">Calm: one change every 2 seconds</option></select><div class="hint">For lights marked "In my eye line". Applies even with the flash guard off.</div>
                         <label>Max brightness</label><input type="number" id="gpEnvMax" min="1" max="100"><div class="hint">Presets, URLs, animations and sequences. Sliders are exempt.</div>
                         <label>Min brightness</label><input type="number" id="gpEnvMin" min="0" max="100">
+                    </div>
+                    <h4>Playback</h4>
+                    <div class="form-grid">
+                        <label>Hand-back fade (ms)</label><input type="number" id="gpHandback" min="0" max="5000" step="100"><div class="hint">When an effect, sequence or animation lets go of a light, fade to what comes next. 0 = cut. Starts and manual commands are instant.</div>
                         <label>Sequence frame rate</label><input type="number" id="gpSeqFps" min="1" max="30"><div class="hint">Updates per second for sequences without their own.</div>
                         <label>Effect time limit (s)</label><input type="number" id="gpEffectMax" min="1" max="600"><div class="hint">Forever-looping effects stop after this.</div>
+                    </div>
+                </div>
+                <div>
+                    <h4>Your rig</h4>
+                    <div class="form-grid">
+                        <label>Main camera</label><select id="gpCamera"><option value="front">Front (straight ahead)</option><option value="front-left">Front left</option><option value="front-right">Front right</option><option value="left">Your left</option><option value="right">Your right</option><option value="back-left">Back left</option><option value="back">Behind you</option><option value="back-right">Back right</option></select><div class="hint">Shown on the Stage plan. Positions stay relative to you.</div>
                         <label>Global CCT range</label><span><input type="number" id="gpCCTMin" min="2700" max="8500" step="100"> to <input type="number" id="gpCCTMax" min="2700" max="8500" step="100"> K</span>
                         <label>Colour on CCT-only lights</label><select id="gpFallback"><option value="convert">Convert to white</option><option value="ignore">Ignore</option></select>
+                    </div>
+                    <h4>Simulation</h4>
+                    <div class="form-grid">
                         <label>Simulated lights</label><select id="gpSim"></select><div class="hint">Takes effect at the next start.</div>
                         <label>Simulated CCT-only light</label><label style="text-transform:none"><input type="checkbox" id="gpSimCCT"> Add one (takes effect at the next start)</label>
                     </div>
-                    <div class="btn-row" style="margin-top:10px"><button class="btn primary" id="gpSaveBtn" onclick="saveGlobalPrefs()">Save Global Preferences</button></div>
-                    <div style="color:var(--muted);font-size:11px;margin-top:8px">Network access, keyboard shortcuts and startup options are only changed in the desktop app.</div>
                 </div>
             </div>
+            <div class="btn-row" style="margin-top:10px"><button class="btn primary" id="gpSaveBtn" onclick="saveGlobalPrefs()">Save Global Preferences</button></div>
+            <div style="color:var(--muted);font-size:11px;margin-top:8px">Network access, keyboard shortcuts and startup options are only changed in the desktop app.</div>
         </div>
     </div>
 
@@ -765,7 +804,11 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
             <button class="btn" onclick="saveRenderPNG()">Save PNG</button>
             <button class="btn" onclick="closeRender()">Close</button>
         </div>
-        <canvas id="renderCanvas"></canvas>
+        <div style="position:relative;display:inline-block">
+            <canvas id="renderCanvas" onclick="renderSeekClick(event)"></canvas>
+            <div id="renderMarker" style="position:absolute;top:0;width:2px;background:#fff;display:none;pointer-events:none;box-shadow:0 0 3px #000"></div>
+        </div>
+        <div style="font-size:11px;color:var(--muted)">While this sequence plays, the white line shows where it is; click the strip to jump there.</div>
         <div id="renderCues" style="font-size:11px;color:var(--muted);max-height:160px;overflow:auto;margin-top:6px;font-family:monospace"></div>
     </div>
 </div>
@@ -871,7 +914,7 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
             <div class="tl-main">
                 <canvas id="tlCanvas" tabindex="0"></canvas>
                 <div class="tl-hint">Double-click a track to add a cue. Drag a cue to move it, its right edge to change its length, the notch at its top to change the fade. Right-click for more. Ctrl+wheel zooms. Dashed outlines are cues shared by several lights.</div>
-                <div style="color:var(--muted);font-size:12px;margin-bottom:4px">Preview at the playhead <label style="float:right"><input type="checkbox" id="tlStagePlan" onchange="setStagePlan(this.checked)"> Plan view</label></div>
+                <div style="color:var(--muted);font-size:12px;margin-bottom:4px">Preview at the playhead <select id="tlStageView" style="float:right" onchange="setStageView(this.value)"><option value="plan">Plan</option><option value="height">Height</option><option value="strip">Strip</option></select></div>
                 <div class="stage-grid" id="tlStage"></div>
             </div>
             <div class="tl-props" id="tlProps"></div>
@@ -1218,6 +1261,7 @@ async function loadAnimations() {
 // ---------------------------------------------------------------------------
 // LIVE STATUS: stage tiles, table swatches, sequence and animation status
 let lastStatus = null;
+let lastStatusAt = 0;
 let stageVisible = true;
 function esc(t) { return String(t == null ? '' : t).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function cap(t) { return t ? t.charAt(0).toUpperCase() + t.slice(1) : ''; }
@@ -1229,6 +1273,7 @@ async function pollStatus() {
         const r = await fetch(BASE + 'status_json');
         if (!r.ok) return;
         lastStatus = await r.json();
+        lastStatusAt = performance.now();
     } catch(e) { return; }
     renderStage();
     renderSeqStatus();
@@ -1249,47 +1294,64 @@ function toggleStage(hdr) {
     b.style.display = stageVisible ? 'block' : 'none';
 }
 
-// Plan view: remembered in this browser (storage may be unavailable, so it's best-effort)
-let stagePlan = false;
-try { stagePlan = localStorage.getItem('nlStagePlan') === '1'; } catch (e) {}
-function setStagePlan(on) {
-    stagePlan = !!on;
-    try { localStorage.setItem('nlStagePlan', stagePlan ? '1' : '0'); } catch (e) {}
-    ['stagePlan', 'tlStagePlan'].forEach(id => { const el = document.getElementById(id); if (el) el.checked = stagePlan; });
+// Stage view (plan, height or strip), remembered in this browser (storage may be unavailable, so it's best-effort)
+let stageView = 'plan';
+try { stageView = localStorage.getItem('nlStageView') || 'plan'; } catch (e) {}
+function setStageView(v) {
+    stageView = ['plan', 'height', 'strip'].includes(v) ? v : 'plan';
+    try { localStorage.setItem('nlStageView', stageView); } catch (e) {}
+    ['stageView', 'tlStageView'].forEach(id => { const el = document.getElementById(id); if (el) el.value = stageView; });
     renderStage();
     if (typeof tlUpdateStage === 'function') tlUpdateStage();
 }
-const HEIGHT_BADGE = {low: 'L', middle: 'M', high: 'H'};
+function setStagePlan(on) { setStageView(on ? 'plan' : 'strip'); }  // older name
+const HEIGHT_LEVEL = {low: 1, middle: 2, high: 3};
 function stageTileHTML(t) {
-    // t: name, role, color, mode, bri, linked, simulated, layer, side, depth, height
+    // t: name, role, color, mode, bri, linked, simulated, layer, side, depth, height, aim
     let detail = cap(t.role || '');
     if (t.mode) detail += '  ' + t.mode + (t.mode === 'OFF' || t.bri == null ? '' : ' ' + t.bri + '%');
-    const pos = (t.side || 'centre') + ', ' + (t.depth || 'beside') + ', ' + (t.height || 'middle');
-    return '<div class="stage-tile" title="' + esc(t.name) + ' (' + pos + ')">'
+    const pos = (t.side || 'centre') + ', ' + (t.depth || 'beside') + ', ' + (t.height || 'middle') + ' height, points ' + ((t.aim || 'you') === 'you' ? 'at you' : t.aim);
+    const lvl = HEIGHT_LEVEL[t.height];
+    return '<div class="stage-tile" title="' + esc(t.name) + ' (' + esc(pos) + ')">'
         + '<div class="stage-box layer-' + esc(t.layer || 'base') + '" style="background:' + (t.color || '#373737') + ';' + (t.linked === false ? 'filter:brightness(.4);' : '') + '">'
         + (t.simulated ? '<span class="sim">SIM</span>' : '')
-        + (stagePlan && HEIGHT_BADGE[t.height] ? '<span class="hb">' + HEIGHT_BADGE[t.height] + '</span>' : '')
+        + (stageView === 'plan' && lvl ? '<span class="hb">' + [3, 2, 1].map(n => '<i class="' + (lvl >= n ? 'on' : '') + '"></i>').join('') + '</span>' : '')
+        + (stageView === 'plan' && t.aim && t.aim !== 'you' && AIM_ARROW[t.aim] ? '<span class="aim">' + AIM_ARROW[t.aim] + '</span>' : '')
         + (t.color ? '' : '<span class="unknown">?</span>') + '</div>'
         + '<div class="stage-name">' + esc(t.name) + '</div>'
         + '<div class="stage-detail">' + esc(detail) + '</div>'
         + '<div class="stage-detail">' + esc(t.linked === false ? 'not linked' : (t.layer || 'base')) + '</div></div>';
 }
-function stageLayout(box, tiles) {
-    // Strip in sweep order, or the plan: columns your left to right, front row at the top
-    box.className = stagePlan ? 'stage-plan' : 'stage-grid';
+function stageLayout(box, tiles, camera) {
+    // Strip in sweep order, the plan (columns your left to right, front row at the top, you in
+    // the middle, the camera outside the grid), or the height view (high row at the top)
+    box.className = stageView === 'strip' ? 'stage-grid' : 'stage-plan';
     let html = '';
-    if (!stagePlan) html = tiles.map(stageTileHTML).join('');
+    if (stageView === 'strip') html = tiles.map(stageTileHTML).join('');
     else {
-        const sides = ['left', 'centre', 'right'], depths = ['front', 'beside', 'back'];
-        html = '<div></div>' + ['Your left', 'Centre', 'Your right'].map(n => '<div class="ph">' + n + '</div>').join('');
-        depths.forEach(d => {
-            html += '<div class="pr">' + cap(d) + '</div>';
+        const sides = ['left', 'centre', 'right'];
+        const plan = stageView === 'plan';
+        const rows = plan ? ['front', 'beside', 'back'] : ['high', 'middle', 'low'];
+        const key = plan ? 'depth' : 'height';
+        const cam = camera || 'front';
+        const camHTML = '<div class="stage-cam">' + CAMERA_SVG + ' camera</div>';
+        const camRow = r => {  // a row above or below the grid with the camera in its column
+            const col = cam.endsWith('left') ? 0 : cam.endsWith('right') ? 2 : 1;
+            return '<div></div>' + sides.map((_, c) => c === col ? camHTML : '<div></div>').join('');
+        };
+        if (plan && cam.startsWith('front')) html += camRow();
+        html += '<div></div>' + ['Your left', 'Centre', 'Your right'].map(n => '<div class="ph">' + n + '</div>').join('');
+        rows.forEach(d => {
+            const side = plan && d === 'beside' && (cam === 'left' || cam === 'right') ? cam : null;
+            html += '<div class="pr">' + (side === 'left' ? CAMERA_SVG + ' ' : '') + cap(d) + '</div>';
             sides.forEach(sd => {
-                const here = tiles.filter(t => (sides.includes(t.side) ? t.side : 'centre') === sd && (depths.includes(t.depth) ? t.depth : 'beside') === d);
+                const here = tiles.filter(t => (sides.includes(t.side) ? t.side : 'centre') === sd && (rows.includes(t[key]) ? t[key] : rows[1]) === d);
                 html += '<div class="pc" data-cell="' + sd + '/' + d + '">' + (here.length ? here.map(stageTileHTML).join('')
-                    : (sd === 'centre' && d === 'beside' ? '<span class="you">(you)</span>' : '')) + '</div>';
+                    : (plan && sd === 'centre' && d === 'beside' ? '<span class="you">' + PERSON_SVG + '</span>' : ''))
+                    + (side === 'right' && sd === 'right' ? '<span style="align-self:center">' + CAMERA_SVG + '</span>' : '') + '</div>';
             });
         });
+        if (plan && cam.startsWith('back')) html += camRow();
     }
     if (box._last !== html) { box.innerHTML = html; box._last = html; }
 }
@@ -1298,7 +1360,7 @@ function renderStage() {
     const lights = lastStatus.lights || [];
     const grid = document.getElementById('stageGrid');
     if (!lights.length) { grid.className = 'stage-grid'; grid.innerHTML = '<div style="color:var(--muted)">No lights yet</div>'; grid._last = ''; return; }
-    stageLayout(grid, lights);
+    stageLayout(grid, lights, (lastStatus.stage || {}).camera);
 }
 
 function renderAnimStatus() {
@@ -1405,6 +1467,7 @@ function drawRender(d) {
     cv.width = width; cv.height = rulerH + rowH * d.lights.length + pad;
     const plotW = width - labelW - 12, t0 = d.start_ms, t1 = d.end_ms, span = Math.max(1, t1 - t0);
     const x = t => labelW + (t - t0) / span * plotW;
+    renderAxis = {labelW, plotW, t0, span, height: cv.height, name: d.sequence};
     ctx.fillStyle = '#181818'; ctx.fillRect(0, 0, cv.width, cv.height);
     ctx.font = '13px sans-serif'; ctx.textBaseline = 'middle';
     d.lights.forEach((l, r) => {
@@ -1431,6 +1494,33 @@ function drawRender(d) {
         + ((d.warnings || []).length ? '<br><span style="color:var(--red)">' + d.warnings.map(esc).join('<br>') + '</span>' : '');
 }
 function closeRender() { document.getElementById('renderModal').classList.remove('open'); }
+// Play marker on the render: follows the playing sequence (extrapolated between status polls)
+let renderAxis = null;
+function renderPlayingMs() {
+    const seq = lastStatus && lastStatus.sequence;
+    if (!renderAxis || !seq || seq.name !== renderAxis.name) return null;
+    let ms = seq.position_ms;
+    if (seq.state === 'playing') ms += performance.now() - lastStatusAt;
+    return Math.min(renderAxis.t0 + renderAxis.span, ms);
+}
+setInterval(() => {
+    const m = document.getElementById('renderMarker');
+    if (!m || !document.getElementById('renderModal').classList.contains('open')) return;
+    const ms = renderPlayingMs();
+    if (ms == null) { m.style.display = 'none'; return; }
+    const cv = document.getElementById('renderCanvas');
+    const scale = cv.getBoundingClientRect().width / cv.width;
+    m.style.display = 'block';
+    m.style.height = (renderAxis.height * scale) + 'px';
+    m.style.left = ((renderAxis.labelW + (ms - renderAxis.t0) / renderAxis.span * renderAxis.plotW) * scale - 1) + 'px';
+}, 50);
+function renderSeekClick(ev) {
+    if (!renderAxis || renderPlayingMs() == null) return;
+    const r = ev.target.getBoundingClientRect();
+    const px = (ev.clientX - r.left) * ev.target.width / r.width;
+    if (px < renderAxis.labelW) return;
+    seqCmd('seek', Math.round(renderAxis.t0 + Math.min(1, (px - renderAxis.labelW) / renderAxis.plotW) * renderAxis.span));
+}
 function saveRenderPNG() {
     const a = document.createElement('a');
     a.href = document.getElementById('renderCanvas').toDataURL('image/png');
@@ -1444,6 +1534,11 @@ let settingsData = null;
 async function settingsPost(body) {
     const r = await fetch('/NeewerLux/settings', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
     return r.json();
+}
+function openSettings() {
+    const b = document.getElementById('settingsBody');
+    if (b.style.display === 'none') { b.style.display = 'block'; loadSettings(); }
+    document.getElementById('settingsCard').scrollIntoView({behavior: 'smooth'});
 }
 function toggleSettings(hdr) {
     const b = document.getElementById('settingsBody');
@@ -1478,6 +1573,9 @@ function applySettings(d) {
     document.getElementById('gpFallback').value = g.cctFallbackMode;
     document.getElementById('gpSim').value = g.simulatedLights;
     document.getElementById('gpSimCCT').checked = !!g.simulatedCCTOnly;
+    document.getElementById('gpCamera').value = g.cameraPosition || 'front';
+    document.getElementById('gpEyelineFlash').value = g.eyelineFlash || 'same';
+    document.getElementById('gpHandback').value = g.handbackFadeMs != null ? g.handbackFadeMs : 500;
     setGlobalPrefsDirty(false);
 }
 // Save Global Preferences is highlighted while the form has changes it hasn't saved
@@ -1513,7 +1611,7 @@ function fillLightPrefs() {
     document.getElementById('lpTempMax').value = l.tempRange[1];
     document.getElementById('lpCCTOnly').checked = l.cctOnly;
     document.getElementById('lpRole').value = l.role;
-    lpPos = {side: l.side, depth: l.depth || 'beside', height: l.height || 'middle'};
+    lpPos = {side: l.side, depth: l.depth || 'beside', height: l.height || 'middle', aim: l.aim || 'you'};
     renderPosPicker();
     document.getElementById('lpOrder').value = l.order;
     document.getElementById('lpEyeline').checked = !!l.eyeline;
@@ -1522,7 +1620,14 @@ function fillLightPrefs() {
     document.getElementById('lpLocked').checked = !!l.locked;
 }
 // Position picker: a 3 x 3 grid from your seat (your left to right, front at the top) plus height
-let lpPos = {side: 'centre', depth: 'beside', height: 'middle'};
+let lpPos = {side: 'centre', depth: 'beside', height: 'middle', aim: 'you'};
+const AIM_PAD = [['front-left', '\u2196'], ['front', '\u2191'], ['front-right', '\u2197'], ['left', '\u2190'], ['you', '\u25cf'],
+                 ['right', '\u2192'], ['back-left', '\u2199'], ['back', '\u2193'], ['back-right', '\u2198']];
+const AIM_ARROW = Object.fromEntries(AIM_PAD);
+// a top-down head and shoulders facing the front (up), with a faint view cone
+const PERSON_SVG = '<svg width="44" height="40" viewBox="0 0 44 40" aria-label="you"><polygon points="22,18 6,0 38,0" fill="rgba(255,255,255,.07)"/>'
+    + '<rect x="6" y="20" width="32" height="12" rx="6" fill="#6a6a6a"/><ellipse cx="22" cy="20" rx="7" ry="8" fill="#9a9a9a"/><polygon points="19,13 25,13 22,8" fill="#9a9a9a"/></svg>';
+const CAMERA_SVG = '<svg width="26" height="20" viewBox="0 0 26 20" aria-label="camera"><rect x="3" y="1" width="20" height="12" rx="3" fill="#888"/><polygon points="9,13 17,13 20,19 6,19" fill="#888"/></svg>';
 function renderPosPicker() {
     const box = document.getElementById('lpPos');
     if (!box || !settingsData) return;
@@ -1543,14 +1648,19 @@ function renderPosPicker() {
             let text = '';
             if (sel) text = 'This light' + (names.length ? '\n+ ' + names.length + ' other' + (names.length > 1 ? 's' : '') : '');
             else if (names.length) text = names.slice(0, 2).join('\n') + (names.length > 2 ? '\n+' + (names.length - 2) + ' more' : '');
-            else if (sd === 'centre' && d === 'beside') text = '(you)';
+    
+            const you = !text && sd === 'centre' && d === 'beside';
             g += '<button type="button" class="pos-cell' + (sel ? ' sel' : '') + (names.length ? ' has' : '') + '" data-side="' + sd + '" data-depth="' + d
-                + '" title="' + esc(names.join(', ')) + '" onclick="lpPos.side=this.dataset.side;lpPos.depth=this.dataset.depth;renderPosPicker()">' + esc(text) + '</button>';
+                + '" title="' + esc(names.join(', ')) + '" onclick="lpPos.side=this.dataset.side;lpPos.depth=this.dataset.depth;renderPosPicker()">' + (you ? PERSON_SVG : esc(text)) + '</button>';
         });
     });
     g += '</div><div class="pos-hcol"><div style="color:var(--muted)">Height</div>'
         + ['high', 'middle', 'low'].map(h => '<button type="button" class="pos-h' + (lpPos.height === h ? ' sel' : '') + '" data-height="' + h
-        + '" onclick="lpPos.height=this.dataset.height;renderPosPicker()">' + cap(h) + '</button>').join('') + '</div>';
+        + '" onclick="lpPos.height=this.dataset.height;renderPosPicker()">' + cap(h) + '</button>').join('')
+        + '<div style="color:var(--muted);margin-top:6px">Points</div><div class="pos-aim">'
+        + AIM_PAD.map(([a, glyph]) => '<button type="button" class="' + (lpPos.aim === a ? 'sel' : '') + '" data-aim="' + a + '" title="'
+            + (a === 'you' ? 'At you' : 'Points ' + a.replace('-', ' ')) + '" onclick="lpPos.aim=this.dataset.aim;renderPosPicker()">' + glyph + '</button>').join('')
+        + '</div></div>';
     box.innerHTML = g;
 }
 function resetTempRange() {
@@ -1565,7 +1675,7 @@ async function saveLightPrefs() {
     if (!l) { logMsg('No light selected', 'err'); return; }
     const settings = {customName: document.getElementById('lpName').value, preferredID: num('lpID'),
         tempRange: [num('lpTempMin'), num('lpTempMax')], cctOnly: document.getElementById('lpCCTOnly').checked,
-        role: document.getElementById('lpRole').value, side: lpPos.side, depth: lpPos.depth, height: lpPos.height, order: num('lpOrder'),
+        role: document.getElementById('lpRole').value, side: lpPos.side, depth: lpPos.depth, height: lpPos.height, aim: lpPos.aim || 'you', order: num('lpOrder'),
         eyeline: document.getElementById('lpEyeline').checked, maxBri: num('lpMaxBri'), minBri: num('lpMinBri'),
         locked: document.getElementById('lpLocked').checked};
     try {
@@ -1580,7 +1690,9 @@ async function saveGlobalPrefs() {
     const settings = {envMaxBri: num('gpEnvMax'), envMinBri: num('gpEnvMin'), seqFrameRate: num('gpSeqFps'),
         effectMaxSeconds: num('gpEffectMax'), globalCCTMin: num('gpCCTMin'), globalCCTMax: num('gpCCTMax'),
         cctFallbackMode: document.getElementById('gpFallback').value, simulatedLights: num('gpSim'),
-        simulatedCCTOnly: document.getElementById('gpSimCCT').checked, flashGuardEnabled: document.getElementById('gpFlashGuard').checked};
+        simulatedCCTOnly: document.getElementById('gpSimCCT').checked, flashGuardEnabled: document.getElementById('gpFlashGuard').checked,
+        cameraPosition: document.getElementById('gpCamera').value, eyelineFlash: document.getElementById('gpEyelineFlash').value,
+        handbackFadeMs: num('gpHandback')};
     try {
         const d = await settingsPost({action:'set_global', settings:settings});
         if (!d.success) { logMsg('Global preferences not saved: ' + (d.errors || []).join('; '), 'err'); return; }
@@ -2742,14 +2854,14 @@ function tlUpdateStage() {
         const mt = meta[t.id] || {};
         return {name: t.name, role: mt.role, color: ch && ch[1] ? ch[1] : null, mode: ch ? ch[3] : null, bri: ch ? ch[2] : null,
                 linked: true, simulated: mt.simulated, layer: ch && ch[4] === 'sequence' ? 'show' : 'base',
-                side: mt.side, depth: mt.depth, height: mt.height};
+                side: mt.side, depth: mt.depth, height: mt.height, aim: mt.aim};
     });
-    stageLayout(document.getElementById('tlStage'), tiles);
+    stageLayout(document.getElementById('tlStage'), tiles, settingsData ? settingsData.global.cameraPosition : 'front');
 }
 
 // INIT
 window.addEventListener('load', () => {
-    ['stagePlan', 'tlStagePlan'].forEach(id => { const el = document.getElementById(id); if (el) el.checked = stagePlan; });
+    ['stageView', 'tlStageView'].forEach(id => { const el = document.getElementById(id); if (el) el.value = stageView; });
     watchGlobalPrefs();
     refreshAll();
     startAutoRefresh();

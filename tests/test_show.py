@@ -214,15 +214,22 @@ def _positionChecks(rig, nl, S):
 def t_animationModeValidation(rig):
     """A keyframe light without a known mode is refused on save instead of silently not playing."""
     A = "/NeewerLux/animate"
-    bad = {"name": "Harness Bad Mode", "keyframes": [{"hold_ms": 500, "fade_ms": 0, "lights": {"*": {"mode": "SCENE", "scene": 4, "bri": 50}}}]}
+    bad = {"name": "Harness Bad Mode", "keyframes": [{"hold_ms": 500, "fade_ms": 0, "lights": {"*": {"mode": "SPARKLE", "bri": 50}}}]}
     r = rig.post(A, {"action": "save", "animation": bad, "overwrite": True})
-    check(not r["success"] and "ANM" in r["errors"][0], "SCENE refused with a hint: " + str(r))
+    check(not r["success"] and "SPARKLE" in r["errors"][0], "an unknown mode is refused: " + str(r))
     bad["keyframes"][0]["lights"]["*"] = {"hue": 10}
     r = rig.post(A, {"action": "save", "animation": bad, "overwrite": True})
     check(not r["success"], "a missing mode is refused")
     good = dict(bad, keyframes=[{"hold_ms": 500, "fade_ms": 0, "lights": {"*": {"mode": "ANM", "scene": 4, "bri": 50}, "2": {"mode": "OFF"}}}])
     r = rig.post(A, {"action": "save", "animation": good, "overwrite": True})
     check(r["success"], "ANM and OFF are accepted: " + str(r))
+    # SCENE is another name for ANM, and plays
+    scene = {"name": "Harness Bad Mode", "keyframes": [{"hold_ms": 600, "fade_ms": 0, "lights": {"*": {"mode": "SCENE", "scene": 4, "bri": 50}}}]}
+    r = rig.post(A, {"action": "save", "animation": scene, "overwrite": True})
+    check(r["success"], "SCENE is accepted: " + str(r))
+    t0 = time.monotonic()
+    rig.get("animate=Harness%20Bad%20Mode|1|10|100|false|||effect", 0.4)
+    check(any(d[1] == 136 for _, d in writesFor(rig, FILL, t0)), "a SCENE keyframe sends a scene command")
     rig.post(A, {"action": "delete", "name": "Harness Bad Mode"})
 
 
@@ -258,6 +265,64 @@ def t_exactAnimationTiming(rig):
     finally:
         nl.flashGuardEnabled = True
         rig.post(A, {"action": "delete", "name": "Harness Exact"})
+
+
+def t_handbackFade(rig):
+    """1.3.3: when a layer lets go of a light it fades back instead of cutting (Global
+    Preferences, Hand-back fade; a sequence can set its own). Starts and manual commands
+    stay instant; brightness moves continuously across a mode change."""
+    nl = rig.nl
+    nl.handbackFadeMs = 500
+    try:
+        rig.get("light=*&mode=CCT&temp=56&bri=20", 0.4)  # base: CCT 20%
+        seq = stepSequence("hb", [200], 600)              # HSI 200, 100% for 0.6 s, then revert
+        t0 = time.monotonic()
+        rig.post("/NeewerLux/sequence", {"action": "play", "sequence": seq}, 1.6)
+        w = [(t - t0, list(d)) for t, d in writesFor(rig, FILL, t0)]
+        hsi = [x for x in w if x[1][1] == 134]
+        check(hsi and hsi[0][0] < 0.15, "the sequence starts at once: " + str(w[:2]))
+        last = rig.rec.last(rig.mac(FILL))
+        check(last[1] == 135 and bri(last) == 20, "ends back on the base state: " + str(last))
+        # between the sequence's end (0.6 s) and the base, intermediate frames: HSI with falling
+        # saturation and brightness, no dip below the target brightness
+        mid = [d for t, d in w if 0.62 < t < 1.2 and d[1] == 134]
+        check(len(mid) >= 4, "fades over several frames, got %d: %s" % (len(mid), [d for _, d in w][-8:]))
+        sats = [d[5] for d in mid]
+        bris = [d[6] for d in mid]
+        check(sats == sorted(sats, reverse=True) and min(sats) < 100, "saturation falls towards white: " + str(sats))
+        check(bris == sorted(bris, reverse=True) and min(bris) >= 20, "brightness moves down without a dip: " + str(bris))
+        tBase = min(t for t, d in w if d[1] == 135 and t > 0.6)
+        check(0.4 <= tBase - 0.6 <= 0.75, "the fade takes about 0.5 s, took %.0f ms" % ((tBase - 0.6) * 1000))
+        RESULTS.append("    hand-back fade: %d frames, %.0f ms, saturation %s" % (len(mid), (tBase - 0.6) * 1000, sats))
+        # a manual command during a hand-back is instant
+        rig.post("/NeewerLux/sequence", {"action": "play", "sequence": seq}, 0.7)
+        t1 = time.monotonic()
+        rig.get("light=2&mode=CCT&temp=40&bri=60", 0.15)
+        after = [(t - t1, list(d)) for t, d in writesFor(rig, FILL, t1)]
+        check(after and after[-1][1][1] == 135 and bri(after[-1][1]) == 60 and after[-1][0] < 0.12,
+              "a manual command during the fade lands at once: " + str(after[-3:]))
+        # per-sequence override: 0 = cut
+        rig.get("light=*&mode=CCT&temp=56&bri=20", 0.6)
+        seq0 = dict(seq, handback_fade_ms=0)
+        t2 = time.monotonic()
+        rig.post("/NeewerLux/sequence", {"action": "play", "sequence": seq0}, 1.0)
+        w2 = [(t - t2, list(d)) for t, d in writesFor(rig, FILL, t2)]
+        check(not [d for t, d in w2 if 0.62 < t and d[1] == 134 and d[5] < 100], "handback_fade_ms 0 cuts: " + str(w2[-4:]))
+    finally:
+        nl.handbackFadeMs = 0
+
+
+def t_blendCommands(rig):
+    """Pure checks of the fade maths."""
+    b = rig.nl.show.blendCommands
+    check(b({"mode": "HSI", "hue": 350, "sat": 100, "bri": 50}, {"mode": "HSI", "hue": 10, "sat": 100, "bri": 50}, 0.5)["hue"] == 0, "hue goes the short way round")
+    m = b({"mode": "CCT", "temp": 56, "bri": 80}, {"mode": "HSI", "hue": 120, "sat": 100, "bri": 40}, 0.5)
+    check(m == {"mode": "HSI", "hue": 120, "sat": 50, "bri": 60}, "CCT to HSI starts white: " + str(m))
+    m = b({"mode": "HSI", "hue": 120, "sat": 100, "bri": 40}, {"mode": "CCT", "temp": 56, "bri": 80}, 0.5)
+    check(m == {"mode": "HSI", "hue": 120, "sat": 50, "bri": 60}, "HSI to CCT fades to white first: " + str(m))
+    m = b({"mode": "ANM", "scene": 4, "bri": 50}, {"mode": "CCT", "temp": 56, "bri": 10}, 0.5)
+    check(m == {"mode": "ANM", "scene": 4, "bri": 30}, "scene brightness moves first: " + str(m))
+    check(b({"mode": "OFF"}, {"mode": "CCT", "temp": 56, "bri": 10}, 0.5)["mode"] == "CCT", "power commands cut")
 
 
 def t_effectOverPartOfRigRejoinsInSync(rig):
@@ -509,7 +574,7 @@ def t_guidSidecar(rig):
 
 def t_statusShape(rig):
     st = rig.getJSON("status_json")
-    check(set(st) == {"apiVersion", "layers", "sequence", "lights", "flashGuard"}, "status keys")
+    check(set(st) == {"apiVersion", "layers", "sequence", "lights", "flashGuard", "stage", "handbackFadeMs"}, "status keys: " + str(sorted(st)))
     check([l["role"] for l in st["lights"]] == ["key", "fill", "rim", "ambient"], "roles in status")
     check(all(l["layer"] == "base" for l in st["lights"]), "idle lights are on base")
 
@@ -1115,7 +1180,7 @@ TESTS = [t_maxBrightnessHTTP, t_maxBrightnessAnimationAndSequence, t_minBrightne
          t_batchDuringSequenceBecomesRevertTarget, t_listJsonStructured,
          t_presetEditAPI, t_animationEditAPI, t_sequenceEditAPI, t_commandsDontWaitForStatusPoll,
          t_flashGuardLimitsOutput, t_flashGuardRedFlashes, t_shippedContentUnderFlashLimit,
-         t_positionTargetsAndSweep, t_animationModeValidation, t_exactAnimationTiming,
+         t_positionTargetsAndSweep, t_animationModeValidation, t_exactAnimationTiming, t_handbackFade, t_blendCommands,
          t_addSimulatedRig]
 
 

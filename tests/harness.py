@@ -109,6 +109,8 @@ class Rig:
     def reset(self, bytesForAll=None):
         """Stop everything, put every light back to a known state, clear the recorder."""
         nl = self.nl
+        if hasattr(nl, "handbackFadeMs"):
+            nl.handbackFadeMs = 0  # most tests check exact values right after a hand-back; t_handbackFade turns it on
         if getattr(nl, "showEngine", None) is not None:
             nl.stopAnimation("override")
             nl.stopAnimation("effect", clearQueue=True)
@@ -188,4 +190,6 @@ def boot(srcDir, verbose=False, roles=True, model="RGB660"):
     server = nl.ThreadingHTTPServer(("127.0.0.1", 0), nl.NLPythonServer)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     time.sleep(0.3)
+    if hasattr(nl, "handbackFadeMs"):
+        nl.handbackFadeMs = 0  # see Rig.reset
     return Rig(nl, server.server_address[1], rec, workdir)

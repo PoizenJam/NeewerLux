@@ -250,7 +250,7 @@ animRevertOnFinish = True  # revert lights to pre-animation state when a non-loo
 showEngine = None              # neewerlux_show.ShowCompositor, created by initShowEngine()
 savedSequences = {}            # dict of {name: sequence_dict} loaded from disk
 sequencesDir = os.path.dirname(os.path.abspath(sys.argv[0])) + os.sep + "light_prefs" + os.sep + "sequences"
-lightShowPrefs = {}            # {MAC: {"role", "side", "order", "eyeline", "maxBri", "minBri", "locked", "depth", "height"}}
+lightShowPrefs = {}            # {MAC: {"role", "side", "order", "eyeline", "maxBri", "minBri", "locked", "depth", "height", "aim"}}
 _lastWritten = {}              # {MAC: bytes last actually written, after CCT-only conversion and limits}, for display
 API_VERSION = 2                # HTTP API contract version (docs/HTTP_API.md); v1.3.0 and earlier count as 1
 flashGuard = show.FlashGuard() # photosensitivity limit on what is actually sent (flashGuardEnabled)
@@ -261,11 +261,14 @@ _pendingSendsLock = threading.Lock()
 _lightsOff = set()             # MACs whose last power command was OFF
 SHOW_PREF_DEFAULTS = {"role": "ambient", "side": "centre", "order": 0, "eyeline": False,
                       "maxBri": -1, "minBri": -1, "locked": False, # -1 brightness = use the global default
-                      "depth": "beside", "height": "middle"}
+                      "depth": "beside", "height": "middle", "aim": "you"}
 LIGHT_ROLES = ["key", "fill", "rim", "ambient", "practical"]
 LIGHT_SIDES = ["left", "centre", "right"]     # the streamer's left and right, facing the camera
 LIGHT_DEPTHS = ["front", "beside", "back"]    # between the streamer and the camera, level with them, behind them
 LIGHT_HEIGHTS = ["low", "middle", "high"]
+LIGHT_AIMS = ["you", "front", "front-right", "right", "back-right", "back", "back-left", "left", "front-left"]  # where it points (plan directions)
+CAMERA_POSITIONS = ["front-left", "front", "front-right", "left", "right", "back-left", "back", "back-right"]
+EYELINE_FLASH_CHOICES = ("same", "gentler", "calm")
 
 # HTTP SERVER (GUI-LAUNCHED) MANAGEMENT
 httpServerInstance = None   # ThreadingHTTPServer object (when running from GUI)
@@ -322,6 +325,9 @@ envMinBri = 0 # default brightness floor for lights that are on (0% and OFF stil
 flashGuardEnabled = True # limit flashing to 3 per second per light (WCAG); the manual controls are exempt
 seqFrameRate = 20 # default sequence frame rate (BLE updates per second), 1-30
 effectMaxSeconds = 30 # cap for looping effect-layer animations that have no loop count
+cameraPosition = "front"  # where the main camera is, from the streamer's seat (drawn on the Stage plan)
+eyelineFlash = "same"     # flashes on eye-line lights: "same", "gentler" (1 a second) or "calm" (one change per 2 s)
+handbackFadeMs = 500      # fade when a layer hands a light back (effect ends, sequence reverts, animation stops); 0 = cut
 simulatedLights = 0 # simulated lights to add at startup (rig preset 0-4); --simulate overrides for one run
 simulatedCCTOnly = False # also add a simulated CCT-only light, to exercise the CCT-only fallback
 simulateFaults = False # --simulate-faults: simulated lights drop some writes and disconnect now and then
@@ -1328,6 +1334,9 @@ try: # try to load the GUI
 
                 self.seqFrameRateSpin.setValue(seqFrameRate)
                 self.effectMaxSecondsSpin.setValue(effectMaxSeconds)
+                self.cameraPositionCombo.setCurrentIndex(CAMERA_POSITIONS.index(cameraPosition))
+                self.eyelineFlashCombo.setCurrentIndex(EYELINE_FLASH_CHOICES.index(eyelineFlash))
+                self.handbackFadeSpin.setValue(handbackFadeMs)
                 self.globalCCTMinSpin.setValue(globalCCTMin)
                 self.globalCCTMaxSpin.setValue(globalCCTMax)
                 self.simulatedLightsCombo.setCurrentIndex(simulatedLights)
@@ -1491,7 +1500,13 @@ try: # try to load the GUI
                 self.seqStatusLabel.setText("Can't render: " + result["errors"][0])
                 return
             from neewerlux_stage import RenderDialog
-            pyside_exec(RenderDialog(renderSequencePNG(result), result["sequence"], self))
+            png = renderSequencePNG(result)
+
+            def playing():  # position in ms if this sequence is the one playing, else None
+                st = getShowStatus()["sequence"]
+                return st.get("position_ms") if st and st.get("name") == result["sequence"] else None
+            pyside_exec(RenderDialog(png, result["sequence"], self, axis=result.get("axis"), position=playing,
+                                     seek=lambda ms: sequenceControl("seek", ms)))
 
         def seqPauseResume(self):
             seqStatus = getShowStatus()["sequence"]
@@ -2388,7 +2403,7 @@ try: # try to load the GUI
             # SHOW SETTINGS
             self.lightRoleCombo.setCurrentIndex(LIGHT_ROLES.index(getLightShowPref(selectedLight, "role")))
             self.lightPositionPicker.setValue(getLightShowPref(selectedLight, "side"), getLightShowPref(selectedLight, "depth"),
-                                              getLightShowPref(selectedLight, "height"))
+                                              getLightShowPref(selectedLight, "height"), getLightShowPref(selectedLight, "aim"))
             others = {}
             for b in range(len(availableLights)):
                 if b != selectedLight:
@@ -2478,7 +2493,7 @@ try: # try to load the GUI
                 lightMAC = availableLights[selectedRows[0]][0].address.upper()
                 side, depth, height = self.lightPositionPicker.value()
                 newShowPrefs = {"role": LIGHT_ROLES[self.lightRoleCombo.currentIndex()],
-                                "side": side, "depth": depth, "height": height,
+                                "side": side, "depth": depth, "height": height, "aim": self.lightPositionPicker.aim(),
                                 "order": self.lightOrderSpin.value(),
                                 "eyeline": self.lightEyelineCheck.isChecked(),
                                 "maxBri": self.lightMaxBriSpin.value(),
@@ -2512,7 +2527,14 @@ try: # try to load the GUI
                         saveLightPrefs(selectedRows[0]) # save the light settings to a special file
 
                     loadLightAliases() # refresh alias table so names/IDs take effect immediately
+                    savedMAC = availableLights[selectedRows[0]][0].address.upper()
                     self.updateLights(False) # reorder table to reflect any preferred ID changes
+                    # the reload clears the selection (which switched tabs); stay on this light's preferences
+                    for row in range(len(availableLights)):
+                        if availableLights[row][0].address.upper() == savedMAC:
+                            self.lightTable.selectRow(row)
+                            break
+                    self.ColorModeTabWidget.setCurrentIndex(self.TAB_LIGHTPREFS)
                 else:                    
                     printDebugString("You don't have any new preferences to save, so we aren't saving any!")
 
@@ -2554,6 +2576,9 @@ try: # try to load the GUI
                 self.flashGuardCheck.blockSignals(False)
                 self.seqFrameRateSpin.setValue(seqFrameRate)
                 self.effectMaxSecondsSpin.setValue(effectMaxSeconds)
+                self.cameraPositionCombo.setCurrentIndex(CAMERA_POSITIONS.index(cameraPosition))
+                self.eyelineFlashCombo.setCurrentIndex(EYELINE_FLASH_CHOICES.index(eyelineFlash))
+                self.handbackFadeSpin.setValue(handbackFadeMs)
                 self.simulatedLightsCombo.setCurrentIndex(simulatedLights)
                 self.simulatedCCTOnlyCheck.setChecked(simulatedCCTOnly)
                 self.maxNumOfAttempts_field.setText(str(maxNumOfAttempts))
@@ -2608,6 +2633,9 @@ try: # try to load the GUI
                 self.flashGuardCheck.blockSignals(False)
                 self.seqFrameRateSpin.setValue(20)
                 self.effectMaxSecondsSpin.setValue(30)
+                self.cameraPositionCombo.setCurrentIndex(CAMERA_POSITIONS.index("front"))
+                self.eyelineFlashCombo.setCurrentIndex(0)
+                self.handbackFadeSpin.setValue(500)
                 self.simulatedLightsCombo.setCurrentIndex(0)
                 self.simulatedCCTOnlyCheck.setChecked(False)
                 self.maxNumOfAttempts_field.setText("6")
@@ -2640,7 +2668,7 @@ try: # try to load the GUI
 
         def saveGlobalPrefs(self):
             # change these global values to the new values in Prefs
-            global customKeys, autoConnectToLights, printDebug, rememberLightsOnExit, rememberPresetsOnExit, autoReconnectOnDisconnect, maxNumOfAttempts, acceptable_HTTP_IPs, whiteListedMACs, hideConsoleOnLaunch, minimizeToTrayOnClose, httpAutoStart, httpPort, cctFallbackMode, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, globalCCTMin, globalCCTMax, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, cctFallbackMode, envMaxBri, envMinBri, seqFrameRate, effectMaxSeconds, simulatedLights, simulatedCCTOnly, flashGuardEnabled
+            global customKeys, autoConnectToLights, printDebug, rememberLightsOnExit, rememberPresetsOnExit, autoReconnectOnDisconnect, maxNumOfAttempts, acceptable_HTTP_IPs, whiteListedMACs, hideConsoleOnLaunch, minimizeToTrayOnClose, httpAutoStart, httpPort, cctFallbackMode, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, globalCCTMin, globalCCTMax, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, cctFallbackMode, envMaxBri, envMinBri, seqFrameRate, effectMaxSeconds, simulatedLights, simulatedCCTOnly, flashGuardEnabled, cameraPosition, eyelineFlash, handbackFadeMs
 
             finalPrefs = [] # list of final prefs to merge together at the end
 
@@ -2770,6 +2798,15 @@ try: # try to load the GUI
             effectMaxSeconds = self.effectMaxSecondsSpin.value()
             if effectMaxSeconds != 30:
                 finalPrefs.append("effectMaxSeconds=" + str(effectMaxSeconds))
+            cameraPosition = self.CAMERA_POSITIONS[self.cameraPositionCombo.currentIndex()]
+            if cameraPosition != "front":
+                finalPrefs.append("cameraPosition=" + cameraPosition)
+            eyelineFlash = self.EYELINE_FLASH[self.eyelineFlashCombo.currentIndex()]
+            if eyelineFlash != "same":
+                finalPrefs.append("eyelineFlash=" + eyelineFlash)
+            handbackFadeMs = self.handbackFadeSpin.value()
+            if handbackFadeMs != 500:
+                finalPrefs.append("handbackFadeMs=" + str(handbackFadeMs))
 
             # Simulated lights take effect at the next start (the light list isn't rebuilt live)
             simulatedLights = self.simulatedLightsCombo.currentIndex()
@@ -5415,15 +5452,29 @@ def _takePendingSends():
     return indices
 
 
+# Stricter limits for lights marked "In my eye line", when Global Preferences asks for them.
+# They apply even with the main flash guard off; flashes per second, so "calm" (0.25) spaces
+# changes about 2 seconds apart.
+eyelineGuards = {"gentler": show.FlashGuard(limit=1.0), "calm": show.FlashGuard(limit=0.25)}
+
+
 def _flashAllowed(lightIdx, byteVal):
     """The flash guard's decision for a value about to be written to a light. Values the
-    light will really show are judged (after the CCT-only conversion)."""
-    if not flashGuardEnabled or not isinstance(byteVal, (list, tuple)) or len(byteVal) < 4:
+    light will really show are judged (after the CCT-only conversion). Eye-line lights use
+    their stricter guard when one is chosen (it is stricter, so it covers the main one)."""
+    if not isinstance(byteVal, (list, tuple)) or len(byteVal) < 4:
+        return True
+    guard = None
+    if eyelineFlash in eyelineGuards and getLightShowPref(lightIdx, "eyeline"):
+        guard = eyelineGuards[eyelineFlash]
+    elif flashGuardEnabled:
+        guard = flashGuard
+    if guard is None:
         return True
     shown = applyCCTFallback(lightIdx, byteVal)
     if shown is None:
         return True
-    if flashGuard.allow(availableLights[lightIdx][0].address, show.bytesToCommand(shown), getLightDisplayState(lightIdx)[0]):
+    if guard.allow(availableLights[lightIdx][0].address, show.bytesToCommand(shown), getLightDisplayState(lightIdx)[0]):
         _flashHeld.pop(lightIdx, None)
         return True
     # remember it: if nothing newer comes (the last value of a fast dial, the end of a
@@ -6302,7 +6353,7 @@ def resolveRoleTarget(spec):
 
 
 def parseShowPrefFields(fields):
-    """Show settings from sidecar fields 6-14: role|side|order|eyeline|maxBri|minBri|locked|depth|height."""
+    """Show settings from sidecar fields 6-15: role|side|order|eyeline|maxBri|minBri|locked|depth|height|aim."""
     prefs = dict(SHOW_PREF_DEFAULTS)
 
     def field(i):
@@ -6324,6 +6375,8 @@ def parseShowPrefFields(fields):
         prefs["depth"] = field(12).lower()
     if field(13).lower() in LIGHT_HEIGHTS:
         prefs["height"] = field(13).lower()
+    if field(14).lower() in LIGHT_AIMS:
+        prefs["aim"] = field(14).lower()
     return prefs
 
 
@@ -6333,9 +6386,11 @@ def showPrefsToFields(prefs):
         return ""
     fields = [prefs["role"], prefs["side"], str(prefs["order"]), "True" if prefs["eyeline"] else "",
               str(prefs["maxBri"]), str(prefs["minBri"]), "True" if prefs["locked"] else ""]
-    depth, height = prefs.get("depth", "beside"), prefs.get("height", "middle")
-    if (depth, height) != ("beside", "middle"):
+    depth, height, aim = prefs.get("depth", "beside"), prefs.get("height", "middle"), prefs.get("aim", "you")
+    if (depth, height, aim) != ("beside", "middle", "you"):
         fields += [depth, height]  # only when set, so files without a position stay as v1.3.2 wrote them
+        if aim != "you":
+            fields.append(aim)
     return "|" + "|".join(fields)
 
 
@@ -6591,6 +6646,7 @@ def commandToByteValue(lightIdx, cmd):
     """Byte value for one animation-style command on one light, after the CCT-only fallback.
     Returns None when the light should be skipped (unknown mode, or the 'ignore' fallback)."""
     mode = str(cmd.get("mode", "")).upper()
+    mode = show.MODE_ALIASES.get(mode, mode)
     try:
         if mode == "ON":
             byteVal = [120, 129, 1, 1, 251]
@@ -6698,6 +6754,9 @@ class _ShowHooks:
 
     def globalRevert(self):
         return animRevertOnFinish
+
+    def handbackMs(self):
+        return handbackFadeMs
 
     def recallPreset(self, presetNumber):
         if 1 <= presetNumber <= numOfPresets:
@@ -6933,7 +6992,7 @@ class SequenceEditorHost:
             result.append({"index": idx, "id": prefID if prefID > 0 else idx + 1,
                            "name": light[2] if light[2] else light[0].name,
                            "role": getLightShowPref(idx, "role"), "side": getLightShowPref(idx, "side"),
-                           "depth": getLightShowPref(idx, "depth"), "height": getLightShowPref(idx, "height"),
+                           "depth": getLightShowPref(idx, "depth"), "height": getLightShowPref(idx, "height"), "aim": getLightShowPref(idx, "aim"),
                            "simulated": sim.isSimulated(light[0])})
         return result
 
@@ -7016,7 +7075,7 @@ def renderSequence(nameOrData, stepMs=None, startMs=0, endMs=None):
         lightID = str(prefID if prefID > 0 else idx + 1)
         lights.append({"id": lightID, "name": light[2] if light[2] else light[0].name,
                        "role": getLightShowPref(idx, "role"), "side": getLightShowPref(idx, "side"),
-                       "depth": getLightShowPref(idx, "depth"), "height": getLightShowPref(idx, "height"),
+                       "depth": getLightShowPref(idx, "depth"), "height": getLightShowPref(idx, "height"), "aim": getLightShowPref(idx, "aim"),
                        "locked": bool(getLightShowPref(idx, "locked")), "simulated": sim.isSimulated(light[0])})
         changes[lightID] = []
         intent = showEngine.baseStates.get(idx) if showEngine is not None else None
@@ -7111,6 +7170,8 @@ def renderSequencePNG(result, width=1600):
 
     def xAt(t):
         return labelW + (t - result["start_ms"]) * width / span
+
+    result["axis"] = {"x0": labelW, "width": width, "start_ms": result["start_ms"], "end_ms": result["end_ms"]}  # for the play marker
 
     for r, meta in enumerate(rows):
         y = rulerH + r * rowH
@@ -7212,7 +7273,7 @@ def getStageTiles():
         light = availableLights[idx]
         tiles.append({"name": light[2] if light[2] else light[0].name, "role": getLightShowPref(idx, "role"),
                       "side": getLightShowPref(idx, "side"), "depth": getLightShowPref(idx, "depth"),
-                      "height": getLightShowPref(idx, "height"),
+                      "height": getLightShowPref(idx, "height"), "aim": getLightShowPref(idx, "aim"), "camera": cameraPosition,
                       "rgb": rgb, "mode": cmd["mode"] if cmd else "", "bri": cmd.get("bri", "") if cmd else "",
                       "linked": linked, "simulated": simulated,
                       "layer": "base" if getLightShowPref(idx, "locked") else show.LAYER_NAMES[owners.get(idx, 0)]})
@@ -7232,14 +7293,15 @@ def getShowStatus():
         lights.append({"id": prefID if prefID > 0 else idx + 1,
                        "name": light[2] if light[2] else light[0].name,
                        "role": getLightShowPref(idx, "role"), "side": getLightShowPref(idx, "side"),
-                       "depth": getLightShowPref(idx, "depth"), "height": getLightShowPref(idx, "height"),
+                       "depth": getLightShowPref(idx, "depth"), "height": getLightShowPref(idx, "height"), "aim": getLightShowPref(idx, "aim"),
                        "locked": bool(getLightShowPref(idx, "locked")),
                        "layer": show.LAYER_NAMES[st["owners"].get(idx, 0)],
                        "linked": linked, "simulated": simulated,
                        "mode": cmd["mode"] if cmd else None, "bri": cmd.get("bri") if cmd else None,
                        "color": show.rgbHex(rgb)})
     return {"apiVersion": API_VERSION, "layers": st["layers"], "sequence": st["sequence"], "lights": lights,
-            "flashGuard": {"enabled": flashGuardEnabled, "held": flashGuard.held}}
+            "flashGuard": {"enabled": flashGuardEnabled, "held": flashGuard.held, "eyeline": eyelineFlash},
+            "stage": {"camera": cameraPosition}, "handbackFadeMs": handbackFadeMs}
 
 
 def _commandJSON(cmd):
@@ -7274,7 +7336,7 @@ def lightStateJSON(lightIdx):
             "output": dict(_commandJSON(cmd) or {}, color=show.rgbHex(rgb)) if cmd else None,
             "cctRange": [minK, maxK], "cctOnly": bool(light[5]),
             "role": getLightShowPref(lightIdx, "role"), "side": getLightShowPref(lightIdx, "side"),
-            "depth": getLightShowPref(lightIdx, "depth"), "height": getLightShowPref(lightIdx, "height"),
+            "depth": getLightShowPref(lightIdx, "depth"), "height": getLightShowPref(lightIdx, "height"), "aim": getLightShowPref(lightIdx, "aim"),
             "locked": bool(getLightShowPref(lightIdx, "locked")), "layer": layer}
 
 
@@ -7288,7 +7350,8 @@ WEB_GLOBAL_PREFS = {"envMaxBri": (100, 1, 100), "envMinBri": (0, 0, 100), "seqFr
                     "effectMaxSeconds": (30, 1, 600), "globalCCTMin": (3200, 2700, 8500),
                     "globalCCTMax": (5600, 2700, 8500), "simulatedLights": (0, 0, len(sim.RIG_LIGHTS)),
                     "simulatedCCTOnly": (False, None, None), "cctFallbackMode": ("convert", "ignore"),
-                    "flashGuardEnabled": (True, None, None)}
+                    "flashGuardEnabled": (True, None, None), "cameraPosition": tuple(["front"] + [c for c in CAMERA_POSITIONS if c != "front"]),
+                    "eyelineFlash": EYELINE_FLASH_CHOICES, "handbackFadeMs": (500, 0, 5000)}
 
 
 def _lightIndexFromWeb(value):
@@ -7319,7 +7382,8 @@ def getWebSettings():
         lights.append(entry)
     current = {name: globals()[name] for name in WEB_GLOBAL_PREFS}
     return {"success": True, "apiVersion": API_VERSION, "global": current, "lights": lights, "roles": LIGHT_ROLES, "sides": LIGHT_SIDES,
-            "depths": LIGHT_DEPTHS, "heights": LIGHT_HEIGHTS,
+            "depths": LIGHT_DEPTHS, "heights": LIGHT_HEIGHTS, "aims": LIGHT_AIMS, "cameraPositions": CAMERA_POSITIONS,
+            "eyelineFlashChoices": list(EYELINE_FLASH_CHOICES),
             "simulatedRigs": ["Off"] + [", ".join(r["role"] for r in sim.RIG_LIGHTS[:n]) for n in range(1, len(sim.RIG_LIGHTS) + 1)]}
 
 
@@ -7437,6 +7501,8 @@ def setWebLightSettings(lightIdx, changes):
             errors.append("depth must be one of " + ", ".join(LIGHT_DEPTHS))
         elif key == "height" and value not in LIGHT_HEIGHTS:
             errors.append("height must be one of " + ", ".join(LIGHT_HEIGHTS))
+        elif key == "aim" and value not in LIGHT_AIMS:
+            errors.append("aim must be one of " + ", ".join(LIGHT_AIMS))
         elif isinstance(default, bool):
             newShow[key] = value in (True, 1, "1", "true", "True")
             continue
@@ -7714,7 +7780,7 @@ def loadLightAliases():
     HTTP commands and animations before any light is connected.
 
     Prefs file format: customName|colorTempRange|onlyCCTMode[|lastSettings][|preferredID]
-    [|role|side|sweepOrder|eyeline|maxBri|minBri|locked[|depth|height]]
+    [|role|side|sweepOrder|eyeline|maxBri|minBri|locked[|depth|height[|aim]]]
     """
     global lightAliases, lightShowPrefs
     lightAliases = {}
@@ -8571,7 +8637,8 @@ def loadPrefsFile(globalPrefsFile = ""):
     global findLightsOnStartup, autoConnectToLights, printDebug, maxNumOfAttempts, \
            rememberLightsOnExit, acceptable_HTTP_IPs, customKeys, enableTabsOnLaunch, \
            whiteListedMACs, rememberPresetsOnExit, autoReconnectOnDisconnect, livePreview, hideConsoleOnLaunch, minimizeToTrayOnClose, httpAutoStart, httpPort, cctFallbackMode, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, \
-           envMaxBri, envMinBri, seqFrameRate, effectMaxSeconds, simulatedLights, simulatedCCTOnly, flashGuardEnabled
+           envMaxBri, envMinBri, seqFrameRate, effectMaxSeconds, simulatedLights, simulatedCCTOnly, flashGuardEnabled, \
+           cameraPosition, eyelineFlash, handbackFadeMs
 
     if globalPrefsFile != "":
         printDebugString("Loading global preferences from file...")
@@ -8585,7 +8652,8 @@ def loadPrefsFile(globalPrefsFile = ""):
             "SC_Dec_1_Small", "SC_Inc_1_Small", "SC_Dec_2_Small", "SC_Inc_2_Small", "SC_Dec_3_Small", "SC_Inc_3_Small", \
             "SC_Dec_1_Large", "SC_Inc_1_Large", "SC_Dec_2_Large", "SC_Inc_2_Large", "SC_Dec_3_Large", "SC_Inc_3_Large", \
             "enableTabsOnLaunch", "whiteListedMACs", "rememberPresetsOnExit", "autoReconnectOnDisconnect", "hideConsoleOnLaunch", "minimizeToTrayOnClose", "livePreview", "httpAutoStart", "httpPort", "cctFallbackMode", "enableLogTab", "logToFile", "logHeartbeat", "globalCCTMin", "globalCCTMax", \
-            "envMaxBri", "envMinBri", "seqFrameRate", "effectMaxSeconds", "simulatedLights", "simulatedCCTOnly", "flashGuard"]
+            "envMaxBri", "envMinBri", "seqFrameRate", "effectMaxSeconds", "simulatedLights", "simulatedCCTOnly", "flashGuard", \
+            "cameraPosition", "eyelineFlash", "handbackFadeMs"]
 
         # KICK OUT ANY PARAMETERS THAT AREN'T IN THE "ACCEPTABLE ARGUMENTS" LIST ABOVE
         # THIS SECTION OF CODE IS *SLIGHTLY* DIFFERENT THAN THE CLI KICK OUT CODE
@@ -8626,6 +8694,9 @@ def loadPrefsFile(globalPrefsFile = ""):
     prefsParser.add_argument("--envMaxBri", default=100)
     prefsParser.add_argument("--envMinBri", default=0)
     prefsParser.add_argument("--flashGuard", default=1)
+    prefsParser.add_argument("--cameraPosition", default="front")
+    prefsParser.add_argument("--eyelineFlash", default="same")
+    prefsParser.add_argument("--handbackFadeMs", default=500)
     prefsParser.add_argument("--seqFrameRate", default=20)
     prefsParser.add_argument("--effectMaxSeconds", default=30)
     prefsParser.add_argument("--simulatedLights", default=0)
@@ -8702,6 +8773,9 @@ def loadPrefsFile(globalPrefsFile = ""):
     simulatedLights = _intPref(mainPrefs.simulatedLights, 0, 0, len(sim.RIG_LIGHTS))
     simulatedCCTOnly = _intPref(mainPrefs.simulatedCCTOnly, 0, 0, 1) == 1
     flashGuardEnabled = _intPref(mainPrefs.flashGuard, 1, 0, 1) == 1
+    cameraPosition = mainPrefs.cameraPosition if mainPrefs.cameraPosition in CAMERA_POSITIONS else "front"
+    eyelineFlash = mainPrefs.eyelineFlash if mainPrefs.eyelineFlash in EYELINE_FLASH_CHOICES else "same"
+    handbackFadeMs = _intPref(mainPrefs.handbackFadeMs, 500, 0, 5000)
 
     if type(mainPrefs.acceptableIPs) is not list: # we have a string in the return, so we need to post-process it
         acceptable_HTTP_IPs = mainPrefs.acceptableIPs.replace(" ", "").split(";") # split the IP addresses into a list for acceptable IPs

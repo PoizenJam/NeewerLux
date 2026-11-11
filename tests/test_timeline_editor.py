@@ -199,10 +199,11 @@ def main():
         check(len(tiles) == 4 and all(t["rgb"] for t in tiles), "preview tiles at the playhead: " + str(tiles))
         check(any(t["layer"] == "show" for t in tiles), "the sequence drives the preview")
         check(all(t.get("side") in ("left", "centre", "right") and t.get("depth") for t in tiles), "preview tiles carry positions")
-        ed.planCheck.setChecked(True)
+        check(ed.stage.viewMode == "plan" and len(ed.stage._layout()) == 4, "plan view is the editor preview's default")
+        ed.viewCombo.setCurrentIndex(1)
         pump(50)
-        check(ed.stage.planMode and len(ed.stage._layout()) == 4, "plan view in the editor preview")
-        ed.planCheck.setChecked(False)
+        check(ed.stage.viewMode == "height", "height view in the editor preview")
+        ed.viewCombo.setCurrentIndex(0)
 
     def saveAndRename():
         ed = state["ed"]

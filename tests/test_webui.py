@@ -113,17 +113,20 @@ def main():
         check(js(page, "document.querySelector('[data-swatch]').style.background").startswith("rgb(0, 255, 0"), "swatch colour")
         # plan view: each light in its cell (the harness rig is fill and ambient on the left,
         # key and rim on the right, all beside you by default)
-        js(page, "setStagePlan(true)")
+        js(page, "setStageView('plan')")
         waitFor(page, "document.getElementById('stageGrid').classList.contains('stage-plan')", "plan layout")
+        check(js(page, "document.querySelectorAll('#stageGrid svg[aria-label=\"camera\"]').length") >= 1, "the camera is drawn")
         waitFor(page, "document.querySelectorAll('#stageGrid .stage-tile').length === 4", "4 tiles in the plan")
         cells = json.loads(js(page, "JSON.stringify([...document.querySelectorAll('#stageGrid .pc')].map(c => [c.dataset.cell, c.querySelectorAll('.stage-tile').length]))"))
         got = {c: n for c, n in cells if n}
         check(got == {"left/beside": 2, "right/beside": 2}, "plan cells: " + str(got))
-        check(js(page, "document.querySelectorAll('#stageGrid .hb').length") == 4, "height badges")
+        check(js(page, "document.querySelectorAll('#stageGrid .hb').length") == 4, "height gauges")
+        js(page, "setStageView('height')")
+        waitFor(page, "document.querySelector('#stageGrid .pc[data-cell=\"left/middle\"]') !== null", "height view rows")
         js(page, "document.getElementById('stageGrid').scrollIntoView()")
         spin(400)
         view.grab().save(os.path.join(rig.workdir, "webui_plan.png"))
-        js(page, "setStagePlan(false)")
+        js(page, "setStageView('strip')")
         waitFor(page, "document.getElementById('stageGrid').classList.contains('stage-grid')", "strip layout again")
 
     def sequenceList():
@@ -167,6 +170,18 @@ def main():
         spin(200)
         view.grab().save(os.path.join(rig.workdir, "webui_render.png"))
         js(page, "closeRender()")
+        # with the sequence playing, the render shows a play marker, and a click seeks
+        js(page, "seqPlay()")
+        waitFor(page, "lastStatus && lastStatus.sequence && lastStatus.sequence.name === %r" % EXAMPLE, "playing")
+        js(page, "seqRender()")
+        waitFor(page, "document.getElementById('renderMarker').style.display === 'block'", "play marker shown")
+        js(page, """(() => { const c = document.getElementById('renderCanvas'), r = c.getBoundingClientRect();
+                    renderSeekClick({target: c, clientX: r.left + r.width * 0.9}); })()""")
+        spin(400)
+        pos = nl.getShowStatus()["sequence"]["position_ms"]
+        check(pos > 25000, "clicking the render seeks: %s" % pos)
+        js(page, "closeRender(); seqCmd('stop')")
+        spin(300)
 
     def reload():
         path = os.path.join(rig.workdir, "light_prefs", "sequences", "Web Reload Check.json")
@@ -183,6 +198,7 @@ def main():
         check(js(page, "document.querySelectorAll('#lpPos .pos-cell').length") == 9, "3 x 3 position grid")
         js(page, "document.querySelector('#lpPos .pos-cell[data-side=\"left\"][data-depth=\"back\"]').click()")
         js(page, "document.querySelector('#lpPos .pos-h[data-height=\"high\"]').click()")
+        js(page, "document.querySelector('#lpPos .pos-aim button[data-aim=\"back\"]').click()")
         js(page, "document.getElementById('lpPos').scrollIntoView()")
         spin(300)
         view.grab().save(os.path.join(rig.workdir, "webui_position.png"))
@@ -196,7 +212,7 @@ def main():
         mac = nl.availableLights[1][0].address.upper()
         prefs = nl.lightShowPrefs.get(mac, {})
         check(prefs.get("role") == "practical" and prefs.get("maxBri") == 45 and prefs.get("locked") is True, "show prefs: " + str(prefs))
-        check((prefs.get("side"), prefs.get("depth"), prefs.get("height")) == ("left", "back", "high"), "position: " + str(prefs))
+        check((prefs.get("side"), prefs.get("depth"), prefs.get("height"), prefs.get("aim")) == ("left", "back", "high", "back"), "position: " + str(prefs))
         check(nl.returnLightIndexesFromMacAddress("@back.left.high") == [1], "position targets")
         check(nl.availableLights[1][2] == "Web Named", "custom name")
         sidecar = os.path.join(rig.workdir, "light_prefs", nl.availableLights[1][0].address.replace(":", ""))
@@ -208,7 +224,7 @@ def main():
         check(js(page, "document.getElementById('commandLog').textContent.includes('not saved')"), "refusal shown in the log")
         # put it back to defaults: the sidecar is deleted, as on the desktop
         js(page, """document.getElementById('lpLight').value = '1'; fillLightPrefs();
-                    document.getElementById('lpRole').value = 'ambient'; lpPos = {side: 'centre', depth: 'beside', height: 'middle'};
+                    document.getElementById('lpRole').value = 'ambient'; lpPos = {side: 'centre', depth: 'beside', height: 'middle', aim: 'you'};
                     document.getElementById('lpOrder').value = '0'; document.getElementById('lpEyeline').checked = false;
                     document.getElementById('lpMaxBri').value = '-1'; document.getElementById('lpMinBri').value = '-1';
                     document.getElementById('lpLocked').checked = false; document.getElementById('lpName').value = '';
@@ -220,9 +236,12 @@ def main():
         check("unsaved" not in js(page, "document.getElementById('gpSaveBtn').textContent"), "clean after loading")
         js(page, """const el = document.getElementById('gpEnvMax'); el.value = '80'; el.dispatchEvent(new Event('input'));""")
         check("unsaved" in js(page, "document.getElementById('gpSaveBtn').textContent"), "a change highlights Save")
-        js(page, """document.getElementById('gpSeqFps').value = '15';
+        js(page, """document.getElementById('gpSeqFps').value = '15'; document.getElementById('gpCamera').value = 'front-left';
+                    document.getElementById('gpEyelineFlash').value = 'gentler'; document.getElementById('gpHandback').value = '300';
                     document.getElementById('gpSim').value = '3'; saveGlobalPrefs();""")
         spin(600)
+        check((nl.cameraPosition, nl.eyelineFlash, nl.handbackFadeMs) == ("front-left", "gentler", 300),
+              "new global settings: %s %s %s" % (nl.cameraPosition, nl.eyelineFlash, nl.handbackFadeMs))
         check("unsaved" not in js(page, "document.getElementById('gpSaveBtn').textContent"), "saving clears the highlight")
         check(nl.envMaxBri == 80 and nl.seqFrameRate == 15 and nl.simulatedLights == 3, "globals: %s %s %s" % (nl.envMaxBri, nl.seqFrameRate, nl.simulatedLights))
         text = open(nl.globalPrefsFile, encoding="utf-8").read()
@@ -234,9 +253,12 @@ def main():
         spin(500)
         check(nl.envMinBri == 0, "min above max must be refused")
         js(page, """document.getElementById('gpEnvMax').value = '100'; document.getElementById('gpEnvMin').value = '0';
-                    document.getElementById('gpSeqFps').value = '20'; document.getElementById('gpSim').value = '0'; saveGlobalPrefs();""")
+                    document.getElementById('gpSeqFps').value = '20'; document.getElementById('gpSim').value = '0';
+                    document.getElementById('gpCamera').value = 'front'; document.getElementById('gpEyelineFlash').value = 'same';
+                    document.getElementById('gpHandback').value = '500'; saveGlobalPrefs();""")
         spin(600)
         check(nl.envMaxBri == 100 and not os.path.exists(nl.globalPrefsFile), "defaults again should remove the prefs file")
+        nl.handbackFadeMs = 0  # back to the harness setting
         js(page, "window.scrollTo(0, 0)")
         spin(300)
         view.grab().save(os.path.join(rig.workdir, "webui.png"))

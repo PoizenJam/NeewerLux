@@ -6,8 +6,8 @@ contract with NeewerLux.py, which connects the signal handlers.
 
 try:
     import PySide6
-    from PySide6.QtCore import Qt, Signal, QSize
-    from PySide6.QtGui import QFont, QColor, QLinearGradient, QBrush, QKeySequence, QIcon, QPainter
+    from PySide6.QtCore import Qt, Signal, QSize, QRectF, QPointF
+    from PySide6.QtGui import QFont, QColor, QLinearGradient, QBrush, QKeySequence, QIcon, QPainter, QPixmap, QPolygonF
     from PySide6.QtWidgets import (
         QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QFormLayout,
         QSplitter, QSizePolicy, QAbstractItemView, QAbstractScrollArea,
@@ -21,8 +21,8 @@ try:
 except ImportError:
     try:
         import PySide2
-        from PySide2.QtCore import Qt, Signal, QSize
-        from PySide2.QtGui import QFont, QColor, QLinearGradient, QBrush, QKeySequence, QIcon, QPainter
+        from PySide2.QtCore import Qt, Signal, QSize, QRectF, QPointF
+        from PySide2.QtGui import QFont, QColor, QLinearGradient, QBrush, QKeySequence, QIcon, QPainter, QPixmap, QPolygonF
         from PySide2.QtWidgets import (
             QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QFormLayout,
             QSplitter, QSizePolicy, QAbstractItemView, QAbstractScrollArea,
@@ -39,6 +39,24 @@ except ImportError:
 
 # === HELPER WIDGETS ===
 
+def personIcon(size):
+    """A top-down head and shoulders facing up (the front), as an icon."""
+    pix = QPixmap(size, size)
+    pix.fill(Qt.transparent)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.Antialiasing)
+    p.setPen(Qt.NoPen)
+    c = size / 2.0
+    p.setBrush(QColor(120, 120, 120))
+    p.drawEllipse(QRectF(c - size * 0.45, c - size * 0.02, size * 0.9, size * 0.38))
+    p.setBrush(QColor(160, 160, 160))
+    p.drawEllipse(QRectF(c - size * 0.17, c - size * 0.16, size * 0.34, size * 0.34))
+    p.drawPolygon(QPolygonF([QPointF(c - size * 0.07, c - size * 0.13), QPointF(c + size * 0.07, c - size * 0.13),
+                             QPointF(c, c - size * 0.3)]))
+    p.end()
+    return QIcon(pix)
+
+
 class PositionPicker(QWidget):
     """Where a light stands, from the streamer's seat facing the camera: a 3 x 3 grid for side
     (columns: your left, centre, your right) and depth (rows: front at the top, beside you,
@@ -48,10 +66,14 @@ class PositionPicker(QWidget):
     SIDES = ["left", "centre", "right"]
     DEPTHS = ["front", "beside", "back"]
     HEIGHTS = ["high", "middle", "low"]  # top to bottom, as they're shown
+    AIM_PAD = {(0, 0): "front-left", (0, 1): "front", (0, 2): "front-right", (1, 0): "left", (1, 1): "you",
+               (1, 2): "right", (2, 0): "back-left", (2, 1): "back", (2, 2): "back-right"}
+    AIM_GLYPHS = {"front-left": "\u2196", "front": "\u2191", "front-right": "\u2197", "left": "\u2190", "you": "\u25cf",
+                  "right": "\u2192", "back-left": "\u2199", "back": "\u2193", "back-right": "\u2198"}
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._side, self._depth, self._height = "centre", "beside", "middle"
+        self._side, self._depth, self._height, self._aim = "centre", "beside", "middle", "you"
         self._others = {}
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -66,7 +88,7 @@ class PositionPicker(QWidget):
         for r, depth in enumerate(self.DEPTHS):
             for c, side in enumerate(self.SIDES):
                 b = QPushButton(); b.setCheckable(True)
-                b.setMinimumSize(84, 54); b.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)  # long names clip, not widen
+                b.setMinimumSize(84, 44); b.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)  # long names clip, not widen
                 b.clicked.connect(lambda _=False, s=side, d=depth: self._pick(s, d))
                 grid.addWidget(b, r + 1, c + 1)
                 self.cells[(side, depth)] = b
@@ -82,9 +104,22 @@ class PositionPicker(QWidget):
             b.clicked.connect(lambda _=False, h=h: self._pickHeight(h))
             col.addWidget(b)
             self.heightButtons[h] = b
+        al = QLabel("Points"); al.setStyleSheet("color: #999;")
+        al.setToolTip("Which way the light points, on the same top-down grid (up = towards the camera).\nThe middle button means at you.")
+        col.addSpacing(6)
+        col.addWidget(al)
+        aimGrid = QGridLayout(); aimGrid.setSpacing(2)
+        self.aimButtons = {}
+        for (r, c), aim in self.AIM_PAD.items():
+            b = QPushButton(self.AIM_GLYPHS[aim]); b.setCheckable(True); b.setFixedSize(26, 24)
+            b.setToolTip("Points at you" if aim == "you" else "Points " + aim.replace("-", " "))
+            b.clicked.connect(lambda _=False, a=aim: self._pickAim(a))
+            aimGrid.addWidget(b, r, c)
+            self.aimButtons[aim] = b
+        col.addLayout(aimGrid)
         col.addStretch(1)
         lay.addLayout(col, 1)
-        self.setToolTip("Where this light is, from your seat facing the camera (front is between you and the camera).\n"
+        self.setToolTip("Where this light is, from your seat facing the camera (front is between you and the camera),\nits height, and which way it points.\n"
                         "Targets: @left @centre @right, @front @beside @back, @low @middle @high,\n"
                         "combined with dots and roles: @back.left, @rim.high. Auto sweep order follows position.")
         self._refresh()
@@ -97,10 +132,23 @@ class PositionPicker(QWidget):
         self._height = height
         self._refresh(); self.changed.emit()
 
+    def _pickAim(self, aim):
+        self._aim = aim
+        self._refresh(); self.changed.emit()
+
+    def aim(self):
+        return self._aim
+
+    def setAim(self, aim):
+        self._aim = aim if aim in self.AIM_GLYPHS else "you"
+        self._refresh()
+
     def value(self):
         return self._side, self._depth, self._height
 
-    def setValue(self, side, depth, height):
+    def setValue(self, side, depth, height, aim=None):
+        if aim is not None:
+            self._aim = aim if aim in self.AIM_GLYPHS else "you"
         self._side = side if side in self.SIDES else "centre"
         self._depth = depth if depth in self.DEPTHS else "beside"
         self._height = height if height in self.HEIGHTS else "middle"
@@ -123,8 +171,6 @@ class PositionPicker(QWidget):
                 text = "This light" + ("\n+ %d other%s" % (len(names), "" if len(names) == 1 else "s") if names else "")
             elif names:
                 text = listed
-            elif (side, depth) == ("centre", "beside"):
-                text = "(you)"
             else:
                 text = ""
             b.setText(text)
@@ -133,6 +179,14 @@ class PositionPicker(QWidget):
         for h, b in self.heightButtons.items():
             b.setChecked(h == self._height)
             b.setStyleSheet(self.CHECKED)
+        for a, b in self.aimButtons.items():
+            b.setChecked(a == self._aim)
+            b.setStyleSheet("QPushButton { padding: 0px; } " + self.CHECKED)
+        you = self.cells[("centre", "beside")]
+        if not you.text():  # nobody placed on you: show you, from above, facing the front
+            you.setIcon(personIcon(28)); you.setIconSize(QSize(28, 28))
+        else:
+            you.setIcon(QIcon())
 
 
 class SpinBoxWithButtons(QWidget):
@@ -846,88 +900,100 @@ class Ui_MainWindow(object):
         self.ColorModeTabWidget.addTab(self.seqTab, "Sequences")
 
         # --- LIGHT PREFS ---
-        self.lightPrefs = QScrollArea()  # scrolls: the position picker makes this tab taller than the panel
+        # Two columns: the light itself on the left, its part in shows on the right
+        self.lightPrefs = QScrollArea()  # scrolls only on small windows
         self.lightPrefs.setWidgetResizable(True)
         self.lightPrefsCW = QWidget()
-        lpLay = QVBoxLayout(self.lightPrefsCW)
-        lpLay.setContentsMargins(8, 8, 8, 8)
+        lpOuter = QVBoxLayout(self.lightPrefsCW)
+        lpOuter.setContentsMargins(8, 8, 8, 8)
+        lpCols = QHBoxLayout()
+        lpCols.setSpacing(18)
+        lpOuter.addLayout(lpCols, 1)
+        lpLay = QVBoxLayout()
         lpLay.setSpacing(6)
+        lpCols.addLayout(lpLay, 4)
 
+        lpLay.addWidget(QLabel("<strong>This light</strong>"))
         nameRow = QHBoxLayout()
-        self.customName = QCheckBox("Custom Name for this light:")
-        self.customName.setFont(mainFont)
+        self.customName = QCheckBox("Custom name:")
         nameRow.addWidget(self.customName, 1)
         nameRow.addWidget(QLabel("Preferred ID:"))
         self.preferredIDSpin = QSpinBox(); self.preferredIDSpin.setRange(0, 99); self.preferredIDSpin.setMinimumWidth(65)
-        self.preferredIDSpin.setToolTip("Fixed numeric ID (0 = auto)")
+        self.preferredIDSpin.setSpecialValueText("Auto")
+        self.preferredIDSpin.setToolTip("Fixed numeric ID for HTTP commands and animations (Auto = table order)")
         nameRow.addWidget(self.preferredIDSpin)
         lpLay.addLayout(nameRow)
-
         self.customNameTF = QLineEdit(); self.customNameTF.setMaxLength(80)
         self.customNameTF.setPlaceholderText("Enter a custom name...")
         lpLay.addWidget(self.customNameTF)
-        lpLay.addSpacing(10)
-
-        self.colorTempRange = QCheckBox("Use Custom Color Temperature Range for CCT mode:")
-        self.colorTempRange.setFont(mainFont)
+        self.colorTempRange = QCheckBox("Custom colour temperature range for CCT mode:")
         lpLay.addWidget(self.colorTempRange)
         tempRow = QHBoxLayout()
         self.colorTempRange_Min_TF = QLineEdit(); self.colorTempRange_Min_TF.setMaxLength(10); self.colorTempRange_Min_TF.setPlaceholderText("Min")
         self.colorTempRange_Max_TF = QLineEdit(); self.colorTempRange_Max_TF.setMaxLength(10); self.colorTempRange_Max_TF.setPlaceholderText("Max")
-        tempRow.addWidget(self.colorTempRange_Min_TF); tempRow.addWidget(QLabel("to")); tempRow.addWidget(self.colorTempRange_Max_TF); tempRow.addStretch(1)
+        tempRow.addWidget(self.colorTempRange_Min_TF); tempRow.addWidget(QLabel("to")); tempRow.addWidget(self.colorTempRange_Max_TF); tempRow.addWidget(QLabel("K"))
         lpLay.addLayout(tempRow)
-        lpLay.addSpacing(10)
-
-        self.onlyCCTModeCheck = QCheckBox("This light can only use CCT mode\n(for Neewer lights without HSI mode)")
-        self.onlyCCTModeCheck.setFont(mainFont)
+        self.onlyCCTModeCheck = QCheckBox("This light can only use CCT mode (Neewer lights without HSI)")
         lpLay.addWidget(self.onlyCCTModeCheck)
-        lpLay.addSpacing(10)
+        lpLay.addSpacing(6)
 
-        # Show settings: roles for @targets, sweep order, brightness limits, locked
-        lpLay.addWidget(QLabel("<strong>Sequences and effects</strong>"))
-        showGrid = QGridLayout(); showGrid.setSpacing(4)
-        self.lightRoleCombo = QComboBox(); self.lightRoleCombo.addItems(["Key", "Fill", "Rim", "Ambient", "Practical"])
-        self.lightRoleCombo.setToolTip("Role used by @key, @fill, @rim, @ambient and @practical targets.\nLights without a role count as Ambient.")
-        self.lightPositionPicker = PositionPicker()
-        self.lightOrderSpin = QSpinBox(); self.lightOrderSpin.setRange(0, 99); self.lightOrderSpin.setSpecialValueText("Auto")
-        self.lightOrderSpin.setToolTip("Position in sweeps: @ targets list lights in this order,\nand a clip's light 1, 2, 3... map onto them in this order.\nAuto = by position (left to right, front to back, low to high), then ID.")
-        self.lightEyelineCheck = QCheckBox("In my eye line")
-        self.lightEyelineCheck.setToolTip("Marks lights you look into; target them with @eyeline (for example to keep them dim)")
+        lpLay.addWidget(QLabel("<strong>Limits in sequences, effects, presets and HTTP</strong>"))
+        limitGrid = QGridLayout(); limitGrid.setSpacing(4)
         self.lightMaxBriSpin = QSpinBox(); self.lightMaxBriSpin.setRange(-1, 100); self.lightMaxBriSpin.setSuffix("%")
         self.lightMaxBriSpin.setSpecialValueText("Global"); self.lightMaxBriSpin.setValue(-1)
         self.lightMaxBriSpin.setToolTip("Brightness ceiling for presets, HTTP commands, animations and sequences.\nThe manual sliders are exempt. Global = the default in Global Preferences.")
         self.lightMinBriSpin = QSpinBox(); self.lightMinBriSpin.setRange(-1, 100); self.lightMinBriSpin.setSuffix("%")
         self.lightMinBriSpin.setSpecialValueText("Global"); self.lightMinBriSpin.setValue(-1)
         self.lightMinBriSpin.setToolTip("Brightness floor while the light is on (0% and OFF still pass).\nThe manual sliders are exempt.")
-        self.lightLockedCheck = QCheckBox("Locked (stays on its manual or preset\nstate during sequences and effects)")
-        showGrid.addWidget(QLabel("Role:"), 0, 0); showGrid.addWidget(self.lightRoleCombo, 0, 1)
-        showGrid.addWidget(QLabel("Sweep order:"), 0, 2); showGrid.addWidget(self.lightOrderSpin, 0, 3)
-        showGrid.addWidget(QLabel("Max brightness:"), 1, 0); showGrid.addWidget(self.lightMaxBriSpin, 1, 1)
-        showGrid.addWidget(QLabel("Min brightness:"), 1, 2); showGrid.addWidget(self.lightMinBriSpin, 1, 3)
-        showGrid.addWidget(self.lightEyelineCheck, 2, 0, 1, 4)
-        showGrid.addWidget(self.lightLockedCheck, 3, 0, 1, 4)
-        showGrid.setRowStretch(4, 1)
-        showRow = QHBoxLayout()
-        showRow.addLayout(showGrid, 1)
-        posBox = QVBoxLayout()
-        posBox.addWidget(QLabel("Position (from your seat, facing the camera):"))
-        posBox.addWidget(self.lightPositionPicker)
-        showRow.addSpacing(12)
-        showRow.addLayout(posBox, 1)
-        lpLay.addLayout(showRow)
+        limitGrid.addWidget(QLabel("Max brightness:"), 0, 0); limitGrid.addWidget(self.lightMaxBriSpin, 0, 1)
+        limitGrid.addWidget(QLabel("Min brightness:"), 0, 2); limitGrid.addWidget(self.lightMinBriSpin, 0, 3)
+        limitGrid.setColumnStretch(4, 1)
+        lpLay.addLayout(limitGrid)
+        self.lightLockedCheck = QCheckBox("Locked: stays on its manual or preset state during sequences and effects")
+        lpLay.addWidget(self.lightLockedCheck)
+        self.lightEyelineCheck = QCheckBox("In my eye line (a light I look into on camera)")
+        self.lightEyelineCheck.setToolTip("Targets: @eyeline. Global Preferences can also make flashes gentler on these lights.")
+        lpLay.addWidget(self.lightEyelineCheck)
         lpLay.addStretch(1)
+
+        showLay = QVBoxLayout()
+        showLay.setSpacing(6)
+        lpCols.addLayout(showLay, 5)
+        showLay.addWidget(QLabel("<strong>In sequences and effects</strong>"))
+        roleRow = QHBoxLayout()
+        self.lightRoleCombo = QComboBox(); self.lightRoleCombo.addItems(["Key", "Fill", "Rim", "Ambient", "Practical"])
+        self.lightRoleCombo.setToolTip("Role used by @key, @fill, @rim, @ambient and @practical targets.\nLights without a role count as Ambient.")
+        self.lightOrderSpin = QSpinBox(); self.lightOrderSpin.setRange(0, 99); self.lightOrderSpin.setSpecialValueText("Auto")
+        self.lightOrderSpin.setToolTip("Position in sweeps: @ targets list lights in this order,\nand a clip's light 1, 2, 3... map onto them in this order.\nAuto = by position (left to right, front to back, low to high), then ID.")
+        roleRow.addWidget(QLabel("Role:")); roleRow.addWidget(self.lightRoleCombo, 1)
+        roleRow.addSpacing(12)
+        roleRow.addWidget(QLabel("Sweep order:")); roleRow.addWidget(self.lightOrderSpin)
+        showLay.addLayout(roleRow)
+        showLay.addWidget(QLabel("Position, height and aim (from your seat, facing the camera):"))
+        self.lightPositionPicker = PositionPicker()
+        showLay.addWidget(self.lightPositionPicker)
+        showLay.addStretch(1)
+
         self.saveLightPrefsButton = QPushButton("Save Preferences")
-        lpLay.addWidget(self.saveLightPrefsButton, alignment=Qt.AlignRight)
+        lpOuter.addWidget(self.saveLightPrefsButton, alignment=Qt.AlignRight)
         self.lightPrefs.setWidget(self.lightPrefsCW)
         self.ColorModeTabWidget.addTab(self.lightPrefs, "Light Preferences")
 
         # --- GLOBAL PREFS ---
-        self.globalPrefs = QScrollArea()
-        self.globalPrefsCW = QWidget()
-        self.globalPrefsLay = QFormLayout(self.globalPrefsCW)
-        self.globalPrefsLay.setLabelAlignment(Qt.AlignLeft)
-        self.globalPrefs.setWidget(self.globalPrefsCW)
-        self.globalPrefs.setWidgetResizable(True)
+        # Four sub-tabs, with Reset and Save below them so they're always in view
+        self.globalPrefs = QWidget()
+        gpOuter = QVBoxLayout(self.globalPrefs)
+        gpOuter.setContentsMargins(0, 0, 0, 0)
+        self.globalPrefsCW = self.globalPrefs  # every control lives under here (for the unsaved-changes watch)
+        self.globalPrefsTabs = QTabWidget()
+        gpOuter.addWidget(self.globalPrefsTabs, 1)
+
+        def _gpPage(title):
+            scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setFrameShape(QFrame.NoFrame)
+            page = QWidget(); form = QFormLayout(page); form.setLabelAlignment(Qt.AlignLeft)
+            scroll.setWidget(page)
+            self.globalPrefsTabs.addTab(scroll, title)
+            return form
 
         self.findLightsOnStartup_check = QCheckBox("Scan for Neewer lights on program launch")
         self.autoConnectToLights_check = QCheckBox("Automatically try to link to newly found lights")
@@ -1067,63 +1133,81 @@ class Ui_MainWindow(object):
         self.bottomButtonsLay.addWidget(self.resetGlobalPrefsButton, 1, 1)
         self.bottomButtonsLay.addWidget(self.saveGlobalPrefsButton, 1, 2)
 
-        # Build form, organized into logical sections
-        self.globalPrefsLay.addRow(QLabel("<strong>Startup &amp; Connection</strong>"))
-        self.globalPrefsLay.addRow(self.findLightsOnStartup_check)
-        self.globalPrefsLay.addRow(self.autoConnectToLights_check)
-        self.globalPrefsLay.addRow(self.autoReconnect_check)
-        self.globalPrefsLay.addRow("Max connection retries:", self.maxNumOfAttempts_field)
+        # Settings added in 1.3.3
+        self.cameraPositionCombo = QComboBox()
+        self.CAMERA_POSITIONS = ["front-left", "front", "front-right", "left", "right", "back-left", "back", "back-right"]
+        self.cameraPositionCombo.addItems(["Front left", "Front (straight ahead)", "Front right", "Your left", "Your right",
+                                           "Back left", "Behind you", "Back right"])
+        self.cameraPositionCombo.setCurrentIndex(1)
+        self.cameraPositionCombo.setToolTip("Where your main camera is, from your seat. Shown on the Stage plan;\n"
+                                            "positions (front, left...) stay relative to you, facing the camera.")
+        self.eyelineFlashCombo = QComboBox()
+        self.EYELINE_FLASH = ["same", "gentler", "calm"]
+        self.eyelineFlashCombo.addItems(["Same as other lights", "Gentler: at most 1 flash a second", "Calm: at most one change every 2 seconds"])
+        self.eyelineFlashCombo.setToolTip("For lights marked 'In my eye line' in Light Preferences. Applies even with the flash guard off.")
+        self.handbackFadeSpin = QSpinBox(); self.handbackFadeSpin.setRange(0, 5000); self.handbackFadeSpin.setSingleStep(100)
+        self.handbackFadeSpin.setSuffix(" ms"); self.handbackFadeSpin.setSpecialValueText("Off (cut)"); self.handbackFadeSpin.setValue(500)
+        self.handbackFadeSpin.setToolTip("When an effect ends and the sequence takes back over, a sequence ends and reverts,\n"
+                                         "or an animation stops: fade to what comes next instead of cutting.\n"
+                                         "Starts and manual commands stay instant. A sequence can set its own.")
 
-        self.globalPrefsLay.addRow(QLabel("<br><strong>Control &amp; Presets</strong>"))
-        self.globalPrefsLay.addRow(self.livePreview_check)
-        self.globalPrefsLay.addRow(self.rememberLightsOnExit_check)
-        self.globalPrefsLay.addRow(self.rememberPresetsOnExit_check)
-
-        self.globalPrefsLay.addRow(QLabel("<br><strong>Light Behaviour</strong>"))
-        self.globalPrefsLay.addRow(cctFallbackRow)
-        self.globalPrefsLay.addRow(cctRangeRow)
-
-        self.globalPrefsLay.addRow(QLabel("<br><strong>Sequences and Effects</strong>"))
-        self.globalPrefsLay.addRow("Default max brightness:", self.envMaxBriSpin)
-        self.globalPrefsLay.addRow("Default min brightness:", self.envMinBriSpin)
-        self.globalPrefsLay.addRow("", self.flashGuardCheck)
-        self.globalPrefsLay.addRow("Sequence frame rate:", self.seqFrameRateSpin)
-        self.globalPrefsLay.addRow("Looping effect time limit:", self.effectMaxSecondsSpin)
-
-        self.globalPrefsLay.addRow(QLabel("<br><strong>Simulated Lights</strong>"))
-        self.globalPrefsLay.addRow("Simulated rig:", self.simulatedLightsCombo)
-        self.globalPrefsLay.addRow("", self.simulatedCCTOnlyCheck)
-
-        self.globalPrefsLay.addRow(QLabel("<br><strong>HTTP Server</strong>"))
-        self.globalPrefsLay.addRow(self.httpAutoStart_check)
-        self.globalPrefsLay.addRow("HTTP server port:", self.httpPortField)
-
-        self.globalPrefsLay.addRow(QLabel("<br><strong>Window &amp; Display</strong>"))
-        self.globalPrefsLay.addRow(self.hideConsoleOnLaunch_check)
-        self.globalPrefsLay.addRow(self.minimizeToTrayOnClose_check)
-
-        self.globalPrefsLay.addRow(QLabel("<br><strong>Logging</strong>"))
+        general = _gpPage("General")
+        general.addRow(QLabel("<strong>Startup and connection</strong>"))
+        general.addRow(self.findLightsOnStartup_check)
+        general.addRow(self.autoConnectToLights_check)
+        general.addRow(self.autoReconnect_check)
+        general.addRow("Max connection retries:", self.maxNumOfAttempts_field)
+        general.addRow(QLabel("Whitelisted MAC addresses:"))
+        general.addRow(self.whiteListedMACs_field)
+        general.addRow(QLabel("<br><strong>Control and presets</strong>"))
+        general.addRow(self.livePreview_check)
+        general.addRow(self.rememberLightsOnExit_check)
+        general.addRow(self.rememberPresetsOnExit_check)
+        general.addRow(QLabel("<br><strong>Window</strong>"))
+        general.addRow(self.hideConsoleOnLaunch_check)
+        general.addRow(self.minimizeToTrayOnClose_check)
+        general.addRow(QLabel("<br><strong>Logging</strong>"))
         self.enableLogTab_check = QCheckBox("Enable Log tab (show debug output in GUI)")
         self.enableLogTab_check.setChecked(True)
         self.logToFile_check = QCheckBox("Also write log to file (light_prefs/NeewerLux.log)")
         self.logHeartbeat_check = QCheckBox("Log a background heartbeat every 30 seconds")
-        self.globalPrefsLay.addRow(self.enableLogTab_check)
-        self.globalPrefsLay.addRow(self.logToFile_check)
-        self.globalPrefsLay.addRow(self.logHeartbeat_check)
-        self.globalPrefsLay.addRow(self.printDebug_check)
+        general.addRow(self.enableLogTab_check)
+        general.addRow(self.logToFile_check)
+        general.addRow(self.logHeartbeat_check)
+        general.addRow(self.printDebug_check)
 
-        self.globalPrefsLay.addRow(QLabel("<br><strong>Filtering</strong>"))
-        self.globalPrefsLay.addRow(QLabel("Acceptable IPs for HTTP Server:"))
-        self.globalPrefsLay.addRow(self.acceptable_HTTP_IPs_field)
-        self.globalPrefsLay.addRow(QLabel("Whitelisted MAC Addresses:"))
-        self.globalPrefsLay.addRow(self.whiteListedMACs_field)
+        shows = _gpPage("Lights and shows")
+        shows.addRow(QLabel("<strong>Safety</strong>"))
+        shows.addRow("", self.flashGuardCheck)
+        shows.addRow("Eye-line lights during flashes:", self.eyelineFlashCombo)
+        shows.addRow("Default max brightness:", self.envMaxBriSpin)
+        shows.addRow("Default min brightness:", self.envMinBriSpin)
+        shows.addRow(QLabel("<br><strong>Playback</strong>"))
+        shows.addRow("Hand-back fade:", self.handbackFadeSpin)
+        shows.addRow("Sequence frame rate:", self.seqFrameRateSpin)
+        shows.addRow("Looping effect time limit:", self.effectMaxSecondsSpin)
+        shows.addRow(QLabel("<br><strong>Your rig</strong>"))
+        shows.addRow("Main camera:", self.cameraPositionCombo)
+        shows.addRow(cctFallbackRow)
+        shows.addRow(cctRangeRow)
 
-        self.globalPrefsLay.addRow(QLabel("<br><strong>Keyboard Shortcuts</strong>"))
-        self.globalPrefsLay.addRow(self.windowButtonsCW)
-        self.globalPrefsLay.addRow(self.tabSwitchCW)
-        self.globalPrefsLay.addRow(self.brightnessCW)
-        self.globalPrefsLay.addRow(self.sliderAdjustmentCW)
-        self.globalPrefsLay.addRow(self.bottomButtonsCW)
+        net = _gpPage("Simulation and HTTP")
+        net.addRow(QLabel("<strong>Simulated lights</strong>"))
+        net.addRow("Simulated rig:", self.simulatedLightsCombo)
+        net.addRow("", self.simulatedCCTOnlyCheck)
+        net.addRow(QLabel("<br><strong>HTTP server</strong>"))
+        net.addRow(self.httpAutoStart_check)
+        net.addRow("HTTP server port:", self.httpPortField)
+        net.addRow(QLabel("Acceptable IPs for the HTTP server:"))
+        net.addRow(self.acceptable_HTTP_IPs_field)
+
+        keys = _gpPage("Shortcuts")
+        keys.addRow(self.windowButtonsCW)
+        keys.addRow(self.tabSwitchCW)
+        keys.addRow(self.brightnessCW)
+        keys.addRow(self.sliderAdjustmentCW)
+
+        gpOuter.addWidget(self.bottomButtonsCW)
         self.ColorModeTabWidget.addTab(self.globalPrefs, "Global Preferences")
 
         # --- INFO TAB ---

@@ -25,7 +25,7 @@ Wherever a light is named (`light=`, the `light` field of a batch command, anima
 
 ### The flash guard
 
-On by default, every light is kept to at most 3 flashes a second (the WCAG limit for photosensitive seizures): changes are spaced evenly, and one that would come too soon is held back and sent (as the light's latest value) once it's allowed. This applies to everything sent over HTTP, so a fast animation or a burst of commands plays slower than asked; `status_json` reports how many changes were held. It can be turned off in Global Preferences or with `set_global` `{"flashGuardEnabled": false}`.
+On by default, every light is kept to at most 3 flashes a second (the WCAG limit for photosensitive seizures): changes are spaced evenly, and one that would come too soon is held back and sent (as the light's latest value) once it's allowed. This applies to everything sent over HTTP, so a fast animation or a burst of commands plays slower than asked; `status_json` reports how many changes were held. It can be turned off in Global Preferences or with `set_global` `{"flashGuardEnabled": false}`. Lights marked as in the eye line can be given a stricter limit (`eyelineFlash`), which applies even with the guard off.
 
 ### Units
 
@@ -116,7 +116,7 @@ Example, a five-loop strobe on the rim lights as an effect: `animate=Strobe|1|10
       "setting": {"mode": "CCT", "temp": 4500, "bri": 60},
       "output": {"mode": "CCT", "temp": 4500, "bri": 60, "color": "#ffdcbb"},
       "cctRange": [3200, 5600], "cctOnly": false,
-      "role": "key", "side": "right", "depth": "front", "height": "middle", "locked": false, "layer": "base"
+      "role": "key", "side": "right", "depth": "front", "height": "middle", "aim": "you", "locked": false, "layer": "base"
     }
   ],
   "animations": [{"name": "Heartbeat", "description": "...", "frames": 4, "loop": true, "modes": ["HSI"]}],
@@ -138,7 +138,7 @@ Per light:
 | `output` | What the light is actually showing: `setting` after the CCT-only conversion and brightness limits, plus `color`, an approximate `#rrggbb` for display. `null` if unknown. For simulated lights, built from what they received. |
 | `cctRange` | The light's colour temperature range in Kelvin, as used for clamping |
 | `cctOnly` | `true` for lights that only do white; colour commands are converted (or ignored) |
-| `role`, `side`, `depth`, `height`, `locked` | Show settings from Light Preferences |
+| `role`, `side`, `depth`, `height`, `aim`, `locked` | Show settings from Light Preferences |
 | `layer` | What is driving the light now: `base` (sliders, presets, light commands), `show` (a sequence), `effect` or `override` (animations) |
 
 ### status_json
@@ -150,13 +150,15 @@ Per light:
   "apiVersion": 2,
   "layers": {"override": null, "effect": null, "show": null},
   "sequence": {"type": "sequence", "name": "Example - Four Light Demo", "state": "playing", "position_ms": 12034, "duration_ms": 40000},
-  "lights": [{"id": 1, "name": "Key", "role": "key", "side": "right", "depth": "front", "height": "middle", "locked": false, "layer": "show",
+  "lights": [{"id": 1, "name": "Key", "role": "key", "side": "right", "depth": "front", "height": "middle", "aim": "you", "locked": false, "layer": "show",
               "linked": true, "simulated": false, "mode": "HSI", "bri": 45, "color": "#b04ce0"}],
-  "flashGuard": {"enabled": true, "held": 0}
+  "flashGuard": {"enabled": true, "held": 0, "eyeline": "same"},
+  "stage": {"camera": "front"},
+  "handbackFadeMs": 500
 }
 ```
 
-`flashGuard` is `{"enabled": true, "held": 12}`: whether the flash guard is on, and how many changes it has held back since NeewerLux started.
+`flashGuard` is `{"enabled": true, "held": 12, "eyeline": "same"}`: whether the flash guard is on, how many changes it has held back since NeewerLux started, and the eye-line setting. `stage.camera` is where the main camera is (for drawing a plan), and `handbackFadeMs` the global hand-back fade.
 
 `layers` holds whatever is playing on each layer (`null` when nothing is); the override entry includes `name`, `keyframe` and `keyframes`. `sequence` is `null` when no sequence is loaded; `state` is `playing` or `paused`.
 
@@ -198,7 +200,7 @@ Response:
 | `{"action": "status"}` | `{"running", "animation", "show"}` where `show` is the `status_json` body |
 | `{"action": "create", "animation": {...}}` | Save an animation (same format as the files in `light_prefs/animations`), replacing any of the same name |
 | `{"action": "get", "name": "Heartbeat"}` | The whole animation: `{"animation": {...}}` |
-| `{"action": "save", "animation": {...}, "original": "Old Name", "overwrite": false}` | Save from an editor. Needs a name and at least one keyframe, and every light entry needs a `mode` of `HSI`, `CCT`, `ANM` (a built-in scene), `ON` or `OFF`; otherwise `errors` says which. `original` is the name it was opened under: a different name renames it. Saving over another animation needs `"overwrite": true`. |
+| `{"action": "save", "animation": {...}, "original": "Old Name", "overwrite": false}` | Save from an editor. Needs a name and at least one keyframe, and every light entry needs a `mode` of `HSI`, `CCT`, `SCENE` (or `ANM`; a built-in scene), `ON` or `OFF`; otherwise `errors` says which. `original` is the name it was opened under: a different name renames it. Saving over another animation needs `"overwrite": true`. |
 | `{"action": "duplicate", "name": "Heartbeat"}` | Copy as "Heartbeat (copy)"; the reply's `animation` is the new name |
 | `{"action": "delete", "name": "Heartbeat"}` | Delete it (stops it first if it's playing) |
 | `{"action": "reload"}` | Re-read `light_prefs/animations`; the reply has `count` |
@@ -247,8 +249,8 @@ The desktop's preset menu and editor. Preset numbers are 1-based. Every reply th
 | Body | Effect |
 |---|---|
 | `{"action": "get"}` | `{"apiVersion", "global": {...}, "lights": [...], "roles", "sides", "simulatedRigs"}` |
-| `{"action": "set_light", "light": 0, "settings": {"role": "key", "maxBri": 60}}` | Change one light's preferences. `light` is the 0-based `index` from `get` (an ID, name or MAC also works). Settings: `customName`, `preferredID` (0 to 99, 0 = automatic), `tempRange` (`[min, max]` Kelvin), `cctOnly`, `role`, `side` (`left`, `centre`, `right`), `depth` (`front`, `beside`, `back`), `height` (`low`, `middle`, `high`), `order` (0 to 99, 0 = automatic: by position, then ID), `eyeline`, `maxBri` and `minBri` (-1 = use the global limit, else 0 to 100), `locked`. Saved to the light's preferences file, as the desktop does. |
-| `{"action": "set_global", "settings": {"envMaxBri": 80}}` | Change global preferences: `envMaxBri` (1 to 100), `envMinBri` (0 to 100), `seqFrameRate` (1 to 30), `effectMaxSeconds` (1 to 600), `globalCCTMin` and `globalCCTMax` (2700 to 8500), `cctFallbackMode` (`convert` or `ignore`), `simulatedLights` (0 to 4, next start), `simulatedCCTOnly` (next start), `flashGuardEnabled` (true or false). |
+| `{"action": "set_light", "light": 0, "settings": {"role": "key", "maxBri": 60}}` | Change one light's preferences. `light` is the 0-based `index` from `get` (an ID, name or MAC also works). Settings: `customName`, `preferredID` (0 to 99, 0 = automatic), `tempRange` (`[min, max]` Kelvin), `cctOnly`, `role`, `side` (`left`, `centre`, `right`), `depth` (`front`, `beside`, `back`), `height` (`low`, `middle`, `high`), `aim` (where it points: `you`, or `front`, `front-right`, `right`, `back-right`, `back`, `back-left`, `left`, `front-left` on the plan), `order` (0 to 99, 0 = automatic: by position, then ID), `eyeline`, `maxBri` and `minBri` (-1 = use the global limit, else 0 to 100), `locked`. Saved to the light's preferences file, as the desktop does. |
+| `{"action": "set_global", "settings": {"envMaxBri": 80}}` | Change global preferences: `envMaxBri` (1 to 100), `envMinBri` (0 to 100), `seqFrameRate` (1 to 30), `effectMaxSeconds` (1 to 600), `globalCCTMin` and `globalCCTMax` (2700 to 8500), `cctFallbackMode` (`convert` or `ignore`), `simulatedLights` (0 to 4, next start), `simulatedCCTOnly` (next start), `flashGuardEnabled` (true or false), `eyelineFlash` (`same`, `gentler` = at most 1 flash a second, `calm` = one change every 2 seconds, for lights marked as in the eye line; applies even with the guard off), `handbackFadeMs` (0 to 5000: fade when an effect, sequence or animation lets go of a light; 0 cuts), `cameraPosition` (`front`, `front-left`, `front-right`, `left`, `right`, `back-left`, `back`, `back-right`; drawn on the Stage plan). |
 
 Every value in a request is checked before any is applied; a request with an invalid value changes nothing and lists the problems in `errors`. Network access, keyboard shortcuts and startup options can't be changed over HTTP. Changes show up in the desktop window straight away.
 

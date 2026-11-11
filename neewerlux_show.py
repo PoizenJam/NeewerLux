@@ -338,11 +338,25 @@ def buildKeyMap(keys, resolver, targetIdx=None):
 # ============================================================================
 
 KEYFRAME_MODES = ("HSI", "CCT", "ANM", "ON", "OFF")
+MODE_ALIASES = {"SCENE": "ANM", "SCN": "ANM"}  # what the README, HTTP commands and the editor call scenes
+
+
+def _normaliseKeyframe(kf):
+    """A keyframe with mode aliases ("SCENE") spelled the way the engine expects ("ANM")."""
+    if not isinstance(kf, dict) or not isinstance(kf.get("lights"), dict):
+        return kf
+    if not any(isinstance(p, dict) and str(p.get("mode", "")).upper() in MODE_ALIASES for p in kf["lights"].values()):
+        return kf
+    out = dict(kf)
+    out["lights"] = {key: (dict(p, mode=MODE_ALIASES[str(p.get("mode", "")).upper()])
+                           if isinstance(p, dict) and str(p.get("mode", "")).upper() in MODE_ALIASES else p)
+                     for key, p in kf["lights"].items()}
+    return out
 
 
 def animationErrors(anim):
     """Problems that would make parts of an animation silently do nothing: a light entry
-    without a mode, or with a mode lights don't understand (scenes are "ANM", not "SCENE")."""
+    without a mode, or with a mode lights don't understand. Scenes can be "ANM" or "SCENE"."""
     errors = []
     for i, kf in enumerate(anim.get("keyframes", []) or []):
         if not isinstance(kf, dict):
@@ -354,11 +368,10 @@ def animationErrors(anim):
             continue
         for key, params in lights.items():
             mode = str(params.get("mode", "")).upper() if isinstance(params, dict) else ""
+            mode = MODE_ALIASES.get(mode, mode)
             if mode not in KEYFRAME_MODES:
-                hint = ' (built-in scenes use "ANM")' if mode in ("SCENE", "SCN") else ""
-                errors.append("keyframe %d, light %r: mode %r isn't one of %s%s"
-                              % (i + 1, key, params.get("mode") if isinstance(params, dict) else params,
-                                 ", ".join(KEYFRAME_MODES), hint))
+                errors.append("keyframe %d, light %r: mode %r isn't one of HSI, CCT, SCENE (or ANM), ON, OFF"
+                              % (i + 1, key, params.get("mode") if isinstance(params, dict) else params))
     return errors
 
 
@@ -379,7 +392,7 @@ class AnimationTimeline:
     """
 
     def __init__(self, anim, speed=1.0, fps=5, briScale=1.0, loop=None, maxLoops=0, legacy=False, stepped=False):
-        self.keyframes = anim.get("keyframes", []) or []
+        self.keyframes = [_normaliseKeyframe(k) for k in (anim.get("keyframes", []) or [])]
         self.loop = bool(anim.get("loop", False) if loop is None else loop)
         self.maxLoops = max(0, int(maxLoops or 0))
         try:
@@ -623,7 +636,7 @@ class Cue:
 
 
 class Sequence:
-    __slots__ = ("name", "duration", "fps", "end", "pausemode", "oninterrupt", "cues", "raw")
+    __slots__ = ("name", "duration", "fps", "end", "pausemode", "oninterrupt", "handbackMs", "cues", "raw")
 
 
 class SequencePlayer:
@@ -831,6 +844,9 @@ def parseSequence(data, clipExists, defaultFps=DEFAULT_SEQUENCE_FPS, resolveTarg
     if seq.oninterrupt not in ("continue", "pause"):
         errors.append("'on_interrupt' must be \"continue\" or \"pause\"")
         seq.oninterrupt = "continue"
+    # how long the lights take to fade back when this sequence lets go of them (None = the global setting)
+    seq.handbackMs = None if data.get("handback_fade_ms") is None else \
+        _num(data.get("handback_fade_ms"), "handback_fade_ms", 0, 10000, errors, "sequence")
 
     rawCues = data.get("cues")
     if not isinstance(rawCues, list) or not rawCues:
@@ -905,6 +921,47 @@ def parseSequence(data, clipExists, defaultFps=DEFAULT_SEQUENCE_FPS, resolveTarg
 
 
 # ============================================================================
+# HAND-BACK FADES
+# ============================================================================
+HANDBACK_FPS = 20  # updates a second while a light fades back (keeps Bluetooth writes modest)
+
+
+def _lerp(a, b, t):
+    return a + (b - a) * t
+
+
+def blendCommands(a, b, t):
+    """A command t (0 to 1) of the way from a to b, for fading a light back when a layer
+    lets go of it. Brightness (CCT and scene brightness, HSI intensity) moves continuously
+    even across a mode change:
+      HSI to CCT    saturation falls to 0 (white) while brightness moves, then CCT;
+      CCT to HSI    HSI from saturation 0 at once, then the colour comes in;
+      scene to X    the scene's brightness moves, then X; X to scene: the reverse.
+    Lights can't blend between modes themselves, so the switch is one step at matched
+    brightness. Power commands and unknown values cut."""
+    if not a or not b or t >= 1.0:
+        return b
+    ma, mb = a.get("mode"), b.get("mode")
+    if ma not in ("HSI", "CCT", "ANM") or mb not in ("HSI", "CCT", "ANM"):
+        return b
+    bri = int(round(_lerp(a.get("bri", 100), b.get("bri", 100), t)))
+    if ma == mb == "HSI":
+        h0, h1 = a.get("hue", 0) % 360, b.get("hue", 0) % 360
+        d = ((h1 - h0 + 180) % 360) - 180  # the short way round
+        return {"mode": "HSI", "hue": int(round(h0 + d * t)) % 360,
+                "sat": int(round(_lerp(a.get("sat", 100), b.get("sat", 100), t))), "bri": bri}
+    if ma == mb == "CCT":
+        return {"mode": "CCT", "temp": int(round(_lerp(a.get("temp", 56), b.get("temp", 56), t))), "bri": bri}
+    if ma == "HSI" and mb == "CCT":
+        return {"mode": "HSI", "hue": a.get("hue", 0), "sat": int(round(_lerp(a.get("sat", 100), 0, t))), "bri": bri}
+    if ma == "CCT" and mb == "HSI":
+        return {"mode": "HSI", "hue": b.get("hue", 0), "sat": int(round(_lerp(0, b.get("sat", 100), t))), "bri": bri}
+    if ma == "ANM":  # to anything: keep the scene while its brightness moves
+        return {"mode": "ANM", "scene": a.get("scene", 1), "bri": bri}
+    return {"mode": "ANM", "scene": b.get("scene", 1), "bri": bri}  # into a scene: switch, then brightness
+
+
+# ============================================================================
 # COMPOSITOR
 # ============================================================================
 
@@ -928,6 +985,9 @@ class ShowCompositor:
         self.lastCmd = {}
         self.mailbox = {}     # idx -> (bytes, parallel)
         self.released = {}   # idx -> base bytes just restored, until a base write replaces them
+        self.fades = {}      # idx -> (start ms, duration ms, command faded from, layer handed to; 0 = base)
+        self._absorbUntil = 0.0  # a sequence ending on a preset: its recall becomes the fade's target, not a cut
+        self._endedFade = {} # layer -> hand-back ms asked for by the player that ended this tick
         self._deferred = []
         self._lightCount = None
         self._thread = None
@@ -1099,6 +1159,14 @@ class ShowCompositor:
         stale revert can't land on top of it.
         """
         with self.lock:
+            fade = self.fades.get(idx)
+            if fade is not None and fade[3] == 0 and self.clock() > self._absorbUntil:
+                # fading back to its base state and a manual command arrives: that's instant
+                del self.fades[idx]
+                self.owner.pop(idx, None)
+                self.lastCmd.pop(idx, None)
+                self.lastSent.pop(idx, None)
+                self.baseStates.pop(idx, None)
             if self.owner.get(idx, 0) > 0:
                 if isinstance(value, (list, tuple)) and len(value) > 1:
                     self.baseStates[idx] = list(OFF_BYTES) if value[0] == 0 else list(value)
@@ -1117,7 +1185,7 @@ class ShowCompositor:
 
     def anyActive(self):
         with self.lock:
-            return any(p is not None for p in self.layers.values()) or bool(self.effectQueue)
+            return any(p is not None for p in self.layers.values()) or bool(self.effectQueue) or bool(self.fades)
 
     def layerActive(self, layer):
         with self.lock:
@@ -1156,6 +1224,7 @@ class ShowCompositor:
                 commit = True
             elif player.seq.end.startswith("preset:") and reason == "finished":
                 n = int(player.seq.end[7:])
+                self._absorbUntil = self.clock() + 0.5
                 self._deferred.append(lambda: self.hooks.recallPreset(n))
         else:
             revert = player.revert if player.revert is not None else self.hooks.globalRevert()
@@ -1166,6 +1235,9 @@ class ShowCompositor:
                 b = self.hooks.encode(idx, cmd)
                 if b is not None:
                     self.baseStates[idx] = list(b)
+        own = getattr(getattr(player, "seq", None), "handbackMs", None)
+        if own is not None:
+            self._endedFade[layer] = own
         self._status("end", layer, player, reason=reason)
         if layer == LAYER_EFFECT and self.effectQueue and self.layers[LAYER_EFFECT] is None:
             nxt = self.effectQueue.pop(0)
@@ -1212,6 +1284,8 @@ class ShowCompositor:
         for out, _ in frames.values():
             lights.update(out)
         queued = False
+        handback = self.hooks.handbackMs() if hasattr(self.hooks, "handbackMs") else 0
+        stepMs = 1000.0 / HANDBACK_FPS
         for idx in lights:
             win = 0
             if not self.hooks.isLocked(idx):
@@ -1220,6 +1294,37 @@ class ShowCompositor:
                         win = layer
                         break
             prev = self.owner.get(idx, 0)
+            fade = self.fades.get(idx)
+            # A layer letting go of a light (to a lower layer, or back to its base state)
+            # starts a hand-back fade from what the light was showing. Taking over is instant.
+            if prev > 0 and win < prev and fade is None:
+                dur = self._endedFade.get(prev, handback)
+                fromCmd = self.lastCmd.get(idx)
+                if dur > 0 and fromCmd is not None and not (win == 0 and self.baseStates.get(idx) is None):
+                    fade = self.fades[idx] = (nowMs, float(dur), fromCmd, win)
+            elif fade is not None and win > fade[3]:
+                del self.fades[idx]  # a layer took the light again: starts are instant
+                fade = None
+            if fade is not None:
+                start, dur, fromCmd, _ = fade
+                k = int((nowMs - start) // stepMs) + 1
+                t = min(1.0, k * stepMs / dur)
+                target = frames[win][0][idx] if win > 0 else bytesToCommand(self.baseStates.get(idx))
+                if t >= 1.0 or target is None:
+                    del self.fades[idx]
+                    fade = None
+                else:
+                    cmd = blendCommands(fromCmd, target, t)
+                    if win > 0:
+                        self.owner[idx] = win
+                    if cmd != self.lastCmd.get(idx):
+                        self.lastCmd[idx] = cmd
+                        b = self.hooks.encode(idx, cmd)
+                        if b is not None and b != self.lastSent.get(idx):
+                            self.mailbox[idx] = (list(b), True)
+                            self.lastSent[idx] = list(b)
+                            queued = True
+                    continue  # while fading back to base the light stays owned, so base writes become the target
             if win > 0:
                 if prev == 0 and idx not in self.baseStates:
                     # A revert queued moments ago may not have reached the light's stored value yet
@@ -1248,5 +1353,6 @@ class ShowCompositor:
                     queued = True
                 elif b is None:
                     self.mailbox.pop(idx, None)
+        self._endedFade = {}
         if queued:
             self._deferred.append(self.hooks.wake)
