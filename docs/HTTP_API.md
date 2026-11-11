@@ -20,7 +20,7 @@ Wherever a light is named (`light=`, the `light` field of a batch command, anima
 | Name | `Key Light` | The custom name, case-insensitive |
 | MAC address | `AA:BB:CC:DD:EE:FF` | On macOS, the GUID Bluetooth reports instead |
 | All | `*` or `all` | Every light |
-| Role or side | `@key`, `@fill`, `@rim`, `@ambient`, `@practical`, `@left`, `@centre`, `@right`, `@eyeline`, `@all` | From each light's show settings; `@rim.left` means both |
+| Role or position | `@key`, `@fill`, `@rim`, `@ambient`, `@practical`, `@left`, `@centre`, `@right`, `@front`, `@beside`, `@back`, `@low`, `@middle`, `@high`, `@eyeline`, `@all` | From each light's show settings; dots combine them (`@rim.left`, `@back.left.high`). Sides are the streamer's left and right facing the camera; front is between the streamer and the camera |
 | A list | `1;3;@rim` | Any mix, separated by `;` |
 
 ### The flash guard
@@ -116,7 +116,7 @@ Example, a five-loop strobe on the rim lights as an effect: `animate=Strobe|1|10
       "setting": {"mode": "CCT", "temp": 4500, "bri": 60},
       "output": {"mode": "CCT", "temp": 4500, "bri": 60, "color": "#ffdcbb"},
       "cctRange": [3200, 5600], "cctOnly": false,
-      "role": "key", "side": "right", "locked": false, "layer": "base"
+      "role": "key", "side": "right", "depth": "front", "height": "middle", "locked": false, "layer": "base"
     }
   ],
   "animations": [{"name": "Heartbeat", "description": "...", "frames": 4, "loop": true, "modes": ["HSI"]}],
@@ -138,7 +138,7 @@ Per light:
 | `output` | What the light is actually showing: `setting` after the CCT-only conversion and brightness limits, plus `color`, an approximate `#rrggbb` for display. `null` if unknown. For simulated lights, built from what they received. |
 | `cctRange` | The light's colour temperature range in Kelvin, as used for clamping |
 | `cctOnly` | `true` for lights that only do white; colour commands are converted (or ignored) |
-| `role`, `side`, `locked` | Show settings from Light Preferences |
+| `role`, `side`, `depth`, `height`, `locked` | Show settings from Light Preferences |
 | `layer` | What is driving the light now: `base` (sliders, presets, light commands), `show` (a sequence), `effect` or `override` (animations) |
 
 ### status_json
@@ -150,7 +150,7 @@ Per light:
   "apiVersion": 2,
   "layers": {"override": null, "effect": null, "show": null},
   "sequence": {"type": "sequence", "name": "Example - Four Light Demo", "state": "playing", "position_ms": 12034, "duration_ms": 40000},
-  "lights": [{"id": 1, "name": "Key", "role": "key", "side": "right", "locked": false, "layer": "show",
+  "lights": [{"id": 1, "name": "Key", "role": "key", "side": "right", "depth": "front", "height": "middle", "locked": false, "layer": "show",
               "linked": true, "simulated": false, "mode": "HSI", "bri": 45, "color": "#b04ce0"}],
   "flashGuard": {"enabled": true, "held": 0}
 }
@@ -198,7 +198,7 @@ Response:
 | `{"action": "status"}` | `{"running", "animation", "show"}` where `show` is the `status_json` body |
 | `{"action": "create", "animation": {...}}` | Save an animation (same format as the files in `light_prefs/animations`), replacing any of the same name |
 | `{"action": "get", "name": "Heartbeat"}` | The whole animation: `{"animation": {...}}` |
-| `{"action": "save", "animation": {...}, "original": "Old Name", "overwrite": false}` | Save from an editor. Needs a name and at least one keyframe. `original` is the name it was opened under: a different name renames it. Saving over another animation needs `"overwrite": true`. |
+| `{"action": "save", "animation": {...}, "original": "Old Name", "overwrite": false}` | Save from an editor. Needs a name and at least one keyframe, and every light entry needs a `mode` of `HSI`, `CCT`, `ANM` (a built-in scene), `ON` or `OFF`; otherwise `errors` says which. `original` is the name it was opened under: a different name renames it. Saving over another animation needs `"overwrite": true`. |
 | `{"action": "duplicate", "name": "Heartbeat"}` | Copy as "Heartbeat (copy)"; the reply's `animation` is the new name |
 | `{"action": "delete", "name": "Heartbeat"}` | Delete it (stops it first if it's playing) |
 | `{"action": "reload"}` | Re-read `light_prefs/animations`; the reply has `count` |
@@ -219,7 +219,7 @@ Response:
 | `{"action": "save", "sequence": {...}, "original": "Old Name", "overwrite": false}` | Validate and save. `original` is the name it was opened under: a different name renames it (the old file goes). Saving over another sequence needs `"overwrite": true`. |
 | `{"action": "get", "name": "..."}` | The whole sequence: `{"sequence": {...}}` |
 | `{"action": "delete", "name": "..."}` | Delete it (stops it first if it's playing) |
-| `{"action": "editor", "targets": ["@rim", "1;2"]}` | What a timeline editor needs: `lights` in sweep order (`index`, `id`, `name`, `role`, `side`, `simulated`), `targets` (the light IDs each given target drives now), `choices` (target suggestions with labels), `animations` and `presets` (count) |
+| `{"action": "editor", "targets": ["@rim", "1;2"]}` | What a timeline editor needs: `lights` in sweep order (`index`, `id`, `name`, `role`, `side`, `depth`, `height`, `simulated`), `targets` (the light IDs each given target drives now), `choices` (target suggestions with labels), `animations` and `presets` (count) |
 | `{"action": "render", "name": "...", "step_ms": 50, "start_ms": 0, "end_ms": 60000}` | What each light would do, without playing: per-light colour changes and the cue list |
 | `{"action": "render", "name": "...", "format": "png", "width": 1600}` | The same as an image strip (`image/png`). Needs the desktop window; without it the reply is an error and the JSON render still works. |
 
@@ -247,7 +247,7 @@ The desktop's preset menu and editor. Preset numbers are 1-based. Every reply th
 | Body | Effect |
 |---|---|
 | `{"action": "get"}` | `{"apiVersion", "global": {...}, "lights": [...], "roles", "sides", "simulatedRigs"}` |
-| `{"action": "set_light", "light": 0, "settings": {"role": "key", "maxBri": 60}}` | Change one light's preferences. `light` is the 0-based `index` from `get` (an ID, name or MAC also works). Settings: `customName`, `preferredID` (0 to 99, 0 = automatic), `tempRange` (`[min, max]` Kelvin), `cctOnly`, `role`, `side`, `order` (0 to 99, 0 = automatic), `eyeline`, `maxBri` and `minBri` (-1 = use the global limit, else 0 to 100), `locked`. Saved to the light's preferences file, as the desktop does. |
+| `{"action": "set_light", "light": 0, "settings": {"role": "key", "maxBri": 60}}` | Change one light's preferences. `light` is the 0-based `index` from `get` (an ID, name or MAC also works). Settings: `customName`, `preferredID` (0 to 99, 0 = automatic), `tempRange` (`[min, max]` Kelvin), `cctOnly`, `role`, `side` (`left`, `centre`, `right`), `depth` (`front`, `beside`, `back`), `height` (`low`, `middle`, `high`), `order` (0 to 99, 0 = automatic: by position, then ID), `eyeline`, `maxBri` and `minBri` (-1 = use the global limit, else 0 to 100), `locked`. Saved to the light's preferences file, as the desktop does. |
 | `{"action": "set_global", "settings": {"envMaxBri": 80}}` | Change global preferences: `envMaxBri` (1 to 100), `envMinBri` (0 to 100), `seqFrameRate` (1 to 30), `effectMaxSeconds` (1 to 600), `globalCCTMin` and `globalCCTMax` (2700 to 8500), `cctFallbackMode` (`convert` or `ignore`), `simulatedLights` (0 to 4, next start), `simulatedCCTOnly` (next start), `flashGuardEnabled` (true or false). |
 
 Every value in a request is checked before any is applied; a request with an invalid value changes nothing and lists the problems in `errors`. Network access, keyboard shortcuts and startup options can't be changed over HTTP. Changes show up in the desktop window straight away.

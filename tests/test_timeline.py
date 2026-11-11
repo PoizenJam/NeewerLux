@@ -1,7 +1,11 @@
-"""Checks AnimationTimeline(legacy=True) against a replay of the v1.3.0 engine loop.
+"""Checks animation timelines against a replay of the v1.3.0 engine loop.
 
 The replay is the old animationEngineThread with time.sleep replaced by a virtual
 clock and zero send overhead, so it records the schedule the old engine aimed for.
+AnimationTimeline(legacy=True) must match it exactly, timing included. The timeline
+NeewerLux plays animations with since 1.3.3 (stepped=True: exact durations instead of
+v1.3.0's 50 ms rounding) is checked for exact durations, every keyframe shown, and fades
+moving in whole rate steps.
 Run: python tests/test_timeline.py
 """
 import glob
@@ -138,12 +142,50 @@ def check(anim, **kw):
     return problems
 
 
+def checkExact(anim, **kw):
+    """1.3.3 timing (stepped=True): each keyframe holds and fades exactly as long as the file
+    says divided by the speed, every keyframe with a hold shows its own colour during it, and
+    a fade moves in floor(fade / rate interval) steps (at least one) with no extra writes."""
+    speed = kw.get("speedMultiplier", 1.0)
+    fps = kw.get("fps", 5)
+    tl = show.AnimationTimeline(anim, speed=speed, fps=fps, briScale=kw.get("briScale", 1.0),
+                                loop=kw.get("loopOverride"), maxLoops=kw.get("maxLoops", 0), stepped=True)
+    kfs = tl.keyframes
+    problems = []
+    exact = sum(k.get("hold_ms", 200) + (k.get("fade_ms", 0) if i else 0) for i, k in enumerate(kfs)) / speed
+    if abs(tl.d0 - exact) > 0.001:
+        problems.append(("first pass length", tl.d0, exact))
+    stepMs = max(33, int(1000 / max(1, int(fps))))
+    for seg in tl.pass0:
+        if seg.holdDur > 2:
+            state, _, _ = tl.frameAt(seg.start + seg.fadeDur + seg.holdDur / 2.0)
+            for key, params in kfs[seg.kf].get("lights", {}).items():
+                if state.get(key) != show._scaled(params, tl.briScale):
+                    problems.append(("keyframe not shown", seg.kf, key, state.get(key)))
+                    break
+        if seg.fadeDur > 0:
+            want = max(1, int(seg.fadeDur // stepMs))
+            if seg.steps != want:
+                problems.append(("fade steps", seg.kf, seg.steps, want))
+            seen = []
+            t = seg.start
+            while t < seg.start + seg.fadeDur:
+                state, _, _ = tl.frameAt(t)
+                if not seen or seen[-1] != state:
+                    seen.append(state)
+                t += 1.0
+            if len(seen) > seg.steps:
+                problems.append(("fade wrote more than its steps", seg.kf, len(seen), seg.steps))
+    return problems
+
+
 def main():
     animDir = os.path.join(os.path.dirname(HERE), "light_prefs", "animations")
     files = sorted(glob.glob(os.path.join(animDir, "*.json")))
     bad = 0
     variants = [dict(), dict(speedMultiplier=1.5, fps=10, briScale=0.8), dict(speedMultiplier=0.5, fps=30),
                 dict(loopOverride=True, maxLoops=2), dict(loopOverride=False)]
+    badValues = 0
     for f in files:
         anim = json.load(open(f, encoding="utf-8"))
         for kw in variants:
@@ -151,8 +193,13 @@ def main():
             if p:
                 bad += 1
                 print("MISMATCH", anim["name"], kw, p[:2])
-    print("timeline vs v1.3.0 replay:", len(files), "animations x", len(variants), "variants,", bad, "mismatches")
-    return 1 if bad else 0
+            p = checkExact(anim, **kw)
+            if p:
+                badValues += 1
+                print("EXACT TIMING", anim["name"], kw, p[:2])
+    print("timeline vs v1.3.0 replay:", len(files), "animations x", len(variants), "variants,", bad, "mismatches (legacy timing),",
+          badValues, "with problems (1.3.3 exact timing)")
+    return 1 if bad or badValues else 0
 
 
 if __name__ == "__main__":

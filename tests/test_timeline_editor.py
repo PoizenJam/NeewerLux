@@ -198,6 +198,11 @@ def main():
         tiles = ed.stage.tiles
         check(len(tiles) == 4 and all(t["rgb"] for t in tiles), "preview tiles at the playhead: " + str(tiles))
         check(any(t["layer"] == "show" for t in tiles), "the sequence drives the preview")
+        check(all(t.get("side") in ("left", "centre", "right") and t.get("depth") for t in tiles), "preview tiles carry positions")
+        ed.planCheck.setChecked(True)
+        pump(50)
+        check(ed.stage.planMode and len(ed.stage._layout()) == 4, "plan view in the editor preview")
+        ed.planCheck.setChecked(False)
 
     def saveAndRename():
         ed = state["ed"]

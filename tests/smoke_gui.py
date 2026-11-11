@@ -81,6 +81,21 @@ def main():
     shotBig = os.path.join(rig.workdir, "stage_bigfont.png")
     stage.grab().save(shotBig)
     print("stage screenshot (large font):", shotBig)
+    # Plan view: lights in their cells, front row at the top, your left on the left
+    stage.view.setFont(stage.font())
+    stage.timer.stop()  # keep these test tiles on screen instead of the live ones
+    planTiles = [dict(t, side=sd, depth=dp, height=h) for t, (sd, dp, h) in zip(stage.view.tiles,
+                 [("right", "front", "middle"), ("left", "front", "low"), ("right", "back", "high"), ("left", "back", "middle")])]
+    stage.view.setTiles(planTiles)
+    stage.planCheck.setChecked(True)
+    app.processEvents()
+    pos = {stage.view.tiles[n]["side"] + "/" + stage.view.tiles[n]["depth"]: (x, y) for n, x, y in stage.view._layout()}
+    assert pos["left/front"][0] < pos["right/front"][0] and pos["left/front"][1] < pos["left/back"][1], pos
+    shotPlan = os.path.join(rig.workdir, "stage_plan.png")
+    stage.grab().save(shotPlan)
+    print("stage plan screenshot:", shotPlan)
+    stage.planCheck.setChecked(False)
+    stage.timer.start(50)
     win._updateShowStatus()
     swatch = win.lightTable.item(0, 0).data(nl.Qt.DecorationRole)
     assert swatch is not None, "no swatch on the first light row"
@@ -100,7 +115,12 @@ def main():
     win.setupLightPrefsTab(0)
     assert win.lightRoleCombo.currentText() == "Key"
     win.lightRoleCombo.setCurrentIndex(nl.LIGHT_ROLES.index("practical"))
-    win.lightSideCombo.setCurrentIndex(nl.LIGHT_SIDES.index("centre"))
+    picker = win.lightPositionPicker
+    others = {k: b.text() for k, b in picker.cells.items()}
+    assert "NEEWER" in others[("left", "beside")], "other lights should show in the picker: %r" % others
+    picker.cells[("left", "back")].click()
+    picker.heightButtons["high"].click()
+    assert picker.value() == ("left", "back", "high") and picker.cells[("left", "back")].text().startswith("This light")
     win.lightMaxBriSpin.setValue(45)
     win.lightLockedCheck.setChecked(True)
     win.checkLightPrefs()
@@ -108,11 +128,47 @@ def main():
     sidecar = os.path.join(rig.workdir, "light_prefs", mac.replace(":", ""))
     assert os.path.exists(sidecar), "sidecar not written"
     fields = open(sidecar, encoding="utf-8").read().split("|")
-    assert fields[5:12] == ["practical", "centre", "4", "", "45", "-1", "True"], fields
+    assert fields[5:14] == ["practical", "left", "4", "", "45", "-1", "True", "back", "high"], fields
     nl.lightShowPrefs.clear()
     nl.loadLightAliases()
     assert nl.lightShowPrefs[mac]["maxBri"] == 45 and nl.lightShowPrefs[mac]["locked"] is True
     assert nl.returnLightIndexesFromMacAddress("@practical") == [0]
+    assert nl.returnLightIndexesFromMacAddress("@back.left.high") == [0]
+    win.lightTable.selectRow(0)
+    app.processEvents()
+    win.setupLightPrefsTab(0)
+    assert win.lightPositionPicker.value() == ("left", "back", "high"), "position reloads into the picker"
+    picker.cells[("centre", "beside")].click()
+    picker.heightButtons["middle"].click()
+    win.checkLightPrefs()
+    fields = open(sidecar, encoding="utf-8").read().split("|")
+    assert len(fields) == 12 and fields[6] == "centre", "no position fields when the position is the default: %r" % fields
+
+    # Apply Settings only shows on the slider tabs, and only with live preview off
+    tabs = win.ColorModeTabWidget
+    win.show()
+    win.livePreview_check.setChecked(False)
+    for i, want in ((0, True), (1, True), (2, True), (win.TAB_GLOBALPREFS, False), (win.TAB_LIGHTPREFS, False), (win.TAB_ANIM, False)):
+        tabs.setCurrentIndex(i)
+        app.processEvents()
+        assert win.applyButton.isVisible() == want, "Apply Settings on tab %s should be %s" % (tabs.tabText(i), "shown" if want else "hidden")
+    win.livePreview_check.setChecked(True)
+    tabs.setCurrentIndex(0)
+    app.processEvents()
+    assert not win.applyButton.isVisible(), "hidden with live preview on"
+
+    # Save Global Preferences highlights while there are unsaved changes
+    win.setupGlobalLightPrefsTab()
+    assert not win.globalPrefsDirty and "unsaved" not in win.saveGlobalPrefsButton.text()
+    nl.globalPrefsFile = os.path.join(rig.workdir, "light_prefs", "NeewerLux.prefs")
+    win.envMaxBriSpin.setValue(81)
+    assert win.globalPrefsDirty and "unsaved" in win.saveGlobalPrefsButton.text(), "a change must highlight Save"
+    win.saveGlobalPrefs()
+    assert not win.globalPrefsDirty, "saving clears the highlight"
+    win.setupGlobalLightPrefsTab(True)
+    assert win.globalPrefsDirty, "Reset to defaults is unsaved until saved"
+    win.setupGlobalLightPrefsTab()
+    assert not win.globalPrefsDirty
 
     # Global prefs save and reload
     win.envMaxBriSpin.setValue(80)
@@ -190,6 +246,16 @@ def main():
     shot = os.path.join(rig.workdir, "sequences_tab.png")
     win.grab().save(shot)
     print("sequences tab screenshot:", shot)
+    win.lightTable.selectRow(0)
+    app.processEvents()
+    tabs.setCurrentIndex(win.TAB_LIGHTPREFS)
+    win.setupLightPrefsTab(0)
+    app.processEvents()
+    win.lightPrefs.ensureWidgetVisible(win.lightPositionPicker)
+    app.processEvents()
+    shot = os.path.join(rig.workdir, "light_prefs_tab.png")
+    win.grab().save(shot)
+    print("light preferences screenshot:", shot)
     print("GUI smoke test: PASS")
     return 0
 

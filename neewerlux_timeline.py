@@ -748,10 +748,17 @@ class SequenceEditor(QWidget):
         hint.setStyleSheet("color: #888;")
         leftLay.addWidget(hint)
         leftLay.addSpacing(8)
+        previewRow = QHBoxLayout()
         previewLabel = QLabel("Preview at the playhead")
         previewLabel.setStyleSheet("color: #aaa;")
-        leftLay.addWidget(previewLabel)
+        previewRow.addWidget(previewLabel)
+        previewRow.addStretch(1)
+        self.planCheck = QCheckBox("Plan view")
+        self.planCheck.setToolTip("Show the lights where they stand, from your seat facing the camera. Badges: L, M, H = height.")
+        previewRow.addWidget(self.planCheck)
+        leftLay.addLayout(previewRow)
         self.stage = StageView(self)
+        self.planCheck.toggled.connect(self.stage.setPlanMode)
         leftLay.addWidget(self.stage)
         leftLay.addStretch(1)
         split.addWidget(left)
@@ -1392,7 +1399,8 @@ class SequenceEditor(QWidget):
                 bri, mode = ch[2], ch[3]
                 layer = "show" if ch[4] == "sequence" else "base"
             tiles.append({"name": track["label"].split("  ", 1)[-1], "role": meta.get("role", ""), "rgb": rgb,
-                          "mode": mode, "bri": bri, "linked": True, "simulated": meta.get("simulated", False), "layer": layer})
+                          "mode": mode, "bri": bri, "linked": True, "simulated": meta.get("simulated", False), "layer": layer,
+                          "side": meta.get("side"), "depth": meta.get("depth"), "height": meta.get("height")})
         self.stage.setTiles(tiles)
 
     # --- closing ------------------------------------------------------------

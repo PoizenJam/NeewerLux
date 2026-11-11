@@ -90,6 +90,7 @@ try:
     from PySide6.QtCore import Qt, QItemSelectionModel, QTimer, Signal as QtSignal
     from PySide6.QtGui import QLinearGradient, QColor, QKeySequence, QFont, QIcon, QShortcut
     from PySide6.QtWidgets import QApplication, QMainWindow, QTableWidgetItem, QMessageBox, QInputDialog, QListWidgetItem, QSizePolicy, QPushButton
+    from PySide6.QtWidgets import QCheckBox, QSpinBox, QComboBox, QLineEdit, QTextEdit, QKeySequenceEdit
     PYSIDE_VERSION = 6
 
 except Exception as e:
@@ -99,6 +100,7 @@ except Exception as e:
         from PySide2.QtCore import Qt, QItemSelectionModel, QTimer, Signal as QtSignal
         from PySide2.QtGui import QLinearGradient, QColor, QKeySequence, QFont, QIcon
         from PySide2.QtWidgets import QApplication, QMainWindow, QTableWidgetItem, QShortcut, QMessageBox, QInputDialog, QListWidgetItem, QSizePolicy, QPushButton
+        from PySide2.QtWidgets import QCheckBox, QSpinBox, QComboBox, QLineEdit, QTextEdit, QKeySequenceEdit
         PYSIDE_VERSION = 2
     except Exception as e2:
         print(f"  [DEBUG] PySide2 import failed: {type(e2).__name__}: {e2}")
@@ -248,18 +250,22 @@ animRevertOnFinish = True  # revert lights to pre-animation state when a non-loo
 showEngine = None              # neewerlux_show.ShowCompositor, created by initShowEngine()
 savedSequences = {}            # dict of {name: sequence_dict} loaded from disk
 sequencesDir = os.path.dirname(os.path.abspath(sys.argv[0])) + os.sep + "light_prefs" + os.sep + "sequences"
-lightShowPrefs = {}            # {MAC: {"role", "side", "order", "eyeline", "maxBri", "minBri", "locked"}}
+lightShowPrefs = {}            # {MAC: {"role", "side", "order", "eyeline", "maxBri", "minBri", "locked", "depth", "height"}}
 _lastWritten = {}              # {MAC: bytes last actually written, after CCT-only conversion and limits}, for display
 API_VERSION = 2                # HTTP API contract version (docs/HTTP_API.md); v1.3.0 and earlier count as 1
 flashGuard = show.FlashGuard() # photosensitivity limit on what is actually sent (flashGuardEnabled)
+legacyAnimationTiming = False  # v1.3.0's 50 ms rounding; only tests/compare_legacy.py turns it on
 _flashHeld = {}                # {light index: time a value was held back}; the worker resends it once allowed
 _pendingSends = set()          # light indices whose stored value ([3]) still needs writing; latest value wins
 _pendingSendsLock = threading.Lock()
 _lightsOff = set()             # MACs whose last power command was OFF
 SHOW_PREF_DEFAULTS = {"role": "ambient", "side": "centre", "order": 0, "eyeline": False,
-                      "maxBri": -1, "minBri": -1, "locked": False} # -1 brightness = use the global default
+                      "maxBri": -1, "minBri": -1, "locked": False, # -1 brightness = use the global default
+                      "depth": "beside", "height": "middle"}
 LIGHT_ROLES = ["key", "fill", "rim", "ambient", "practical"]
-LIGHT_SIDES = ["left", "centre", "right"]
+LIGHT_SIDES = ["left", "centre", "right"]     # the streamer's left and right, facing the camera
+LIGHT_DEPTHS = ["front", "beside", "back"]    # between the streamer and the camera, level with them, behind them
+LIGHT_HEIGHTS = ["low", "middle", "high"]
 
 # HTTP SERVER (GUI-LAUNCHED) MANAGEMENT
 httpServerInstance = None   # ThreadingHTTPServer object (when running from GUI)
@@ -1796,6 +1802,9 @@ try: # try to load the GUI
                     newKeyframes = json.loads(jsonEdit.toPlainText())
                     if not isinstance(newKeyframes, list):
                         raise ValueError("Keyframes must be a JSON array")
+                    modeErrors = show.animationErrors({"keyframes": newKeyframes})
+                    if modeErrors:
+                        raise ValueError("\n".join(modeErrors[:5]))
                 except (json.JSONDecodeError, ValueError) as e:
                     errDlg = QMessageBox(self)
                     errDlg.setWindowTitle("JSON Error")
@@ -1946,11 +1955,12 @@ try: # try to load the GUI
 
             self.resetGlobalPrefsButton.clicked.connect(lambda: self.setupGlobalLightPrefsTab(True))
             self.saveGlobalPrefsButton.clicked.connect(self.saveGlobalPrefs)
+            self.watchGlobalPrefsEdits()
             self.applyButton.clicked.connect(self.manualApply)
             def _onLivePreviewToggled(checked):
                 global livePreview
                 livePreview = checked
-                self.applyButton.setVisible(not checked)
+                self.updateApplyButton()
             self.livePreview_check.toggled.connect(_onLivePreviewToggled)
 
             # THEME TOGGLE
@@ -2377,7 +2387,14 @@ try: # try to load the GUI
 
             # SHOW SETTINGS
             self.lightRoleCombo.setCurrentIndex(LIGHT_ROLES.index(getLightShowPref(selectedLight, "role")))
-            self.lightSideCombo.setCurrentIndex(LIGHT_SIDES.index(getLightShowPref(selectedLight, "side")))
+            self.lightPositionPicker.setValue(getLightShowPref(selectedLight, "side"), getLightShowPref(selectedLight, "depth"),
+                                              getLightShowPref(selectedLight, "height"))
+            others = {}
+            for b in range(len(availableLights)):
+                if b != selectedLight:
+                    cell = (getLightShowPref(b, "side"), getLightShowPref(b, "depth"))
+                    others.setdefault(cell, []).append(availableLights[b][2] if availableLights[b][2] else availableLights[b][0].name)
+            self.lightPositionPicker.setOthers(others)
             self.lightOrderSpin.setValue(getLightShowPref(selectedLight, "order"))
             self.lightEyelineCheck.setChecked(bool(getLightShowPref(selectedLight, "eyeline")))
             self.lightMaxBriSpin.setValue(getLightShowPref(selectedLight, "maxBri"))
@@ -2457,10 +2474,11 @@ try: # try to load the GUI
                     availableLights[selectedRows[0]][5] = self.onlyCCTModeCheck.isChecked() # if the option to send BRI and HUE separately is checked, then turn that on
                     changedPrefs += 1
 
-                # SHOW SETTINGS (role, side, sweep order, eye line, brightness limits, locked)
+                # SHOW SETTINGS (role, position, sweep order, eye line, brightness limits, locked)
                 lightMAC = availableLights[selectedRows[0]][0].address.upper()
+                side, depth, height = self.lightPositionPicker.value()
                 newShowPrefs = {"role": LIGHT_ROLES[self.lightRoleCombo.currentIndex()],
-                                "side": LIGHT_SIDES[self.lightSideCombo.currentIndex()],
+                                "side": side, "depth": depth, "height": height,
                                 "order": self.lightOrderSpin.value(),
                                 "eyeline": self.lightEyelineCheck.isChecked(),
                                 "maxBri": self.lightMaxBriSpin.value(),
@@ -2499,6 +2517,15 @@ try: # try to load the GUI
                     printDebugString("You don't have any new preferences to save, so we aren't saving any!")
 
         def setupGlobalLightPrefsTab(self, setDefault=False):
+            """Fill the tab from the current settings (clean), or with the defaults (unsaved)."""
+            self._globalPrefsLoading = True
+            try:
+                self._fillGlobalPrefsTab(setDefault)
+            finally:
+                self._globalPrefsLoading = False
+            self.setGlobalPrefsDirty(bool(setDefault))
+
+        def _fillGlobalPrefsTab(self, setDefault):
             if setDefault == False:
                 self.findLightsOnStartup_check.setChecked(findLightsOnStartup)
                 self.autoConnectToLights_check.setChecked(autoConnectToLights)
@@ -2648,10 +2675,9 @@ try: # try to load the GUI
             if not self.livePreview_check.isChecked():
                 livePreview = False
                 finalPrefs.append("livePreview=0")
-                self.applyButton.setVisible(True)
             else:
                 livePreview = True
-                self.applyButton.setVisible(False)
+            self.updateApplyButton()
 
             if not self.autoReconnect_check.isChecked(): # this option is usually on, so only add if false
                 autoReconnectOnDisconnect = False
@@ -2900,6 +2926,34 @@ try: # try to load the GUI
                 if os.path.exists(globalPrefsFile): # if a previous preferences file exists
                     print("Since all preferences are set to their defaults, we are deleting the NeewerLux.prefs file.")
                     os.remove(globalPrefsFile) # ...delete it!
+            self.setGlobalPrefsDirty(False)
+
+        def watchGlobalPrefsEdits(self):
+            """Mark Global Preferences as unsaved whenever one of its controls changes."""
+            mark = lambda *a: self.setGlobalPrefsDirty(True)
+            cw = self.globalPrefsCW
+            for w in cw.findChildren(QCheckBox):
+                w.toggled.connect(mark)
+            for w in cw.findChildren(QSpinBox):
+                w.valueChanged.connect(mark)
+            for w in cw.findChildren(QComboBox):
+                w.currentIndexChanged.connect(mark)
+            for w in cw.findChildren(QLineEdit):
+                w.textChanged.connect(mark)
+            for w in cw.findChildren(QTextEdit):
+                w.textChanged.connect(mark)
+            for w in cw.findChildren(QKeySequenceEdit):
+                w.keySequenceChanged.connect(mark)
+            self.setGlobalPrefsDirty(False)
+
+        def setGlobalPrefsDirty(self, dirty):
+            """Highlight Save Global Preferences while there are changes it hasn't saved."""
+            if getattr(self, "_globalPrefsLoading", False):
+                return
+            self.globalPrefsDirty = dirty
+            b = self.saveGlobalPrefsButton
+            b.setText("Save Global Preferences (unsaved changes)" if dirty else "Save Global Preferences")
+            b.setStyleSheet("QPushButton { background-color: #c77d12; color: white; font-weight: bold; }" if dirty else "")
 
         def setupShortcutKeys(self):
             self.SC_turnOffButton.setKey(QKeySequence(customKeys[0]))
@@ -3197,8 +3251,15 @@ try: # try to load the GUI
                 threadAction = "send"
 
         # IF YOU CLICK ON ONE OF THE TABS, THIS WILL SWITCH THE VIEW/SEND A NEW SIGNAL FROM THAT SPECIFIC TAB
+        def updateApplyButton(self):
+            """Apply Settings sends the CCT, HSI or Scene sliders when live preview is off, so it
+            only shows on those tabs (elsewhere it looked like it applied the open tab)."""
+            onSliderTab = self.ColorModeTabWidget.currentIndex() in (0, 1, 2)
+            self.applyButton.setVisible(onSliderTab and not livePreview)
+
         def tabChanged(self, i):
             currentSelection = self.selectedLights() # get the list of currently selected lights
+            self.updateApplyButton()
 
             if i == 0: # we clicked on the CCT tab
                 if len(currentSelection) > 0: # if we have something selected
@@ -3962,7 +4023,7 @@ def saveLightPrefs(lightID, deleteFile = False): # save a sidecar file with the 
         preferredID = availableLights[lightID][8] if len(availableLights[lightID]) > 8 else 0
         exportString += "|" + str(preferredID)
 
-        # Show settings (fields 6-12), only written when something isn't default
+        # Show settings (fields 6-14), only written when something isn't default
         exportString += showPrefsToFields(lightShowPrefs.get(availableLights[lightID][0].address.upper(), SHOW_PREF_DEFAULTS))
 
         # WRITE THE PREFERENCES FILE
@@ -4341,6 +4402,9 @@ def animationEditAction(action, body):
         if not isinstance(animData, dict) or not str(animData.get("name", "")).strip() \
                 or not isinstance(animData.get("keyframes"), list) or not animData["keyframes"]:
             return {"success": False, "action": "save", "errors": ["an animation needs a name and at least one keyframe"]}
+        modeErrors = show.animationErrors(animData)
+        if modeErrors:
+            return {"success": False, "action": "save", "errors": modeErrors}
         animData["name"] = str(animData["name"]).strip()
         original = body.get("original")
         existing = resolveAnimationName(animData["name"])
@@ -6193,16 +6257,24 @@ def returnLightIndexesFromMacAddress(addresses):
 
     return foundIndexes
 
+def _positionKey(lightIdx):
+    def at(values, key):
+        v = getLightShowPref(lightIdx, key)
+        return values.index(v) if v in values else 1
+    return (at(LIGHT_SIDES, "side"), at(LIGHT_DEPTHS, "depth"), at(LIGHT_HEIGHTS, "height"))
+
+
 def lightSweepKey(lightIdx):
-    """Sort key for sweeps: a set sweep order first, then preferred ID or discovery order."""
+    """Sort key for sweeps: a set sweep order first, then position (left to right, front to
+    back, low to high), then preferred ID or discovery order."""
     light = availableLights[lightIdx]
     effectiveID = light[8] if len(light) > 8 and light[8] > 0 else lightIdx + 1
     order = getLightShowPref(lightIdx, "order")
-    return (0, order, effectiveID) if order > 0 else (1, effectiveID, 0)
+    return (0, order, (0, 0, 0), effectiveID) if order > 0 else (1, 0, _positionKey(lightIdx), effectiveID)
 
 
 def resolveRoleTarget(spec):
-    """Indices for "rim", "left", "rim.left", "eyeline" or "all", in sweep order."""
+    """Indices for "rim", "left", "back", "high", "rim.left", "eyeline" or "all", in sweep order."""
     terms = [t for t in spec.lower().replace("center", "centre").split(".") if t]
     matches = []
     for b in range(len(availableLights)):
@@ -6214,6 +6286,10 @@ def resolveRoleTarget(spec):
                 ok = getLightShowPref(b, "role") == term
             elif term in LIGHT_SIDES:
                 ok = getLightShowPref(b, "side") == term
+            elif term in LIGHT_DEPTHS:
+                ok = getLightShowPref(b, "depth") == term
+            elif term in LIGHT_HEIGHTS:
+                ok = getLightShowPref(b, "height") == term
             elif term == "eyeline":
                 ok = bool(getLightShowPref(b, "eyeline"))
             else:
@@ -6226,7 +6302,7 @@ def resolveRoleTarget(spec):
 
 
 def parseShowPrefFields(fields):
-    """Show settings from sidecar fields 6-12: role|side|order|eyeline|maxBri|minBri|locked."""
+    """Show settings from sidecar fields 6-14: role|side|order|eyeline|maxBri|minBri|locked|depth|height."""
     prefs = dict(SHOW_PREF_DEFAULTS)
 
     def field(i):
@@ -6244,6 +6320,10 @@ def parseShowPrefFields(fields):
             pass
     prefs["eyeline"] = field(8).lower() in ("true", "1")
     prefs["locked"] = field(11).lower() in ("true", "1")
+    if field(12).lower() in LIGHT_DEPTHS:
+        prefs["depth"] = field(12).lower()
+    if field(13).lower() in LIGHT_HEIGHTS:
+        prefs["height"] = field(13).lower()
     return prefs
 
 
@@ -6251,8 +6331,12 @@ def showPrefsToFields(prefs):
     """Sidecar fields for show settings, or "" when everything is default (keeps v1.3.0 files unchanged)."""
     if all(prefs.get(k, v) == v for k, v in SHOW_PREF_DEFAULTS.items()):
         return ""
-    return "|" + "|".join([prefs["role"], prefs["side"], str(prefs["order"]), "True" if prefs["eyeline"] else "",
-                           str(prefs["maxBri"]), str(prefs["minBri"]), "True" if prefs["locked"] else ""])
+    fields = [prefs["role"], prefs["side"], str(prefs["order"]), "True" if prefs["eyeline"] else "",
+              str(prefs["maxBri"]), str(prefs["minBri"]), "True" if prefs["locked"] else ""]
+    depth, height = prefs.get("depth", "beside"), prefs.get("height", "middle")
+    if (depth, height) != ("beside", "middle"):
+        fields += [depth, height]  # only when set, so files without a position stay as v1.3.2 wrote them
+    return "|" + "|".join(fields)
 
 
 # ============================================================================
@@ -6535,7 +6619,7 @@ def commandToByteValue(lightIdx, cmd):
 
 
 def getLightShowPref(lightIdx, key):
-    """A light's show setting (role, side, order, eyeline, maxBri, minBri, locked), or its default."""
+    """A light's show setting (role, side, depth, height, order, eyeline, maxBri, minBri, locked), or its default."""
     if 0 <= lightIdx < len(availableLights):
         prefs = lightShowPrefs.get(availableLights[lightIdx][0].address.upper())
         if prefs is not None and key in prefs:
@@ -6666,7 +6750,8 @@ def startAnimation(animName, loop, speedMultiplier=1.0, loopOverride=None, fps=5
 
     animation = savedAnimations[resolvedName]
     timeline = show.AnimationTimeline(animation, speed=speedMultiplier, fps=fps, briScale=briScale,
-                                      loop=loopOverride, maxLoops=maxLoops, legacy=True)
+                                      loop=loopOverride, maxLoops=maxLoops,
+                                      legacy=legacyAnimationTiming, stepped=not legacyAnimationTiming)
     if not timeline.keyframes:
         printDebugString("Animation '" + resolvedName + "' has no keyframes")
         return False
@@ -6848,6 +6933,7 @@ class SequenceEditorHost:
             result.append({"index": idx, "id": prefID if prefID > 0 else idx + 1,
                            "name": light[2] if light[2] else light[0].name,
                            "role": getLightShowPref(idx, "role"), "side": getLightShowPref(idx, "side"),
+                           "depth": getLightShowPref(idx, "depth"), "height": getLightShowPref(idx, "height"),
                            "simulated": sim.isSimulated(light[0])})
         return result
 
@@ -6858,6 +6944,8 @@ class SequenceEditorHost:
         choices = [("Every light (*)", "*"), ("Every light, in sweep order (@all)", "@all")]
         choices += [(r.capitalize() + " lights (@" + r + ")", "@" + r) for r in LIGHT_ROLES]
         choices += [(s.capitalize() + " side (@" + s + ")", "@" + s) for s in LIGHT_SIDES]
+        choices += [("Front lights (@front)", "@front"), ("Lights beside you (@beside)", "@beside"), ("Back lights (@back)", "@back")]
+        choices += [(h.capitalize() + " lights (@" + h + ")", "@" + h) for h in LIGHT_HEIGHTS]
         choices.append(("Eye-line lights (@eyeline)", "@eyeline"))
         for light in self.lights():
             choices.append((str(light["id"]) + " - " + light["name"], str(light["id"])))
@@ -6928,6 +7016,7 @@ def renderSequence(nameOrData, stepMs=None, startMs=0, endMs=None):
         lightID = str(prefID if prefID > 0 else idx + 1)
         lights.append({"id": lightID, "name": light[2] if light[2] else light[0].name,
                        "role": getLightShowPref(idx, "role"), "side": getLightShowPref(idx, "side"),
+                       "depth": getLightShowPref(idx, "depth"), "height": getLightShowPref(idx, "height"),
                        "locked": bool(getLightShowPref(idx, "locked")), "simulated": sim.isSimulated(light[0])})
         changes[lightID] = []
         intent = showEngine.baseStates.get(idx) if showEngine is not None else None
@@ -6982,7 +7071,7 @@ def animationFlashReport(name, speed=1.0, seconds=None):
     if resolved is None:
         return None
     anim = savedAnimations[resolved]
-    loopMs = sum(max(50, int(k.get("hold_ms", 0))) + int(k.get("fade_ms", 0)) for k in anim.get("keyframes", [])) / max(0.05, speed)
+    loopMs = sum(int(k.get("hold_ms", 0)) + int(k.get("fade_ms", 0)) for k in anim.get("keyframes", [])) / max(0.05, speed)
     dur = int(seconds * 1000) if seconds else int(min(60000, max(6000, loopMs * 3)))
     seqData = {"format": 1, "name": "flash check", "duration_ms": dur, "fps": 30,
                "cues": [{"at_ms": 0, "duration_ms": dur, "target": "@all",
@@ -7122,6 +7211,8 @@ def getStageTiles():
         cmd, rgb, linked, simulated = getLightDisplayState(idx)
         light = availableLights[idx]
         tiles.append({"name": light[2] if light[2] else light[0].name, "role": getLightShowPref(idx, "role"),
+                      "side": getLightShowPref(idx, "side"), "depth": getLightShowPref(idx, "depth"),
+                      "height": getLightShowPref(idx, "height"),
                       "rgb": rgb, "mode": cmd["mode"] if cmd else "", "bri": cmd.get("bri", "") if cmd else "",
                       "linked": linked, "simulated": simulated,
                       "layer": "base" if getLightShowPref(idx, "locked") else show.LAYER_NAMES[owners.get(idx, 0)]})
@@ -7141,6 +7232,7 @@ def getShowStatus():
         lights.append({"id": prefID if prefID > 0 else idx + 1,
                        "name": light[2] if light[2] else light[0].name,
                        "role": getLightShowPref(idx, "role"), "side": getLightShowPref(idx, "side"),
+                       "depth": getLightShowPref(idx, "depth"), "height": getLightShowPref(idx, "height"),
                        "locked": bool(getLightShowPref(idx, "locked")),
                        "layer": show.LAYER_NAMES[st["owners"].get(idx, 0)],
                        "linked": linked, "simulated": simulated,
@@ -7182,6 +7274,7 @@ def lightStateJSON(lightIdx):
             "output": dict(_commandJSON(cmd) or {}, color=show.rgbHex(rgb)) if cmd else None,
             "cctRange": [minK, maxK], "cctOnly": bool(light[5]),
             "role": getLightShowPref(lightIdx, "role"), "side": getLightShowPref(lightIdx, "side"),
+            "depth": getLightShowPref(lightIdx, "depth"), "height": getLightShowPref(lightIdx, "height"),
             "locked": bool(getLightShowPref(lightIdx, "locked")), "layer": layer}
 
 
@@ -7226,6 +7319,7 @@ def getWebSettings():
         lights.append(entry)
     current = {name: globals()[name] for name in WEB_GLOBAL_PREFS}
     return {"success": True, "apiVersion": API_VERSION, "global": current, "lights": lights, "roles": LIGHT_ROLES, "sides": LIGHT_SIDES,
+            "depths": LIGHT_DEPTHS, "heights": LIGHT_HEIGHTS,
             "simulatedRigs": ["Off"] + [", ".join(r["role"] for r in sim.RIG_LIGHTS[:n]) for n in range(1, len(sim.RIG_LIGHTS) + 1)]}
 
 
@@ -7339,6 +7433,10 @@ def setWebLightSettings(lightIdx, changes):
             errors.append("role must be one of " + ", ".join(LIGHT_ROLES))
         elif key == "side" and value not in LIGHT_SIDES:
             errors.append("side must be one of " + ", ".join(LIGHT_SIDES))
+        elif key == "depth" and value not in LIGHT_DEPTHS:
+            errors.append("depth must be one of " + ", ".join(LIGHT_DEPTHS))
+        elif key == "height" and value not in LIGHT_HEIGHTS:
+            errors.append("height must be one of " + ", ".join(LIGHT_HEIGHTS))
         elif isinstance(default, bool):
             newShow[key] = value in (True, 1, "1", "true", "True")
             continue
@@ -7600,6 +7698,8 @@ def loadAllAnimations():
                     name = anim.get("name", filename.replace(".json", ""))
                     savedAnimations[name] = anim
                     printDebugString("Loaded animation: " + name)
+                    for problem in show.animationErrors(anim)[:3]:
+                        printDebugString("  Animation '" + name + "': " + problem + " - that part won't play")
                 except (json.JSONDecodeError, IOError) as e:
                     printDebugString("Error loading " + filename + ": " + str(e))
     except FileNotFoundError:
@@ -7614,7 +7714,7 @@ def loadLightAliases():
     HTTP commands and animations before any light is connected.
 
     Prefs file format: customName|colorTempRange|onlyCCTMode[|lastSettings][|preferredID]
-    [|role|side|sweepOrder|eyeline|maxBri|minBri|locked]
+    [|role|side|sweepOrder|eyeline|maxBri|minBri|locked[|depth|height]]
     """
     global lightAliases, lightShowPrefs
     lightAliases = {}
@@ -8173,6 +8273,8 @@ class NLPythonServer(BaseHTTPRequestHandler):
                 animData = body.get("animation", {})
                 if not animData.get("name") or not animData.get("keyframes"):
                     resultData = {"success": False, "error": "Animation must have 'name' and 'keyframes'"}
+                elif show.animationErrors(animData):
+                    resultData = {"success": False, "error": "; ".join(show.animationErrors(animData))}
                 else:
                     savedAnimations[animData["name"]] = animData
                     saveAnimationToFile(animData)

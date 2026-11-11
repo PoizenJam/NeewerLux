@@ -111,6 +111,20 @@ def main():
         waitFor(page, "[...document.querySelectorAll('.stage-box')].every(b => b.style.background.includes('0, 255, 0'))", "green tiles")
         check(js(page, "document.querySelectorAll('[data-swatch]').length") == 4, "table swatches")
         check(js(page, "document.querySelector('[data-swatch]').style.background").startswith("rgb(0, 255, 0"), "swatch colour")
+        # plan view: each light in its cell (the harness rig is fill and ambient on the left,
+        # key and rim on the right, all beside you by default)
+        js(page, "setStagePlan(true)")
+        waitFor(page, "document.getElementById('stageGrid').classList.contains('stage-plan')", "plan layout")
+        waitFor(page, "document.querySelectorAll('#stageGrid .stage-tile').length === 4", "4 tiles in the plan")
+        cells = json.loads(js(page, "JSON.stringify([...document.querySelectorAll('#stageGrid .pc')].map(c => [c.dataset.cell, c.querySelectorAll('.stage-tile').length]))"))
+        got = {c: n for c, n in cells if n}
+        check(got == {"left/beside": 2, "right/beside": 2}, "plan cells: " + str(got))
+        check(js(page, "document.querySelectorAll('#stageGrid .hb').length") == 4, "height badges")
+        js(page, "document.getElementById('stageGrid').scrollIntoView()")
+        spin(400)
+        view.grab().save(os.path.join(rig.workdir, "webui_plan.png"))
+        js(page, "setStagePlan(false)")
+        waitFor(page, "document.getElementById('stageGrid').classList.contains('stage-grid')", "strip layout again")
 
     def sequenceList():
         waitFor(page, "[...document.querySelectorAll('#seqList .anim-item strong')].some(s => s.textContent === %r)" % EXAMPLE, "example in the list")
@@ -165,6 +179,14 @@ def main():
         js(page, "toggleSettings()")
         waitFor(page, "document.getElementById('lpLight').options.length === 4", "light list in settings")
         js(page, "document.getElementById('lpLight').value = '1'; fillLightPrefs();")
+        # the position picker: click a cell and a height
+        check(js(page, "document.querySelectorAll('#lpPos .pos-cell').length") == 9, "3 x 3 position grid")
+        js(page, "document.querySelector('#lpPos .pos-cell[data-side=\"left\"][data-depth=\"back\"]').click()")
+        js(page, "document.querySelector('#lpPos .pos-h[data-height=\"high\"]').click()")
+        js(page, "document.getElementById('lpPos').scrollIntoView()")
+        spin(300)
+        view.grab().save(os.path.join(rig.workdir, "webui_position.png"))
+        check(js(page, "document.querySelector('#lpPos .pos-cell.sel').dataset.side + '/' + document.querySelector('#lpPos .pos-cell.sel').dataset.depth") == "left/back", "picked cell")
         js(page, """document.getElementById('lpRole').value = 'practical';
                     document.getElementById('lpMaxBri').value = '45';
                     document.getElementById('lpLocked').checked = true;
@@ -174,6 +196,8 @@ def main():
         mac = nl.availableLights[1][0].address.upper()
         prefs = nl.lightShowPrefs.get(mac, {})
         check(prefs.get("role") == "practical" and prefs.get("maxBri") == 45 and prefs.get("locked") is True, "show prefs: " + str(prefs))
+        check((prefs.get("side"), prefs.get("depth"), prefs.get("height")) == ("left", "back", "high"), "position: " + str(prefs))
+        check(nl.returnLightIndexesFromMacAddress("@back.left.high") == [1], "position targets")
         check(nl.availableLights[1][2] == "Web Named", "custom name")
         sidecar = os.path.join(rig.workdir, "light_prefs", nl.availableLights[1][0].address.replace(":", ""))
         check(os.path.exists(sidecar) and "Web Named" in open(sidecar, encoding="utf-8").read(), "sidecar file")
@@ -184,7 +208,7 @@ def main():
         check(js(page, "document.getElementById('commandLog').textContent.includes('not saved')"), "refusal shown in the log")
         # put it back to defaults: the sidecar is deleted, as on the desktop
         js(page, """document.getElementById('lpLight').value = '1'; fillLightPrefs();
-                    document.getElementById('lpRole').value = 'ambient'; document.getElementById('lpSide').value = 'centre';
+                    document.getElementById('lpRole').value = 'ambient'; lpPos = {side: 'centre', depth: 'beside', height: 'middle'};
                     document.getElementById('lpOrder').value = '0'; document.getElementById('lpEyeline').checked = false;
                     document.getElementById('lpMaxBri').value = '-1'; document.getElementById('lpMinBri').value = '-1';
                     document.getElementById('lpLocked').checked = false; document.getElementById('lpName').value = '';
@@ -193,9 +217,13 @@ def main():
         check(mac not in nl.lightShowPrefs and not os.path.exists(sidecar), "all-default light prefs should remove the sidecar")
 
     def globalPrefs():
-        js(page, """document.getElementById('gpEnvMax').value = '80'; document.getElementById('gpSeqFps').value = '15';
+        check("unsaved" not in js(page, "document.getElementById('gpSaveBtn').textContent"), "clean after loading")
+        js(page, """const el = document.getElementById('gpEnvMax'); el.value = '80'; el.dispatchEvent(new Event('input'));""")
+        check("unsaved" in js(page, "document.getElementById('gpSaveBtn').textContent"), "a change highlights Save")
+        js(page, """document.getElementById('gpSeqFps').value = '15';
                     document.getElementById('gpSim').value = '3'; saveGlobalPrefs();""")
         spin(600)
+        check("unsaved" not in js(page, "document.getElementById('gpSaveBtn').textContent"), "saving clears the highlight")
         check(nl.envMaxBri == 80 and nl.seqFrameRate == 15 and nl.simulatedLights == 3, "globals: %s %s %s" % (nl.envMaxBri, nl.seqFrameRate, nl.simulatedLights))
         text = open(nl.globalPrefsFile, encoding="utf-8").read()
         check("envMaxBri=80" in text and "seqFrameRate=15" in text and "simulatedLights=3" in text, "prefs file: " + text)
@@ -212,7 +240,7 @@ def main():
         js(page, "window.scrollTo(0, 0)")
         spin(300)
         view.grab().save(os.path.join(rig.workdir, "webui.png"))
-        print("    screenshots: " + os.path.join(rig.workdir, "webui.png") + ", webui_render.png, webui_settings.png, webui_timeline.png")
+        print("    screenshots: " + os.path.join(rig.workdir, "webui.png") + ", webui_render.png, webui_settings.png, webui_timeline.png, webui_plan.png, webui_position.png")
 
     def flashGuardSetting():
         check(js(page, "document.getElementById('gpFlashGuard').checked") is True, "the guard shows as on")

@@ -87,9 +87,9 @@ CCT (HSI cues are converted or skipped for those lights, per Global Preferences)
 
 The list of animation names comes from `POST /NeewerLux/animate` with
 `{"action": "list"}`, or `GET /NeewerLux/doAction?list_animations`. Inside sequences, clips
-play with exact keyframe timing and continuous fades sampled at the sequence `fps` (the
-standalone player keeps the older 50 ms-step timing so existing Stream Deck buttons look
-the same).
+play with exact keyframe timing and continuous fades sampled at the sequence `fps`.
+Animations played on their own also use exact keyframe timing (since 1.3.3; before, holds
+were rounded down to 50 ms), with fades moving in steps at the animation's rate.
 
 How a clip's lights map onto the target: animations name their lights `*`, `1`, `2`, `3`,
 `4` and so on. In a clip, `*` means every light in the target, and the numbers are
@@ -121,12 +121,15 @@ order written (`@fill;@ambient;@rim` puts the fill first, which matters for clip
 | `Key Light` | a light by its custom name |
 | `D0:A8:9E:6B:20:84` | a light by MAC address |
 | `@key`, `@fill`, `@rim`, `@ambient`, `@practical` | lights with that role (Light Preferences). Lights without a role count as ambient. |
-| `@left`, `@centre` (or `@center`), `@right` | lights on that side |
+| `@left`, `@centre` (or `@center`), `@right` | lights on that side: the streamer's left and right, facing the camera |
+| `@front`, `@beside`, `@back` | lights at that depth: between the streamer and the camera, level with them, behind them |
+| `@low`, `@middle`, `@high` | lights at that height |
 | `@eyeline` | lights flagged as being in the streamer's eye line |
 | `@all` | every light, in sweep order |
-| `@rim.left` | intersection: rim lights on the left. Any roles, sides and `eyeline` can be combined with dots. |
+| `@rim.left` | intersection: rim lights on the left. Any roles, sides, depths, heights and `eyeline` can be combined with dots: `@back.left.high`. |
 
-`@` targets list lights in sweep order (Light Preferences, Sweep order; Auto sorts by ID),
+`@` targets list lights in sweep order (Light Preferences, Sweep order; Auto sorts by position,
+left to right, then front to back, then low to high, then by ID),
 which is what makes `Color Chase` on `@all` travel left to right if sweep order is set that
 way. Prefer roles over numbers in generated sequences: they survive lights being
 renumbered or replaced.
@@ -302,7 +305,7 @@ The default JSON reply:
 
 ```
 {"success": true, "sequence": "...", "duration_ms": 40000, "start_ms": 0, "end_ms": 40000, "step_ms": 50,
- "lights": [{"id": "1", "name": "Key Light", "role": "key", "side": "right", "locked": false, "simulated": false}, ...],
+ "lights": [{"id": "1", "name": "Key Light", "role": "key", "side": "right", "depth": "front", "height": "middle", "locked": false, "simulated": false}, ...],
  "changes": {"1": [[0, "#ffd5b0", 55, "CCT", "sequence"], [32000, "#ffd5b0", 30, "CCT", "sequence"], ...], ...},
  "cues": [{"index": 0, "at_ms": 0, "duration_ms": 0, "target": "@key", "kind": "state", "what": "CCT 4500K 55%, fade 1000 ms", "label": "..."}, ...],
  "flashes": {"limit": 3, "worst": 2.0, "worstRed": 2.0, "lights": {"1": {"flashes": 0.5, "red": 0.0}, ...}},

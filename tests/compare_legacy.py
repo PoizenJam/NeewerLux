@@ -6,9 +6,11 @@ HTTP server). Per light, consecutive duplicate writes are collapsed and the valu
 sequences must match one v1.3.0 run exactly; v1.3.0 runs several times because it is
 not deterministic. Timing is reported, not compared, because v1.3.0's engine drifts.
 
-This compares the engines, so the current code runs with v1.3.0's animation files and with
-the flash guard off: 1.3.3 slowed the shipped animations that flashed more than 3 times a
-second and added the guard, and tests/test_show.py checks both of those.
+This compares the engines, so the current code runs with v1.3.0's animation files, with
+the flash guard off and with v1.3.0's animation timing: 1.3.3 slowed the shipped animations
+that flashed more than 3 times a second, added the guard and dropped the 50 ms rounding of
+holds (which changes where a stop lands in a fade). tests/test_show.py and
+tests/test_timeline.py check those.
 """
 import json
 import os
@@ -51,6 +53,8 @@ def run(srcDir, outPath, animSrc=None):
     rig = harness.boot(srcDir, roles=False, model="RGB176")
     if hasattr(rig.nl, "flashGuardEnabled"):
         rig.nl.flashGuardEnabled = False
+    if hasattr(rig.nl, "legacyAnimationTiming"):
+        rig.nl.legacyAnimationTiming = True  # values depend on when the URLs stop each animation
     if animSrc:
         src = os.path.join(animSrc, "light_prefs", "animations")
         dst = os.path.join(rig.workdir, "light_prefs", "animations")

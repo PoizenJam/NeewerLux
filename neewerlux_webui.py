@@ -118,6 +118,22 @@ a:hover { text-decoration: underline; }
 .stage-box .sim { position:absolute; top:5px; left:5px; background:rgba(0,0,0,.6); color:#e6e6e6; font-size:10px; padding:1px 5px; border-radius:4px; }
 .stage-box .unknown { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#ccc; font-size:20px; }
 .stage-name { color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.stage-box .hb { position:absolute; top:5px; right:5px; background:rgba(0,0,0,.6); color:#e6e6e6; font-size:10px; padding:1px 5px; border-radius:4px; }
+.stage-plan { display:grid; grid-template-columns:auto repeat(3, minmax(160px, auto)); gap:6px; align-items:stretch; }
+.stage-plan .ph { color:var(--muted); font-size:11px; text-align:center; }
+.stage-plan .pr { color:var(--muted); font-size:11px; display:flex; align-items:center; justify-content:flex-end; padding-right:4px; }
+.stage-plan .pc { border:1px dashed #3a3a4a; border-radius:6px; padding:6px; display:flex; gap:8px; justify-content:center; align-items:flex-start; min-height:140px; }
+.stage-plan .you { color:#666; font-size:12px; align-self:center; }
+.pos-picker { display:flex; gap:10px; align-items:flex-start; }
+.pos-grid { display:grid; grid-template-columns:auto repeat(3, 84px); gap:3px; font-size:11px; }
+.pos-grid .ph { color:var(--muted); text-align:center; }
+.pos-grid .pr { color:var(--muted); display:flex; align-items:center; padding-right:4px; }
+.pos-cell, .pos-h { min-height:44px; border:1px solid var(--border); background:var(--bg3); color:#888; border-radius:var(--radius); font-size:11px; cursor:pointer; padding:2px; overflow:hidden; white-space:pre-line; line-height:1.25; }
+.pos-cell.has { color:#bbb; }
+.pos-cell.sel, .pos-h.sel { background:var(--accent); color:#fff; font-weight:bold; border-color:#8fb0ff; }
+.pos-hcol { display:flex; flex-direction:column; gap:3px; font-size:11px; }
+.pos-h { min-height:30px; width:80px; }
+.btn.unsaved { background:#c77d12; color:#fff; border-color:#c77d12; font-weight:bold; }
 .stage-detail { color:var(--muted); }
 .layer-base { border-color:#5a5a5a; } .layer-show { border-color:#468cff; } .layer-effect { border-color:#ffa028; } .layer-override { border-color:#eb4646; }
 .seq-progress { height:8px; background:var(--bg3); border-radius:4px; cursor:pointer; margin:8px 0 4px; }
@@ -403,6 +419,7 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
     <div class="card full-width">
         <div class="card-header" style="cursor:pointer" onclick="toggleStage(this)">Stage <span style="float:right;color:var(--muted);font-size:11px;font-weight:normal">click to hide/show</span></div>
         <div class="card-body" id="stageBody">
+            <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:8px"><input type="checkbox" id="stagePlan" onchange="setStagePlan(this.checked)"> Plan view (where each light stands, from your seat facing the camera; L, M, H = height)</label>
             <div class="stage-grid" id="stageGrid"><div style="color:var(--muted)">Loading...</div></div>
             <div style="color:var(--muted);font-size:11px;margin-top:8px">Approximate colours. Outline: grey = manual/preset, blue = sequence, orange = effect, red = override animation.
             Simulated lights show what they received; real lights show what was last sent to them.</div>
@@ -602,9 +619,9 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
                         <label>Colour temperature range</label><span><input type="number" id="lpTempMin" min="1000" max="5600" step="100"> to <input type="number" id="lpTempMax" min="1000" max="10000" step="100"> K <button class="btn" style="padding:2px 8px;font-size:11px" onclick="resetTempRange()">Default</button></span>
                         <label>CCT-only light</label><label style="text-transform:none"><input type="checkbox" id="lpCCTOnly"> Only accepts CCT (older lights)</label>
                         <label>Role</label><select id="lpRole"></select>
-                        <label>Side</label><select id="lpSide"></select>
-                        <label>Sweep order</label><input type="number" id="lpOrder" min="0" max="99"><div class="hint">0 = automatic (by side).</div>
-                        <label>Eye line</label><label style="text-transform:none"><input type="checkbox" id="lpEyeline"> At eye level (@eyeline)</label>
+                        <label>Position</label><div class="pos-picker" id="lpPos"></div><div class="hint">From your seat, facing the camera: front is between you and the camera. Targets @left @front @high and combinations like @back.left.</div>
+                        <label>Sweep order</label><input type="number" id="lpOrder" min="0" max="99"><div class="hint">0 = automatic (left to right, front to back, low to high).</div>
+                        <label>Eye line</label><label style="text-transform:none"><input type="checkbox" id="lpEyeline"> In my eye line (@eyeline)</label>
                         <label>Max brightness</label><input type="number" id="lpMaxBri" min="-1" max="100"><div class="hint">-1 = use the global limit.</div>
                         <label>Min brightness</label><input type="number" id="lpMinBri" min="-1" max="100"><div class="hint">-1 = use the global limit.</div>
                         <label>Locked</label><label style="text-transform:none"><input type="checkbox" id="lpLocked"> Ignore sequences and effects</label>
@@ -624,7 +641,7 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
                         <label>Simulated lights</label><select id="gpSim"></select><div class="hint">Takes effect at the next start.</div>
                         <label>Simulated CCT-only light</label><label style="text-transform:none"><input type="checkbox" id="gpSimCCT"> Add one (takes effect at the next start)</label>
                     </div>
-                    <div class="btn-row" style="margin-top:10px"><button class="btn primary" onclick="saveGlobalPrefs()">Save Global Preferences</button></div>
+                    <div class="btn-row" style="margin-top:10px"><button class="btn primary" id="gpSaveBtn" onclick="saveGlobalPrefs()">Save Global Preferences</button></div>
                     <div style="color:var(--muted);font-size:11px;margin-top:8px">Network access, keyboard shortcuts and startup options are only changed in the desktop app.</div>
                 </div>
             </div>
@@ -854,7 +871,7 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
             <div class="tl-main">
                 <canvas id="tlCanvas" tabindex="0"></canvas>
                 <div class="tl-hint">Double-click a track to add a cue. Drag a cue to move it, its right edge to change its length, the notch at its top to change the fade. Right-click for more. Ctrl+wheel zooms. Dashed outlines are cues shared by several lights.</div>
-                <div style="color:var(--muted);font-size:12px;margin-bottom:4px">Preview at the playhead</div>
+                <div style="color:var(--muted);font-size:12px;margin-bottom:4px">Preview at the playhead <label style="float:right"><input type="checkbox" id="tlStagePlan" onchange="setStagePlan(this.checked)"> Plan view</label></div>
                 <div class="stage-grid" id="tlStage"></div>
             </div>
             <div class="tl-props" id="tlProps"></div>
@@ -1232,25 +1249,56 @@ function toggleStage(hdr) {
     b.style.display = stageVisible ? 'block' : 'none';
 }
 
+// Plan view: remembered in this browser (storage may be unavailable, so it's best-effort)
+let stagePlan = false;
+try { stagePlan = localStorage.getItem('nlStagePlan') === '1'; } catch (e) {}
+function setStagePlan(on) {
+    stagePlan = !!on;
+    try { localStorage.setItem('nlStagePlan', stagePlan ? '1' : '0'); } catch (e) {}
+    ['stagePlan', 'tlStagePlan'].forEach(id => { const el = document.getElementById(id); if (el) el.checked = stagePlan; });
+    renderStage();
+    if (typeof tlUpdateStage === 'function') tlUpdateStage();
+}
+const HEIGHT_BADGE = {low: 'L', middle: 'M', high: 'H'};
+function stageTileHTML(t) {
+    // t: name, role, color, mode, bri, linked, simulated, layer, side, depth, height
+    let detail = cap(t.role || '');
+    if (t.mode) detail += '  ' + t.mode + (t.mode === 'OFF' || t.bri == null ? '' : ' ' + t.bri + '%');
+    const pos = (t.side || 'centre') + ', ' + (t.depth || 'beside') + ', ' + (t.height || 'middle');
+    return '<div class="stage-tile" title="' + esc(t.name) + ' (' + pos + ')">'
+        + '<div class="stage-box layer-' + esc(t.layer || 'base') + '" style="background:' + (t.color || '#373737') + ';' + (t.linked === false ? 'filter:brightness(.4);' : '') + '">'
+        + (t.simulated ? '<span class="sim">SIM</span>' : '')
+        + (stagePlan && HEIGHT_BADGE[t.height] ? '<span class="hb">' + HEIGHT_BADGE[t.height] + '</span>' : '')
+        + (t.color ? '' : '<span class="unknown">?</span>') + '</div>'
+        + '<div class="stage-name">' + esc(t.name) + '</div>'
+        + '<div class="stage-detail">' + esc(detail) + '</div>'
+        + '<div class="stage-detail">' + esc(t.linked === false ? 'not linked' : (t.layer || 'base')) + '</div></div>';
+}
+function stageLayout(box, tiles) {
+    // Strip in sweep order, or the plan: columns your left to right, front row at the top
+    box.className = stagePlan ? 'stage-plan' : 'stage-grid';
+    let html = '';
+    if (!stagePlan) html = tiles.map(stageTileHTML).join('');
+    else {
+        const sides = ['left', 'centre', 'right'], depths = ['front', 'beside', 'back'];
+        html = '<div></div>' + ['Your left', 'Centre', 'Your right'].map(n => '<div class="ph">' + n + '</div>').join('');
+        depths.forEach(d => {
+            html += '<div class="pr">' + cap(d) + '</div>';
+            sides.forEach(sd => {
+                const here = tiles.filter(t => (sides.includes(t.side) ? t.side : 'centre') === sd && (depths.includes(t.depth) ? t.depth : 'beside') === d);
+                html += '<div class="pc" data-cell="' + sd + '/' + d + '">' + (here.length ? here.map(stageTileHTML).join('')
+                    : (sd === 'centre' && d === 'beside' ? '<span class="you">(you)</span>' : '')) + '</div>';
+            });
+        });
+    }
+    if (box._last !== html) { box.innerHTML = html; box._last = html; }
+}
 function renderStage() {
     if (!stageVisible || !lastStatus) return;
     const lights = lastStatus.lights || [];
     const grid = document.getElementById('stageGrid');
-    if (!lights.length) { grid.innerHTML = '<div style="color:var(--muted)">No lights yet</div>'; return; }
-    let html = '';
-    lights.forEach(l => {
-        let fill = l.color || '#373737';
-        let detail = cap(l.role);
-        if (l.mode) detail += '  ' + l.mode + (l.mode === 'OFF' || l.bri == null ? '' : ' ' + l.bri + '%');
-        html += '<div class="stage-tile" title="' + esc(l.name) + '">'
-            + '<div class="stage-box layer-' + esc(l.layer || 'base') + '" style="background:' + fill + ';' + (l.linked ? '' : 'filter:brightness(.4);') + '">'
-            + (l.simulated ? '<span class="sim">SIM</span>' : '')
-            + (l.color ? '' : '<span class="unknown">?</span>') + '</div>'
-            + '<div class="stage-name">' + esc(l.name) + '</div>'
-            + '<div class="stage-detail">' + esc(detail) + '</div>'
-            + '<div class="stage-detail">' + esc(l.linked ? (l.layer || 'base') : 'not linked') + '</div></div>';
-    });
-    if (grid._last !== html) { grid.innerHTML = html; grid._last = html; }
+    if (!lights.length) { grid.className = 'stage-grid'; grid.innerHTML = '<div style="color:var(--muted)">No lights yet</div>'; grid._last = ''; return; }
+    stageLayout(grid, lights);
 }
 
 function renderAnimStatus() {
@@ -1415,7 +1463,7 @@ function fillSelect(id, values, labels) {
 function applySettings(d) {
     settingsData = d;
     fillSelect('lpRole', d.roles);
-    fillSelect('lpSide', d.sides);
+
     fillSelect('gpSim', d.simulatedRigs.map((_, i) => i), d.simulatedRigs.map((r, i) => i ? i + ' (' + r + ')' : r));
     fillSelect('lpLight', d.lights.map(l => l.index), d.lights.map(l => l.id + ' - ' + (l.customName || l.model) + (l.simulated ? ' (simulated)' : '')));
     fillLightPrefs();
@@ -1430,6 +1478,22 @@ function applySettings(d) {
     document.getElementById('gpFallback').value = g.cctFallbackMode;
     document.getElementById('gpSim').value = g.simulatedLights;
     document.getElementById('gpSimCCT').checked = !!g.simulatedCCTOnly;
+    setGlobalPrefsDirty(false);
+}
+// Save Global Preferences is highlighted while the form has changes it hasn't saved
+function setGlobalPrefsDirty(dirty) {
+    const b = document.getElementById('gpSaveBtn');
+    if (!b) return;
+    b.classList.toggle('unsaved', dirty);
+    b.classList.toggle('primary', !dirty);
+    b.textContent = dirty ? 'Save Global Preferences (unsaved changes)' : 'Save Global Preferences';
+}
+function watchGlobalPrefs() {
+    document.querySelectorAll('[id^="gp"]').forEach(el => {
+        if (el.id === 'gpSaveBtn') return;
+        el.addEventListener('input', () => setGlobalPrefsDirty(true));
+        el.addEventListener('change', () => setGlobalPrefsDirty(true));
+    });
 }
 function gpFlashGuardChanged(box) {
     if (!box.checked && !confirm('The flash guard keeps every light to at most 3 flashes a second, the WCAG limit for photosensitive seizures. Without it, fast animations, speeds and effects can flash much faster, in the room and on stream.\n\nTurn it off anyway? (It takes effect when you save.)')) box.checked = true;
@@ -1449,12 +1513,45 @@ function fillLightPrefs() {
     document.getElementById('lpTempMax').value = l.tempRange[1];
     document.getElementById('lpCCTOnly').checked = l.cctOnly;
     document.getElementById('lpRole').value = l.role;
-    document.getElementById('lpSide').value = l.side;
+    lpPos = {side: l.side, depth: l.depth || 'beside', height: l.height || 'middle'};
+    renderPosPicker();
     document.getElementById('lpOrder').value = l.order;
     document.getElementById('lpEyeline').checked = !!l.eyeline;
     document.getElementById('lpMaxBri').value = l.maxBri;
     document.getElementById('lpMinBri').value = l.minBri;
     document.getElementById('lpLocked').checked = !!l.locked;
+}
+// Position picker: a 3 x 3 grid from your seat (your left to right, front at the top) plus height
+let lpPos = {side: 'centre', depth: 'beside', height: 'middle'};
+function renderPosPicker() {
+    const box = document.getElementById('lpPos');
+    if (!box || !settingsData) return;
+    const cur = currentLightPrefs();
+    const others = {};
+    settingsData.lights.forEach(l => {
+        if (cur && l.index === cur.index) return;
+        const k = l.side + '/' + (l.depth || 'beside');
+        (others[k] = others[k] || []).push(l.customName || l.model);
+    });
+    const sides = ['left', 'centre', 'right'], depths = ['front', 'beside', 'back'];
+    let g = '<div class="pos-grid"><div></div>' + ['Your left', 'Centre', 'Your right'].map(n => '<div class="ph">' + n + '</div>').join('');
+    depths.forEach(d => {
+        g += '<div class="pr">' + cap(d) + '</div>';
+        sides.forEach(sd => {
+            const names = others[sd + '/' + d] || [];
+            const sel = lpPos.side === sd && lpPos.depth === d;
+            let text = '';
+            if (sel) text = 'This light' + (names.length ? '\n+ ' + names.length + ' other' + (names.length > 1 ? 's' : '') : '');
+            else if (names.length) text = names.slice(0, 2).join('\n') + (names.length > 2 ? '\n+' + (names.length - 2) + ' more' : '');
+            else if (sd === 'centre' && d === 'beside') text = '(you)';
+            g += '<button type="button" class="pos-cell' + (sel ? ' sel' : '') + (names.length ? ' has' : '') + '" data-side="' + sd + '" data-depth="' + d
+                + '" title="' + esc(names.join(', ')) + '" onclick="lpPos.side=this.dataset.side;lpPos.depth=this.dataset.depth;renderPosPicker()">' + esc(text) + '</button>';
+        });
+    });
+    g += '</div><div class="pos-hcol"><div style="color:var(--muted)">Height</div>'
+        + ['high', 'middle', 'low'].map(h => '<button type="button" class="pos-h' + (lpPos.height === h ? ' sel' : '') + '" data-height="' + h
+        + '" onclick="lpPos.height=this.dataset.height;renderPosPicker()">' + cap(h) + '</button>').join('') + '</div>';
+    box.innerHTML = g;
 }
 function resetTempRange() {
     const l = currentLightPrefs();
@@ -1468,7 +1565,7 @@ async function saveLightPrefs() {
     if (!l) { logMsg('No light selected', 'err'); return; }
     const settings = {customName: document.getElementById('lpName').value, preferredID: num('lpID'),
         tempRange: [num('lpTempMin'), num('lpTempMax')], cctOnly: document.getElementById('lpCCTOnly').checked,
-        role: document.getElementById('lpRole').value, side: document.getElementById('lpSide').value, order: num('lpOrder'),
+        role: document.getElementById('lpRole').value, side: lpPos.side, depth: lpPos.depth, height: lpPos.height, order: num('lpOrder'),
         eyeline: document.getElementById('lpEyeline').checked, maxBri: num('lpMaxBri'), minBri: num('lpMinBri'),
         locked: document.getElementById('lpLocked').checked};
     try {
@@ -2640,22 +2737,20 @@ function tlUpdateStage() {
     if (!tl || !tl.render) return;
     const meta = {};
     tl.render.lights.forEach(l => meta[l.id] = l);
-    const html = tl.tracks.filter(t => t.id != null).map(t => {
+    const tiles = tl.tracks.filter(t => t.id != null).map(t => {
         const ch = tlColourAt(tl.render.changes[t.id] || [], tl.playhead);
         const mt = meta[t.id] || {};
-        const colour = ch && ch[1] ? ch[1] : null;
-        const layer = ch && ch[4] === 'sequence' ? 'show' : 'base';
-        const detail = cap(mt.role || '') + (ch ? '  ' + ch[3] + ' ' + ch[2] + '%' : '');
-        return '<div class="stage-tile" title="' + esc(t.name) + '"><div class="stage-box layer-' + layer + '" style="background:' + (colour || '#373737') + '">'
-            + (mt.simulated ? '<span class="sim">SIM</span>' : '') + (colour ? '' : '<span class="unknown">?</span>') + '</div>'
-            + '<div class="stage-name">' + esc(t.name) + '</div><div class="stage-detail">' + esc(detail) + '</div><div class="stage-detail">' + layer + '</div></div>';
-    }).join('');
-    const box = document.getElementById('tlStage');
-    if (box._last !== html) { box.innerHTML = html; box._last = html; }
+        return {name: t.name, role: mt.role, color: ch && ch[1] ? ch[1] : null, mode: ch ? ch[3] : null, bri: ch ? ch[2] : null,
+                linked: true, simulated: mt.simulated, layer: ch && ch[4] === 'sequence' ? 'show' : 'base',
+                side: mt.side, depth: mt.depth, height: mt.height};
+    });
+    stageLayout(document.getElementById('tlStage'), tiles);
 }
 
 // INIT
 window.addEventListener('load', () => {
+    ['stagePlan', 'tlStagePlan'].forEach(id => { const el = document.getElementById(id); if (el) el.checked = stagePlan; });
+    watchGlobalPrefs();
     refreshAll();
     startAutoRefresh();
     pollStatus();

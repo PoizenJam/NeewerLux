@@ -156,6 +156,110 @@ def t_roleTargets(rig):
     check(nl.returnLightIndexesFromMacAddress("@bogus") == [], "unknown role matches nothing")
 
 
+def t_positionTargetsAndSweep(rig):
+    """1.3.3: depth (front, beside, back) and height (low, middle, high) next to side; targets
+    combine with dots; automatic sweep order follows position; saved, shown and refused."""
+    nl = rig.nl
+    S = "/NeewerLux/settings"
+    try:
+        _positionChecks(rig, nl, S)
+    finally:  # put the files back to the harness rig, so later reloads don't pick this up
+        for i, (mac, _, prefs) in enumerate(harness.RIG):
+            rig.post(S, {"action": "set_light", "light": i, "settings": dict(prefs, depth="beside", height="middle")})
+
+
+def _positionChecks(rig, nl, S):
+    # the harness rig sets explicit sweep orders; position settings for this test
+    layout = {KEY: ("right", "front", "middle"), FILL: ("left", "front", "low"),
+              RIM: ("right", "back", "high"), AMB: ("left", "back", "middle")}
+    for i, (side, depth, height) in layout.items():
+        # the harness keeps roles in memory only, and set_light reloads the light files, so send the role too
+        settings = dict(harness.RIG[i][2], side=side, depth=depth, height=height, order=0)
+        r = rig.post(S, {"action": "set_light", "light": i, "settings": settings})
+        check(r["success"], "set_light position: " + str(r))
+    R = nl.returnLightIndexesFromMacAddress
+    check(R("@front") == [FILL, KEY], "@front in sweep order: " + str(R("@front")))
+    check(R("@back") == [AMB, RIM], "@back")
+    check(R("@high") == [RIM] and R("@low") == [FILL] and R("@middle") == [AMB, KEY], "heights")
+    check(R("@back.left") == [AMB] and R("@front.right.middle") == [KEY] and R("@rim.high") == [RIM], "combinations: %s %s %s" % (R("@back.left"), R("@front.right.middle"), R("@rim.high")))
+    check(R("@beside") == [], "nobody beside you")
+    # automatic order: left to right, then front to back
+    check(R("@all") == [FILL, AMB, KEY, RIM], "auto sweep order by position: " + str(R("@all")))
+    # a set order still wins
+    rig.post(S, {"action": "set_light", "light": RIM, "settings": dict(harness.RIG[RIM][2], side="right", depth="back", height="high", order=1)})
+    check(R("@all")[0] == RIM, "a set sweep order comes first")
+    # shown everywhere the side is
+    lj = rig.getJSON("list_json")
+    entry = [l for l in lj["lights"] if l.get("role") == "fill"][0]
+    check(entry.get("depth") == "front" and entry.get("height") == "low", "list_json: " + str(entry))
+    st = [l for l in rig.getJSON("status_json")["lights"] if l["role"] == "rim"][0]
+    check(st.get("depth") == "back" and st.get("height") == "high", "status_json")
+    g = rig.post(S, {"action": "get"})
+    check(g["depths"] == ["front", "beside", "back"] and g["heights"] == ["low", "middle", "high"], "settings get lists the choices")
+    # saved in the light's file and read back
+    sidecar = os.path.join(rig.workdir, "light_prefs", rig.mac(RIM).replace(":", ""))
+    fields = open(sidecar, encoding="utf-8").read().split("|")
+    check(fields[12:14] == ["back", "high"], "sidecar fields: " + str(fields))
+    nl.lightShowPrefs.clear()
+    nl.loadLightAliases()
+    check(nl.getLightShowPref(RIM, "depth") == "back" and nl.getLightShowPref(RIM, "height") == "high", "reloaded from the file")
+    # bad values are refused
+    r = rig.post(S, {"action": "set_light", "light": KEY, "settings": {"depth": "under", "height": "tall"}})
+    check(not r["success"] and len(r["errors"]) == 2, "bad position refused: " + str(r))
+    # the timeline editor offers the new targets
+    choices = [v for _, v in nl.SequenceEditorHost().targetChoices()] if hasattr(nl, "SequenceEditorHost") else []
+    check(not choices or all(t in choices for t in ("@front", "@beside", "@back", "@low", "@middle", "@high")), "editor target choices")
+
+
+def t_animationModeValidation(rig):
+    """A keyframe light without a known mode is refused on save instead of silently not playing."""
+    A = "/NeewerLux/animate"
+    bad = {"name": "Harness Bad Mode", "keyframes": [{"hold_ms": 500, "fade_ms": 0, "lights": {"*": {"mode": "SCENE", "scene": 4, "bri": 50}}}]}
+    r = rig.post(A, {"action": "save", "animation": bad, "overwrite": True})
+    check(not r["success"] and "ANM" in r["errors"][0], "SCENE refused with a hint: " + str(r))
+    bad["keyframes"][0]["lights"]["*"] = {"hue": 10}
+    r = rig.post(A, {"action": "save", "animation": bad, "overwrite": True})
+    check(not r["success"], "a missing mode is refused")
+    good = dict(bad, keyframes=[{"hold_ms": 500, "fade_ms": 0, "lights": {"*": {"mode": "ANM", "scene": 4, "bri": 50}, "2": {"mode": "OFF"}}}])
+    r = rig.post(A, {"action": "save", "animation": good, "overwrite": True})
+    check(r["success"], "ANM and OFF are accepted: " + str(r))
+    rig.post(A, {"action": "delete", "name": "Harness Bad Mode"})
+
+
+def t_exactAnimationTiming(rig):
+    """1.3.3: holds last exactly as long as the file says. v1.3.0 floored them to 50 ms ticks,
+    so a 130 ms hold played as 100 ms and speed 3 on a 220 ms hold played as 50 ms."""
+    A = "/NeewerLux/animate"
+    anim = {"name": "Harness Exact", "loop": True, "keyframes": [
+        {"hold_ms": 130, "fade_ms": 0, "lights": {"*": {"mode": "HSI", "hue": 0, "sat": 100, "bri": 100}}},
+        {"hold_ms": 130, "fade_ms": 0, "lights": {"*": {"mode": "HSI", "hue": 200, "sat": 100, "bri": 100}}}]}
+    rig.post(A, {"action": "save", "animation": anim, "overwrite": True})
+    nl = rig.nl
+    nl.flashGuardEnabled = False  # hue-only changes at the same brightness, but keep the guard out of the timing
+    try:
+        t0 = time.monotonic()
+        rig.get("animate=Harness%20Exact|1|10|100|true", 2.0)
+        rig.get("stop_animate", 0.2)
+        w = [(t, hueOf(d)) for t, d in writesFor(rig, FILL, t0) if d[1] == 134]
+        changes = [t for (_, a), (t, b) in zip(w, w[1:]) if a != b]
+        gaps = sorted(b - a for a, b in zip(changes, changes[1:]))
+        med = gaps[len(gaps) // 2] if gaps else 0
+        RESULTS.append("    130 ms holds: median %.0f ms between colour changes (v1.3.0 rounded to 100 ms)" % (med * 1000))
+        check(0.12 <= med <= 0.14, "130 ms holds played as %.0f ms" % (med * 1000))
+        # speed scales evenly: 3x on 130 ms is 43 ms (v1.3.0: the 50 ms minimum)
+        t1 = time.monotonic()
+        rig.get("animate=Harness%20Exact|2|10|100|true", 1.2)
+        rig.get("stop_animate", 0.2)
+        w = [(t, hueOf(d)) for t, d in writesFor(rig, FILL, t1) if d[1] == 134]
+        changes = [t for (_, a), (t, b) in zip(w, w[1:]) if a != b]
+        gaps = sorted(b - a for a, b in zip(changes, changes[1:]))
+        med = gaps[len(gaps) // 2] if gaps else 0
+        check(0.055 <= med <= 0.075, "speed 2 should give 65 ms holds, got %.0f ms" % (med * 1000))
+    finally:
+        nl.flashGuardEnabled = True
+        rig.post(A, {"action": "delete", "name": "Harness Exact"})
+
+
 def t_effectOverPartOfRigRejoinsInSync(rig):
     hues = [0, 40, 80, 120, 160, 200, 240, 280, 320, 20, 60, 100]
     rig.post("/NeewerLux/sequence", {"action": "play", "sequence": stepSequence("sync", hues, 500)}, 0.7)
@@ -269,7 +373,7 @@ def t_effectCap(rig):
 
 def t_overrideOverSequence(rig):
     rig.post("/NeewerLux/sequence", {"action": "play", "sequence": stepSequence("ovr", [0, 60, 120, 180, 240, 300], 500)}, 0.3)
-    rig.get("animate=Strobe|1|10|100|true|2", 1.1)  # legacy URL = override layer; two 400 ms loops
+    rig.get("animate=Strobe|1|10|100|true|2", 1.2)  # legacy URL = override layer; two 440 ms loops
     last = rig.rec.last(rig.mac(FILL))
     check(last[5] == 100 and hueOf(last) in (60, 120, 180), "after the override ends the light must return to the sequence, got " + str(last))
     check(rig.getJSON("status_json")["sequence"]["state"] == "playing", "sequence keeps running under an override")
@@ -278,7 +382,7 @@ def t_overrideOverSequence(rig):
 def t_onInterruptPause(rig):
     seq = stepSequence("oip", [0, 90, 180, 270], 500, on_interrupt="pause")
     rig.post("/NeewerLux/sequence", {"action": "play", "sequence": seq}, 0.3)
-    rig.get("animate=Strobe|1|10|100|true|2||effect", 0.2)  # 2 loops of 400 ms
+    rig.get("animate=Strobe|1|10|100|true|2||effect", 0.2)  # 2 loops of 440 ms
     p1 = rig.getJSON("status_json")["sequence"]["position_ms"]
     time.sleep(0.3)
     p2 = rig.getJSON("status_json")["sequence"]["position_ms"]
@@ -1011,6 +1115,7 @@ TESTS = [t_maxBrightnessHTTP, t_maxBrightnessAnimationAndSequence, t_minBrightne
          t_batchDuringSequenceBecomesRevertTarget, t_listJsonStructured,
          t_presetEditAPI, t_animationEditAPI, t_sequenceEditAPI, t_commandsDontWaitForStatusPoll,
          t_flashGuardLimitsOutput, t_flashGuardRedFlashes, t_shippedContentUnderFlashLimit,
+         t_positionTargetsAndSweep, t_animationModeValidation, t_exactAnimationTiming,
          t_addSimulatedRig]
 
 

@@ -337,6 +337,31 @@ def buildKeyMap(keys, resolver, targetIdx=None):
 # ANIMATION TIMELINE
 # ============================================================================
 
+KEYFRAME_MODES = ("HSI", "CCT", "ANM", "ON", "OFF")
+
+
+def animationErrors(anim):
+    """Problems that would make parts of an animation silently do nothing: a light entry
+    without a mode, or with a mode lights don't understand (scenes are "ANM", not "SCENE")."""
+    errors = []
+    for i, kf in enumerate(anim.get("keyframes", []) or []):
+        if not isinstance(kf, dict):
+            errors.append("keyframe %d isn't an object" % (i + 1))
+            continue
+        lights = kf.get("lights", {})
+        if not isinstance(lights, dict):
+            errors.append("keyframe %d: \"lights\" must be an object" % (i + 1))
+            continue
+        for key, params in lights.items():
+            mode = str(params.get("mode", "")).upper() if isinstance(params, dict) else ""
+            if mode not in KEYFRAME_MODES:
+                hint = ' (built-in scenes use "ANM")' if mode in ("SCENE", "SCN") else ""
+                errors.append("keyframe %d, light %r: mode %r isn't one of %s%s"
+                              % (i + 1, key, params.get("mode") if isinstance(params, dict) else params,
+                                 ", ".join(KEYFRAME_MODES), hint))
+    return errors
+
+
 class _Segment:
     __slots__ = ("start", "fadeDur", "steps", "holdDur", "kf", "prev", "snapBefore")
 
@@ -344,13 +369,16 @@ class _Segment:
 class AnimationTimeline:
     """Evaluates an animation at any time offset instead of stepping through sleeps.
 
-    legacy=True reproduces the v1.3.0 engine's timing rules exactly (holds floored to
-    50 ms ticks with a 50 ms minimum, fades in whole steps of the rate interval, the
-    loop-wrap fade), without its accumulated drift. legacy=False is used for clips in
-    sequences: exact durations and continuous fades, sampled at the sequence frame rate.
+    Holds and fades last exactly as long as the file says (divided by the speed).
+    stepped=True is for animations played on their own: a fade moves in whole steps of
+    the rate interval (fps updates a second), so the rate keeps limiting Bluetooth writes.
+    Without it (clips in sequences) fades are continuous, sampled at the sequence frame rate.
+    legacy=True reproduces the v1.3.0 engine's rounding (holds floored to 50 ms ticks with
+    a 50 ms minimum, fades a whole number of 1/fps steps long); NeewerLux itself stopped
+    using it in 1.3.3, and tests/test_timeline.py keeps it checked against a v1.3.0 replay.
     """
 
-    def __init__(self, anim, speed=1.0, fps=5, briScale=1.0, loop=None, maxLoops=0, legacy=True):
+    def __init__(self, anim, speed=1.0, fps=5, briScale=1.0, loop=None, maxLoops=0, legacy=False, stepped=False):
         self.keyframes = anim.get("keyframes", []) or []
         self.loop = bool(anim.get("loop", False) if loop is None else loop)
         self.maxLoops = max(0, int(maxLoops or 0))
@@ -362,6 +390,7 @@ class AnimationTimeline:
         self.stepMs = max(33, int(1000 / max(1, int(fps))))
         self.briScale = briScale
         self.legacy = legacy
+        self.stepped = stepped
 
         self.pass0, self.d0, endSnap = self._buildPass(True, {})
         self.endSnap = endSnap
@@ -391,7 +420,8 @@ class AnimationTimeline:
         fadeDur = max(0.0, fade / self.speed)
         if isWrapFrame and fadeDur == 0:
             fadeDur = max(0.0, self.keyframes[-1].get("fade_ms", 0) / self.speed)
-        return fadeDur, 0, holdDur
+        steps = max(1, int(fadeDur // self.stepMs)) if (self.stepped and fadeDur > 0) else 0
+        return fadeDur, steps, holdDur
 
     def _buildPass(self, first, startSnap):
         segs = []
@@ -450,9 +480,9 @@ class AnimationTimeline:
         lights = kf.get("lights", {})
 
         if seg.fadeDur > 0 and within < seg.fadeDur:
-            if self.legacy:
-                k = int(within // self.stepMs)
-                t = (k + 1) / seg.steps
+            if seg.steps:
+                k = int(within // (seg.fadeDur / seg.steps))  # each step is fadeDur / steps long
+                t = min(1.0, (k + 1) / seg.steps)
                 lastStep = k >= seg.steps - 1
             else:
                 t = within / seg.fadeDur
