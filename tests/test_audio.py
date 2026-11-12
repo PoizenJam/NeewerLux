@@ -314,6 +314,7 @@ def t_modeValidation():
              ({"parts": [{"target": "@rim", "drive": "loud"}]}, "drive must be one of"),
              ({"parts": []}, "parts must be a non-empty list"),
              ({"sensitivity": 9}, "sensitivity must be"),
+             ({"range_db": 3}, "range_db must be"),
              ({"name": ""}, "needs a name"),
              ({"parts": [{"drive": "level"}]}, "needs a target")]
     for change, expect in cases:
@@ -326,7 +327,11 @@ def t_modeValidation():
     changed, errors = show.soundModeWithParams(ok, {"sensitivity": 2.5, "ceiling": 50})
     check(changed is not None and changed.sensitivity == 2.5 and changed.ceiling == 50, errors)
     bad, errors = show.soundModeWithParams(ok, {"parts": []})
-    check(bad is None and "can't change parts" in errors[0], errors)
+    check(bad is None and any("parts must be a non-empty list" in e for e in errors), errors)
+    bad, errors = show.soundModeWithParams(ok, {"name": "Other"})
+    check(bad is None and "can't change name" in errors[0], errors)
+    wide, _ = show.soundModeWithParams(ok, {"range_db": 30})
+    check(wide.rangeDb == 30 and ok.rangeDb == 18, "range_db defaults to 18 and can be set")
 
 
 def t_docExamplesValidate():

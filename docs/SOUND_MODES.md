@@ -14,9 +14,11 @@ A sound mode runs on its own **sound** layer, underneath everything else:
 
 - Sequences, stream effects and animations play over it on the lights they drive, and give those lights back to it when they end, with their Fade back. A song's sequence starting while a sound mode runs takes over the lights it uses; when it ends, the sound mode carries on.
 - Lights a mode doesn't aim at stay as they are. The shipped modes leave the key light alone.
+- Recalling a preset, moving a slider or sending a colour to one of the lights a sound mode drives stops the sound mode: what you just set takes over at once, and its other lights fade back. Commands to lights it doesn't drive leave it playing.
+- Switching a light off works whatever is playing: it takes that light out of the sound mode (or a sequence or effect) until you switch it on again, and the others carry on. A light that is off when a sound mode, sequence or effect takes it is switched on first.
 - Brightness limits, Locked lights and the CCT-only fallback apply as for everything else.
 - Starting a sound mode uses its Fade in (else the global one); stopping it hands the lights back with its Fade back (else the global one). Switching to another mode fades between them the same way.
-- A sound mode keeps each light to at most 2 flashes a second by itself (the flash guard's limit is 3), so it swells and steps rather than strobes. It judges brightness swings as if the light were white, so a CCT-only light showing a colour as white stays within the limit too.
+- A sound mode keeps each light to at most 2 flashes in any second by itself (the flash guard's limit is 3), so it swells and steps rather than strobes. It judges brightness swings as if the light were white, so a CCT-only light showing a colour as white stays within the limit too.
 - It writes to a light only when what it shows changes enough to see, at most `fps` times a second.
 
 ## The analysis
@@ -54,6 +56,7 @@ Every 21 ms or so NeewerLux measures:
 | `name` | yes | text | Shown in the lists; also the file name. |
 | `description` | no | text | Shown as a tooltip. |
 | `sensitivity` | no | 0.1 to 5 (1) | Multiplies the analysis values before they're used: above 1 reacts more, below 1 less. |
+| `range_db` | no | 6 to 30 (18) | How far under the loudest recent moment counts as 0, in dB: the smaller, the further the lights swing for the same music. 30 uses the analysis as it is. |
 | `floor` | no | 0 to 100 (10) | Brightness, percent, when the driving value is 0 (silence settles here). |
 | `ceiling` | no | 0 to 100 (75) | Brightness at full. Not below `floor`. |
 | `smoothing` | no | 0 to 1 (0.5) | How slowly lights fall back and colours drift: 0 is quick (about 0.1 s), 1 is slow (about 1.6 s). Rises are always quick (60 ms). |
@@ -105,4 +108,6 @@ A second example, the shipped Bands:
 
 ## Controlling it
 
-Over HTTP: `POST /NeewerLux/sound` with `start`, `stop`, `mode`, `set` (change sensitivity, floor, ceiling, smoothing, palette or fps while it plays, without saving), `device`, `devices`, `status` (including the live levels and tempo) and the file actions `list`, `get`, `save`, `delete`, `validate`, `reload`; or `GET /NeewerLux/doAction?sound=start|Pulse`. See [HTTP_API.md](HTTP_API.md).
+On the desktop, the **Sound** tab: what to listen to (also in Global Preferences, Lights and shows), the mode, Start and Stop, sliders for sensitivity, range, floor, ceiling and smoothing, the palette, the lights each part drives and what drives them, live meters and the tempo, and Save, Save as, Revert and Delete. Changes show on the lights at once while that mode plays, and are kept only when you save. The web dashboard has the same **Sound** card.
+
+Over HTTP: `POST /NeewerLux/sound` with `start`, `stop`, `mode`, `set` (change sensitivity, range, floor, ceiling, smoothing, palette, fps or parts while it plays, without saving), `device`, `devices`, `status` (including the live levels and tempo) and the file actions `list`, `get`, `save`, `delete`, `validate`, `reload`; or `GET /NeewerLux/doAction?sound=start|Pulse`. See [HTTP_API.md](HTTP_API.md).

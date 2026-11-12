@@ -15,7 +15,7 @@ try:
         QTabWidget, QCheckBox, QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, QComboBox, QAbstractButton,
         QGraphicsView, QGraphicsScene, QScrollArea, QKeySequenceEdit,
         QListWidget, QListWidgetItem, QStatusBar, QHeaderView, QFrame,
-        QSystemTrayIcon, QMenu, QTextBrowser
+        QSystemTrayIcon, QMenu, QTextBrowser, QProgressBar
     )
     customSignal = Signal
 except ImportError:
@@ -30,7 +30,7 @@ except ImportError:
             QTabWidget, QCheckBox, QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, QComboBox, QAbstractButton,
             QGraphicsView, QGraphicsScene, QScrollArea, QKeySequenceEdit,
             QListWidget, QListWidgetItem, QStatusBar, QHeaderView, QFrame,
-            QSystemTrayIcon, QMenu, QTextBrowser
+            QSystemTrayIcon, QMenu, QTextBrowser, QProgressBar
         )
         customSignal = Signal
     except ImportError:
@@ -902,6 +902,124 @@ class Ui_MainWindow(object):
         seqLay.addWidget(seqInfoScroll, 2)
         self.ColorModeTabWidget.addTab(self.seqTab, "Sequences")
 
+        # --- SOUND ---  (behaviour in NeewerLux.py, MainWindow sound* methods)
+        self.soundTab = QWidget()
+        soundOuter = QVBoxLayout(self.soundTab)
+        soundOuter.setContentsMargins(8, 8, 8, 8)
+        soundOuter.setSpacing(6)
+        self.soundUnavailableLabel = QLabel("")
+        self.soundUnavailableLabel.setWordWrap(True)
+        soundOuter.addWidget(self.soundUnavailableLabel)
+        self.soundControls = QWidget()
+        soundOuter.addWidget(self.soundControls, 1)
+        soundLay = QHBoxLayout(self.soundControls)
+        soundLay.setContentsMargins(0, 0, 0, 0)
+        soundLay.setSpacing(10)
+        # the controls scroll: the tab is short when the light table is tall
+        soundLeftScroll = QScrollArea()
+        soundLeftScroll.setWidgetResizable(True)
+        soundLeftScroll.setFrameShape(QFrame.NoFrame)
+        soundLeftPage = QWidget()
+        soundLeftScroll.setWidget(soundLeftPage)
+        soundLeft = QVBoxLayout(soundLeftPage); soundLeft.setSpacing(6); soundLeft.setContentsMargins(0, 0, 6, 0)
+        devRow = QHBoxLayout()
+        devRow.addWidget(QLabel("Listen to:"))
+        self.soundDeviceCombo = QComboBox()
+        self.soundDeviceCombo.setToolTip("What to listen to: what an output plays (loopback), or an input such as a microphone or audio interface")
+        self.soundDeviceCombo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        devRow.addWidget(self.soundDeviceCombo, 1)
+        self.soundDeviceRefresh = QPushButton("Refresh")
+        self.soundDeviceRefresh.setToolTip("List the audio devices again (after plugging one in)")
+        devRow.addWidget(self.soundDeviceRefresh)
+        soundLeft.addLayout(devRow)
+        modeRow = QHBoxLayout()
+        modeRow.addWidget(QLabel("Mode:"))
+        self.soundModeCombo = QComboBox()
+        self.soundModeCombo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        modeRow.addWidget(self.soundModeCombo, 1)
+        self.soundStartButton = QPushButton("\u25B6 Start")
+        self.soundStopButton = QPushButton("\u25A0 Stop")
+        modeRow.addWidget(self.soundStartButton)
+        modeRow.addWidget(self.soundStopButton)
+        soundLeft.addLayout(modeRow)
+        self.soundDescLabel = QLabel("")
+        self.soundDescLabel.setWordWrap(True)
+        soundLeft.addWidget(self.soundDescLabel)
+
+        soundGrid = QGridLayout(); soundGrid.setSpacing(4); soundGrid.setColumnStretch(1, 1)
+        self.soundSliders = {}
+        for row, (key, label, lo, hi, tip) in enumerate((
+                ("sensitivity", "Sensitivity", 10, 500, "How strongly the lights react: above 100% more, below less"),
+                ("range_db", "Range", 6, 30, "How far under the loudest recent moment counts as dark: smaller swings further"),
+                ("floor", "Floor", 0, 100, "Brightness when it's quiet"),
+                ("ceiling", "Ceiling", 0, 100, "Brightness at full"),
+                ("smoothing", "Smoothing", 0, 100, "How slowly lights fall back and colours drift"))):
+            slider = QSlider(Qt.Horizontal)
+            slider.setRange(lo, hi)
+            slider.setToolTip(tip)
+            value = QLabel("")
+            value.setMinimumWidth(52)
+            soundGrid.addWidget(QLabel(label + ":"), row, 0)
+            soundGrid.addWidget(slider, row, 1)
+            soundGrid.addWidget(value, row, 2)
+            self.soundSliders[key] = (slider, value)
+        soundLeft.addLayout(soundGrid)
+
+        palRow = QHBoxLayout()
+        palRow.addWidget(QLabel("Palette:"))
+        self.soundPaletteKind = QComboBox()
+        self.soundPaletteKind.addItems(["Colours", "White (Kelvin)"])
+        self.soundPaletteKind.setToolTip("Colours (hue and saturation) or whites (colour temperature) for CCT-only lights")
+        palRow.addWidget(self.soundPaletteKind)
+        self.soundPaletteAdd = QPushButton("+ Colour")
+        palRow.addWidget(self.soundPaletteAdd)
+        palRow.addStretch(1)
+        soundLeft.addLayout(palRow)
+        self.soundPaletteBox = QVBoxLayout(); self.soundPaletteBox.setSpacing(2)
+        soundLeft.addLayout(self.soundPaletteBox)
+
+        soundLeft.addWidget(QLabel("Lights and what drives them:"))
+        self.soundPartsTable = QTableWidget(0, 5)
+        self.soundPartsTable.setHorizontalHeaderLabels(["Lights", "Brightness follows", "Colour", "Chase", ""])
+        self.soundPartsTable.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.soundPartsTable.verticalHeader().setVisible(False)
+        self.soundPartsTable.setMinimumHeight(150)
+        soundLeft.addWidget(self.soundPartsTable)
+        partsRow = QHBoxLayout()
+        self.soundPartAdd = QPushButton("+ Lights")
+        self.soundPartAdd.setToolTip("Add a group of lights (by role, position or number)")
+        partsRow.addWidget(self.soundPartAdd)
+        partsRow.addStretch(1)
+        self.soundSaveButton = QPushButton("Save")
+        self.soundSaveAsButton = QPushButton("Save as...")
+        self.soundRevertButton = QPushButton("Revert")
+        self.soundRevertButton.setToolTip("Go back to the saved mode")
+        self.soundDeleteButton = QPushButton("Delete")
+        for b in (self.soundSaveButton, self.soundSaveAsButton, self.soundRevertButton, self.soundDeleteButton):
+            partsRow.addWidget(b)
+        soundLeft.addLayout(partsRow)
+        soundLeft.addStretch(1)
+        soundLay.addWidget(soundLeftScroll, 3)
+
+        soundRight = QVBoxLayout(); soundRight.setSpacing(4)
+        self.soundStatusLabel = QLabel("Not playing")
+        self.soundStatusLabel.setWordWrap(True)
+        soundRight.addWidget(self.soundStatusLabel)
+        self.soundMeters = {}
+        for key, label in (("level", "Level"), ("low", "Bass"), ("mid", "Mids"), ("high", "Treble"), ("centroid", "Brightness of sound")):
+            soundRight.addWidget(QLabel(label))
+            bar = QProgressBar()
+            bar.setRange(0, 100)
+            bar.setTextVisible(False)
+            bar.setFixedHeight(12)
+            soundRight.addWidget(bar)
+            self.soundMeters[key] = bar
+        self.soundTempoLabel = QLabel("Tempo: -")
+        soundRight.addWidget(self.soundTempoLabel)
+        soundRight.addStretch(1)
+        soundLay.addLayout(soundRight, 2)
+        self.ColorModeTabWidget.addTab(self.soundTab, "Sound")
+
         # --- LIGHT PREFS ---
         # Two columns: the light itself on the left, its part in shows on the right
         self.lightPrefs = QScrollArea()  # scrolls only on small windows
@@ -1198,6 +1316,10 @@ class Ui_MainWindow(object):
         shows.addRow("Fade back (when they let go):", self.handbackFadeSpin)
         shows.addRow("Sequence frame rate:", self.seqFrameRateSpin)
         shows.addRow("Looping effect time limit:", self.effectMaxSecondsSpin)
+        shows.addRow(QLabel("<br><strong>Sound modes</strong>"))
+        self.prefsSoundDeviceCombo = QComboBox()
+        self.prefsSoundDeviceCombo.setToolTip("What sound modes listen to (the same choice as on the Sound tab; saved at once)")
+        shows.addRow("Listen to:", self.prefsSoundDeviceCombo)
         shows.addRow(QLabel("<br><strong>Your rig</strong>"))
         shows.addRow("Main camera:", self.cameraPositionCombo)
         shows.addRow(cctFallbackRow)
@@ -1348,6 +1470,7 @@ Originally from <a href="https://github.com/keefo/NeewerLite">NeewerLite</a> by 
         # Tab positions by name, so code doesn't depend on the tab order
         tabs = self.ColorModeTabWidget
         self.TAB_ANIM, self.TAB_SEQ = tabs.indexOf(self.animTab), tabs.indexOf(self.seqTab)
+        self.TAB_SOUND = tabs.indexOf(self.soundTab)
         self.TAB_LIGHTPREFS, self.TAB_GLOBALPREFS = tabs.indexOf(self.lightPrefs), tabs.indexOf(self.globalPrefs)
         self.TAB_INFO, self.TAB_LOG = tabs.indexOf(self.infoTab), tabs.indexOf(self.logTab)
 

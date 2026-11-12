@@ -91,7 +91,7 @@ try:
     from PySide6.QtCore import Qt, QItemSelectionModel, QTimer, Signal as QtSignal
     from PySide6.QtGui import QLinearGradient, QColor, QKeySequence, QFont, QIcon, QShortcut
     from PySide6.QtWidgets import QApplication, QMainWindow, QTableWidgetItem, QMessageBox, QInputDialog, QListWidgetItem, QSizePolicy, QPushButton
-    from PySide6.QtWidgets import QCheckBox, QSpinBox, QComboBox, QLineEdit, QTextEdit, QKeySequenceEdit
+    from PySide6.QtWidgets import QCheckBox, QSpinBox, QComboBox, QLineEdit, QTextEdit, QKeySequenceEdit, QWidget, QHBoxLayout, QLabel
     PYSIDE_VERSION = 6
 
 except Exception as e:
@@ -101,7 +101,7 @@ except Exception as e:
         from PySide2.QtCore import Qt, QItemSelectionModel, QTimer, Signal as QtSignal
         from PySide2.QtGui import QLinearGradient, QColor, QKeySequence, QFont, QIcon
         from PySide2.QtWidgets import QApplication, QMainWindow, QTableWidgetItem, QShortcut, QMessageBox, QInputDialog, QListWidgetItem, QSizePolicy, QPushButton
-        from PySide2.QtWidgets import QCheckBox, QSpinBox, QComboBox, QLineEdit, QTextEdit, QKeySequenceEdit
+        from PySide2.QtWidgets import QCheckBox, QSpinBox, QComboBox, QLineEdit, QTextEdit, QKeySequenceEdit, QWidget, QHBoxLayout, QLabel
         PYSIDE_VERSION = 2
     except Exception as e2:
         print(f"  [DEBUG] PySide2 import failed: {type(e2).__name__}: {e2}")
@@ -503,6 +503,7 @@ try: # try to load the GUI
             self.lightTable.itemSelectionChanged.connect(self._cacheSelection)
 
             # Sequences panel, and a GUI-thread timer that mirrors show engine state into the labels
+            self.setupSoundTab()
             self._sequenceListSignal.connect(self.seqRefreshList)
             self._settingsChangedSignal.connect(self._settingsChangedRemotely)
             self._presetsChangedSignal.connect(self.createPresetButtons)
@@ -1533,6 +1534,352 @@ try: # try to load the GUI
                 sequenceControl("stop")
             deleteSequence(name)
             self.seqRefreshList()
+
+        # ---------------------------------------------------------------- SOUND TAB
+        SOUND_EDITABLE = ("sensitivity", "range_db", "floor", "ceiling", "smoothing", "palette", "parts")
+        SOUND_TARGETS = ["@rim;@background;@practical", "@all", "@key", "@fill", "@rim", "@background", "@practical",
+                         "@front", "@back", "@left", "@right", "@high", "@low"]
+        SOUND_DRIVES = [("level", "Level"), ("low", "Bass"), ("mid", "Mids"), ("high", "Treble"), ("beat", "Beat")]
+
+        def setupSoundTab(self):
+            self.soundShowAvailability()
+            self._soundDraft = None
+            self._soundLoading = False
+            self.soundStartButton.clicked.connect(self.soundStart)
+            self.soundStopButton.clicked.connect(stopSound)
+            self.soundModeCombo.currentIndexChanged.connect(self.soundModeChosen)
+            self.soundDeviceCombo.activated.connect(lambda i: self.soundDeviceChosen(self.soundDeviceCombo))
+            self.prefsSoundDeviceCombo.activated.connect(lambda i: self.soundDeviceChosen(self.prefsSoundDeviceCombo))
+            self.soundDeviceRefresh.clicked.connect(self.soundRefreshDevices)
+            for key, (slider, label) in self.soundSliders.items():
+                slider.valueChanged.connect(lambda v, k=key: self.soundSliderMoved(k, v))
+            self.soundPaletteKind.activated.connect(self.soundPaletteKindChosen)
+            self.soundPaletteAdd.clicked.connect(self.soundPaletteAddEntry)
+            self.soundPartAdd.clicked.connect(lambda: self.soundAddPartRow({"target": "@background", "drive": "level", "colour": 0}, True))
+            self.soundSaveButton.clicked.connect(self.soundSave)
+            self.soundSaveAsButton.clicked.connect(self.soundSaveAs)
+            self.soundRevertButton.clicked.connect(lambda: self.soundLoadDraft(self.soundModeCombo.currentText(), live=True))
+            self.soundDeleteButton.clicked.connect(self.soundDelete)
+            self.soundTimer = QTimer(self)
+            self.soundTimer.timeout.connect(self.soundRefreshStatus)
+            self.soundTimer.start(150)
+            self.soundRefreshDevices()
+
+        def soundShowAvailability(self):
+            """Without the audio packages the tab is just a note saying what's missing."""
+            ok, why = soundAvailable()
+            self.soundUnavailableLabel.setText(why)
+            self.soundUnavailableLabel.setVisible(not ok)
+            self.soundControls.setVisible(ok)
+
+        def soundRefreshModes(self, select=None):
+            select = select or self.soundModeCombo.currentText() or soundMode
+            self._soundLoading = True
+            self.soundModeCombo.clear()
+            self.soundModeCombo.addItems(sorted(savedSoundModes))
+            i = self.soundModeCombo.findText(resolveSoundModeName(select) or "")
+            self.soundModeCombo.setCurrentIndex(max(0, i))
+            self._soundLoading = False
+            self.soundLoadDraft(self.soundModeCombo.currentText())
+
+        def soundModeChosen(self, index):
+            if self._soundLoading:
+                return
+            name = self.soundModeCombo.currentText()
+            self.soundLoadDraft(name)
+            player = showEngine.soundPlayer() if showEngine is not None else None
+            if player is not None and player.name != name:
+                self.soundStart()  # switching while it plays switches the playing mode
+
+        def soundLoadDraft(self, name, live=False):
+            """Show a saved mode in the controls; edits change this working copy (and the playing
+            mode, if it's this one) until Save."""
+            if name not in savedSoundModes:
+                self._soundDraft = None
+                return
+            self._soundDraft = json.loads(json.dumps(savedSoundModes[name]))
+            self._soundLoading = True
+            d = self._soundDraft
+            self.soundDescLabel.setText(d.get("description", ""))
+            values = {"sensitivity": int(round(d.get("sensitivity", 1.0) * 100)), "range_db": int(round(d.get("range_db", 18))),
+                      "floor": d.get("floor", 10), "ceiling": d.get("ceiling", 75), "smoothing": int(round(d.get("smoothing", 0.5) * 100))}
+            for key, (slider, label) in self.soundSliders.items():
+                slider.setValue(values[key])
+                label.setText(self._soundValueText(key, values[key]))
+            self.soundRebuildPalette()
+            self.soundPartsTable.setRowCount(0)
+            for part in d.get("parts", []):
+                self.soundAddPartRow(part, False)
+            self._soundLoading = False
+            if live:
+                self.soundApplyLive({k: d[k] for k in self.SOUND_EDITABLE if k in d})
+
+        def _soundValueText(self, key, v):
+            return {"sensitivity": "%d%%" % v, "range_db": "%d dB" % v, "floor": "%d%%" % v,
+                    "ceiling": "%d%%" % v, "smoothing": "%d%%" % v}[key]
+
+        def soundSliderMoved(self, key, v):
+            self.soundSliders[key][1].setText(self._soundValueText(key, v))
+            if self._soundLoading or self._soundDraft is None:
+                return
+            value = v / 100.0 if key in ("sensitivity", "smoothing") else v
+            changes = {key: value}
+            floor, ceiling = self.soundSliders["floor"][0], self.soundSliders["ceiling"][0]
+            if key == "floor" and v > ceiling.value():
+                ceiling.setValue(v)  # moving one past the other carries it along
+            elif key == "ceiling" and v < floor.value():
+                floor.setValue(v)
+            self._soundDraft.update(changes)
+            self.soundApplyLive(changes)
+
+        def soundApplyLive(self, params):
+            """Edits show at once when the mode being edited is the one playing."""
+            player = showEngine.soundPlayer() if showEngine is not None else None
+            if player is None or self._soundDraft is None or player.name.lower() != str(self._soundDraft.get("name", "")).lower():
+                return
+            result = setSoundParams({k: params[k] for k in params if k != "range_db" or params[k] >= 6})
+            if not result["success"]:
+                self.soundStatusLabel.setText("Not applied: " + "; ".join(result["errors"]))
+
+        # palette: one row per colour, hue and saturation or a colour temperature
+        def soundRebuildPalette(self):
+            while self.soundPaletteBox.count():
+                w = self.soundPaletteBox.takeAt(0).widget()
+                if w is not None:
+                    w.setParent(None)  # gone now, not at the next event loop
+                    w.deleteLater()
+            palette = self._soundDraft.get("palette", [{"hue": 240, "sat": 100}]) if self._soundDraft else []
+            white = bool(palette) and "temp" in palette[0]
+            self.soundPaletteKind.setCurrentIndex(1 if white else 0)
+            for i, entry in enumerate(palette):
+                row = QWidget()
+                lay = QHBoxLayout(row)
+                lay.setContentsMargins(0, 0, 0, 0)
+                swatch = QLabel()
+                swatch.setFixedSize(22, 22)
+                lay.addWidget(QLabel(str(i + 1)))
+                lay.addWidget(swatch)
+                spins = []
+                if white:
+                    k = SpinBoxWithButtons(None, 2700, 10000, entry.get("temp", 5600), " K")
+                    k.setSingleStep(100)
+                    lay.addWidget(k, 1)
+                    spins.append(("temp", k))
+                else:
+                    h = SpinBoxWithButtons(None, 0, 360, entry.get("hue", 0), "°")
+                    sat = SpinBoxWithButtons(None, 0, 100, entry.get("sat", 100), "%")
+                    lay.addWidget(QLabel("Hue"))
+                    lay.addWidget(h, 1)
+                    lay.addWidget(QLabel("Sat"))
+                    lay.addWidget(sat, 1)
+                    spins += [("hue", h), ("sat", sat)]
+                remove = QPushButton("x")
+                remove.setFixedWidth(26)
+                remove.setStyleSheet("QPushButton { padding: 0px; }")
+                remove.setToolTip("Remove this colour")
+                remove.setEnabled(len(palette) > 1)
+                remove.clicked.connect(lambda _=False, i=i: self.soundPaletteRemove(i))
+                lay.addWidget(remove)
+                for key, spin in spins:
+                    spin.valueChanged.connect(lambda v, i=i, key=key, sw=swatch: self.soundPaletteChanged(i, key, v, sw))
+                self._soundSwatch(swatch, entry)
+                self.soundPaletteBox.addWidget(row)
+
+        def _soundSwatch(self, swatch, entry):
+            cmd = {"mode": "CCT", "temp": entry["temp"] // 100, "bri": 100} if "temp" in entry else \
+                  {"mode": "HSI", "hue": entry.get("hue", 0), "sat": entry.get("sat", 100), "bri": 100}
+            swatch.setStyleSheet("background: %s; border: 1px solid #666;" % show.rgbHex(show.commandToRGB(cmd)))
+
+        def soundPaletteChanged(self, i, key, v, swatch):
+            if self._soundLoading or self._soundDraft is None:
+                return
+            entry = self._soundDraft["palette"][i]
+            entry[key] = int(v)
+            self._soundSwatch(swatch, entry)
+            self.soundApplyLive({"palette": self._soundDraft["palette"]})
+
+        def soundPaletteRemove(self, i):
+            palette = self._soundDraft["palette"]
+            del palette[i]
+            for part in self._soundDraft.get("parts", []):
+                if isinstance(part.get("colour"), int) and part["colour"] >= len(palette):
+                    part["colour"] = len(palette) - 1
+            self._soundPaletteEdited()
+
+        def soundPaletteAddEntry(self):
+            if self._soundDraft is None:
+                return
+            palette = self._soundDraft.setdefault("palette", [])
+            palette.append({"temp": 4000} if palette and "temp" in palette[0] else {"hue": 200, "sat": 90})
+            self._soundPaletteEdited()
+
+        def soundPaletteKindChosen(self, index):
+            if self._soundDraft is None:
+                return
+            self._soundDraft["palette"] = [{"temp": 2900}, {"temp": 4300}] if index == 1 else [{"hue": 265, "sat": 85}]
+            for part in self._soundDraft.get("parts", []):
+                if isinstance(part.get("colour"), int):
+                    part["colour"] = min(part["colour"], len(self._soundDraft["palette"]) - 1)
+            self._soundPaletteEdited()
+
+        def _soundPaletteEdited(self):
+            self._soundLoading = True
+            self.soundRebuildPalette()
+            self.soundPartsTable.setRowCount(0)
+            for part in self._soundDraft.get("parts", []):
+                self.soundAddPartRow(part, False)
+            self._soundLoading = False
+            self.soundApplyLive({"palette": self._soundDraft["palette"], "parts": self._soundDraft.get("parts", [])})
+
+        # parts: which lights, what drives their brightness, which colour, chase
+        def soundAddPartRow(self, part, isNew):
+            table = self.soundPartsTable
+            row = table.rowCount()
+            table.insertRow(row)
+            target = QComboBox()
+            target.setEditable(True)
+            target.addItems(self.SOUND_TARGETS)
+            target.setEditText(part.get("target", "@all"))
+            target.setToolTip("Lights by role (@rim), position (@back.left, @high), number (1;3) or @all, joined with ;")
+            drive = QComboBox()
+            for key, label in self.SOUND_DRIVES:
+                drive.addItem(label, key)
+            drive.setCurrentIndex(max(0, drive.findData(part.get("drive", "level"))))
+            colour = QComboBox()
+            n = len(self._soundDraft.get("palette", [])) if self._soundDraft else 1
+            for i in range(n):
+                colour.addItem("Palette %d" % (i + 1), i)
+            colour.addItem("Follows the sound", "centroid")
+            colour.addItem("Steps on the beat", "beat")
+            colour.setCurrentIndex(max(0, colour.findData(part.get("colour", 0))))
+            chase = QCheckBox()
+            chase.setChecked(bool(part.get("chase", False)))
+            chase.setToolTip("Step through these lights one at a time on the beat")
+            remove = QPushButton("x")
+            remove.setFixedWidth(26)
+            remove.setStyleSheet("QPushButton { padding: 0px; }")
+            remove.setToolTip("Remove these lights")
+            remove.clicked.connect(lambda _=False, w=remove: self.soundRemovePartRow(w))
+            for col, w in enumerate((target, drive, colour, chase, remove)):
+                table.setCellWidget(row, col, w)
+            table.setRowHeight(row, 30)
+            target.lineEdit().editingFinished.connect(self.soundPartsEdited)
+            target.activated.connect(lambda i: self.soundPartsEdited())
+            drive.activated.connect(lambda i: self.soundPartsEdited())
+            colour.activated.connect(lambda i: self.soundPartsEdited())
+            chase.toggled.connect(lambda c: self.soundPartsEdited())
+            if isNew:
+                self.soundPartsEdited()
+
+        def soundRemovePartRow(self, button):
+            table = self.soundPartsTable
+            for row in range(table.rowCount()):
+                if table.cellWidget(row, 4) is button:
+                    table.removeRow(row)
+                    break
+            self.soundPartsEdited()
+
+        def soundPartsEdited(self):
+            if self._soundLoading or self._soundDraft is None:
+                return
+            table = self.soundPartsTable
+            parts = []
+            old = self._soundDraft.get("parts", [])
+            for row in range(table.rowCount()):
+                part = dict(old[row]) if row < len(old) else {}
+                part.update({"target": table.cellWidget(row, 0).currentText().strip(), "drive": table.cellWidget(row, 1).currentData(),
+                             "colour": table.cellWidget(row, 2).currentData(), "chase": table.cellWidget(row, 3).isChecked()})
+                parts.append(part)
+            self._soundDraft["parts"] = parts
+            if parts:
+                self.soundApplyLive({"parts": parts})
+
+        def soundStart(self):
+            name = self.soundModeCombo.currentText()
+            params = {k: self._soundDraft[k] for k in self.SOUND_EDITABLE if self._soundDraft and k in self._soundDraft}
+            result = startSound(name, params=params)
+            if not result["success"]:
+                self.soundStatusLabel.setText("Couldn't start: " + "; ".join(result["errors"]))
+
+        def soundSave(self):
+            if self._soundDraft is None:
+                return
+            name = self.soundModeCombo.currentText()
+            result = saveSoundMode(self._soundDraft, original=name, overwrite=True)
+            self.soundStatusLabel.setText("Saved " + result["mode"] if result["success"] else "Not saved: " + "; ".join(result["errors"]))
+            if result["success"]:
+                self.soundRefreshModes(result["mode"])
+
+        def soundSaveAs(self):
+            if self._soundDraft is None:
+                return
+            name, ok = QInputDialog.getText(self, "Save sound mode as", "Name:", text=self._soundDraft.get("name", "") + " copy")
+            if not ok or not name.strip():
+                return
+            data = dict(self._soundDraft, name=name.strip())
+            result = saveSoundMode(data, original=None, overwrite=False)
+            if not result["success"] and any("exists" in e for e in result["errors"]):
+                if QMessageBox.question(self, "Replace sound mode", "A sound mode named " + name.strip() + " exists. Replace it?") != QMessageBox.Yes:
+                    return
+                result = saveSoundMode(data, original=None, overwrite=True)
+            self.soundStatusLabel.setText("Saved " + result["mode"] if result["success"] else "Not saved: " + "; ".join(result["errors"]))
+            if result["success"]:
+                self.soundRefreshModes(result["mode"])
+
+        def soundDelete(self):
+            name = self.soundModeCombo.currentText()
+            if not name or QMessageBox.question(self, "Delete sound mode", "Delete the sound mode " + name + "?") != QMessageBox.Yes:
+                return
+            soundAction("delete", {"name": name})
+            self.soundRefreshModes()
+
+        def soundRefreshDevices(self):
+            """List the capture choices in both device menus (the Sound tab's and Global
+            Preferences'), with the remembered one selected."""
+            devices = [{"id": "", "name": "System output (what the default output plays)"}]
+            if audio.captureAvailable()[0]:
+                try:
+                    devices = audio.listDevices()
+                except Exception as e:  # the audio system refused to list devices
+                    self.soundStatusLabel.setText("Couldn't list audio devices: " + str(e))
+            if soundDevice and soundDevice not in [d["id"] for d in devices]:
+                devices.append({"id": soundDevice, "name": "(not connected) " + soundDevice})
+            for combo in (self.soundDeviceCombo, self.prefsSoundDeviceCombo):
+                combo.clear()
+                for d in devices:
+                    combo.addItem(d["name"], d["id"])
+                combo.setCurrentIndex(max(0, combo.findData(soundDevice)))
+
+        def soundDeviceChosen(self, combo):
+            setSoundDevice(combo.currentData())
+            for other in (self.soundDeviceCombo, self.prefsSoundDeviceCombo):
+                if other is not combo:
+                    other.setCurrentIndex(max(0, other.findData(soundDevice)))
+
+        def soundRefreshStatus(self):
+            if not self.soundControls.isVisible():
+                return
+            st = soundStatus()
+            if st["running"]:
+                text = "Playing " + st["mode"] + (", listening to " + st["deviceName"] if st["deviceName"] else ", starting...")
+                if st["mode"] != self.soundModeCombo.currentText() and (self._soundDraft is None or not self.soundStartButton.hasFocus()):
+                    self._soundLoading = True
+                    self.soundModeCombo.setCurrentIndex(max(0, self.soundModeCombo.findText(st["mode"])))
+                    self._soundLoading = False
+                    self.soundLoadDraft(st["mode"])
+            else:
+                text = "Not playing"
+            if st["error"]:
+                text += "\nDevice problem (retrying): " + st["error"]
+            if not self.soundStatusLabel.text().startswith(("Saved", "Not saved", "Couldn't", "Not applied")) or st["running"] != getattr(self, "_soundWasRunning", None):
+                self.soundStatusLabel.setText(text)
+            self._soundWasRunning = st["running"]
+            self.soundStopButton.setEnabled(st["running"])
+            levels = st["levels"] or {}
+            for key, bar in self.soundMeters.items():
+                bar.setValue(int(round(100 * levels.get(key, 0.0))))
+            bpm = levels.get("bpm", 0)
+            self.soundTempoLabel.setText("Tempo: %.0f BPM" % bpm if bpm else "Tempo: -")
 
         def seqPlay(self):
             items = self.seqList.selectedItems()
@@ -5669,6 +6016,14 @@ async def parallelWriteToLights(lightIndices, fromShow=False):
                     sendVal = applyBrightnessEnvelope(idx, sendVal)
                     if not _flashAllowed(idx, sendVal):
                         return  # held back: this frame would flash faster than the guard allows
+                    if fromShow and sendVal[1] != 129 and availableLights[idx][0].address in _lightsOff:
+                        # a show taking a light that is off powers it on first: lights in
+                        # standby ignore colour commands (switched off by hand while a show
+                        # plays, the show leaves it alone, see interceptBaseWrite)
+                        await availableLights[int(idx)][1].write_gatt_char(setLightUUID, bytearray([120, 129, 1, 1, 251]), False)
+                        availableLights[int(idx)][6] = True
+                        _recordWritten(int(idx), [120, 129, 1, 1, 251])
+                        await asyncio.sleep(0.05)
                     if availableLights[idx][5] == True and sendVal[1] == 135:
                         # Old-style CCT light needs split commands
                         splitCmds = calculateSeparateBytestrings(sendVal)
@@ -6945,6 +7300,8 @@ class _ShowHooks:
                 currentAnimationName = ""
         if info["event"] == "end":
             printDebugString(info["kind"].capitalize() + " '" + info["name"] + "' stopped on the " + info["layer"] + " layer (" + info.get("reason", "") + ")")
+            if info["layer"] == "sound" and info.get("reason") == "manual":
+                audioEngine.stop()  # a preset or slider took over one of its lights
         elif info["event"] in ("queued", "pause", "resume"):
             printDebugString(info["kind"].capitalize() + " '" + info["name"] + "' " + info["event"] + (" on the " + info["layer"] + " layer" if info["event"] == "queued" else ""))
 
@@ -7653,7 +8010,7 @@ def setSoundDevice(device):
 
 
 def _soundParams(mode):
-    return {"sensitivity": mode.sensitivity, "floor": mode.floor, "ceiling": mode.ceiling,
+    return {"sensitivity": mode.sensitivity, "range_db": mode.rangeDb, "floor": mode.floor, "ceiling": mode.ceiling,
             "smoothing": mode.smoothing, "fps": mode.fps, "palette": mode.palette}
 
 
@@ -9523,6 +9880,7 @@ if __name__ == '__main__':
                 print("[TRACE] loadAllAnimations() + loadLightAliases() complete")
                 mainWindow.animRefreshList()
                 mainWindow.seqRefreshList()
+                mainWindow.soundRefreshModes()
                 print("[TRACE] animRefreshList() complete")
 
                 # START THE BACKGROUND THREAD

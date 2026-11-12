@@ -166,7 +166,7 @@ Per light:
   "stage": {"camera": "front"},
   "handbackFadeMs": 500,
   "fadeInMs": 0,
-  "sound": {"available": true, "reason": "", "running": true, "mode": "Pulse", "params": {"sensitivity": 1.0, "floor": 15, "ceiling": 70, "smoothing": 0.5, "fps": 20, "palette": [{"hue": 265, "sat": 85}]},
+  "sound": {"available": true, "reason": "", "running": true, "mode": "Pulse", "params": {"sensitivity": 1.0, "range_db": 18, "floor": 15, "ceiling": 70, "smoothing": 0.5, "fps": 20, "palette": [{"hue": 265, "sat": 85}]},
             "lastMode": "Pulse", "device": "", "deviceName": "Speakers (Focusrite USB Audio)", "capturing": true, "error": "",
             "levels": {"level": 0.62, "low": 0.71, "mid": 0.55, "high": 0.4, "centroid": 0.48, "bpm": 124.2, "confidence": 0.81, "beat": 311, "silent": false, "rms_db": -18.4}}
 }
@@ -249,7 +249,7 @@ The sequence format, targets, render output and timing rules are in [SEQUENCE_FO
 |---|---|
 | `{"action": "start", "mode": "Pulse"}` | Start a sound mode, replacing the one playing, and the capture. Optional `"device"` (an `id` from `devices`; `""` = whatever the default output plays), `"params"` (top-level values for this play, as in `set`), `"fade_in_ms"` and `"handback_fade_ms"`. Without `mode` it starts the last one used. The mode and device are remembered. |
 | `{"action": "mode", "mode": "Bands"}` | Switch the playing mode (fading between them); an error when none is playing |
-| `{"action": "set", "params": {"sensitivity": 1.5, "ceiling": 60}}` | Change the playing mode's `sensitivity`, `floor`, `ceiling`, `smoothing`, `palette` or `fps` at once, without saving. The reply has the `params` now in use. |
+| `{"action": "set", "params": {"sensitivity": 1.5, "ceiling": 60}}` | Change the playing mode's `sensitivity`, `range_db`, `floor`, `ceiling`, `smoothing`, `palette`, `fps` or `parts` at once, without saving. The reply has the `params` now in use. |
 | `{"action": "stop"}` | Stop it (its lights fade back) and the capture |
 | `{"action": "device", "device": "..."}` | Choose the capture device (remembered); takes effect at once if a mode is playing |
 | `{"action": "devices"}` | `{"devices": [{"id", "name", "loopback"}], "device"}`: first `""` (the default output, followed when it changes), then each output's playback (`loopback` true) and each input |
@@ -261,6 +261,8 @@ The sequence format, targets, render output and timing rules are in [SEQUENCE_FO
 | `{"action": "delete", "name": "..."}` | Delete it (stops it first if it's playing) |
 
 When the audio packages aren't installed, `start` answers `"success": false` with the reason in `errors`; the file actions still work.
+
+Light commands, batches and preset recalls that reach a light the sound mode drives stop the sound mode (and its capture) and show at once. An Off command reaches its light whatever is playing and takes it out of the sound mode, sequence or effect that was driving it until a later command switches it on; a show switches on a light that is off before it drives it.
 
 ### POST /NeewerLux/presets
 

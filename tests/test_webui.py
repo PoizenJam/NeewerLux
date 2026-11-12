@@ -85,6 +85,16 @@ def main():
     rig = harness.boot(ROOT)
     rig.nl.NLPythonServer.log_message = lambda *a: None
     nl = rig.nl
+    if nl.audio.np is not None:
+        # a looping kick at 124 BPM stands in for the sound card
+        np = nl.audio.np
+        t = np.arange(int(0.15 * 48000)) / 48000
+        kick = 0.9 * np.sin(2 * np.pi * (50 + 80 * np.exp(-t * 30)) * t) * np.exp(-t * 12)
+        signal = np.zeros(int(48000 * 16 * 60 / 124.0))
+        for b in range(16):
+            i = int(b * 48000 * 60 / 124.0)
+            signal[i:i + len(kick)] += kick[:len(signal) - i]
+        nl.audioEngine.sourceFactory = lambda device: nl.audio.ArraySource(signal, name="web test signal")
     app = QApplication.instance() or QApplication([])
     page = Page()
     view = QWebEngineView()  # a shown view, so the page counts as visible (it skips polling when hidden)
@@ -262,7 +272,7 @@ def main():
         js(page, "window.scrollTo(0, 0)")
         spin(300)
         view.grab().save(os.path.join(rig.workdir, "webui.png"))
-        print("    screenshots: " + os.path.join(rig.workdir, "webui.png") + ", webui_render.png, webui_settings.png, webui_timeline.png, webui_plan.png, webui_position.png")
+        print("    screenshots: " + os.path.join(rig.workdir, "webui.png") + ", webui_render.png, webui_settings.png, webui_timeline.png, webui_plan.png, webui_position.png, webui_sound.png")
 
     def flashGuardSetting():
         check(js(page, "document.getElementById('gpFlashGuard').checked") is True, "the guard shows as on")
@@ -363,6 +373,49 @@ def main():
         nl.animParallelWrites = True
         spin(300)
 
+    def until(cond, what, timeout=5.0):
+        end = time.monotonic() + timeout
+        while not cond():
+            check(time.monotonic() < end, "timed out waiting for " + what)
+            spin(50)
+
+    def soundPanel():
+        if nl.audio.np is None:
+            waitFor(page, "document.getElementById('sndUnavailable').style.display === 'block'", "the note saying sound needs numpy")
+            return
+        waitFor(page, "!!sndDraft && document.getElementById('sndMode').options.length === %d" % len(nl.savedSoundModes), "the sound modes")
+        js(page, "document.getElementById('sndMode').value = 'Pulse'; sndModeChosen('Pulse')")
+        waitFor(page, "sndName === 'Pulse' && document.querySelectorAll('#sndParts .snd-part').length === 1", "Pulse in the editor")
+        check(js(page, "document.getElementById('sndDevice').options.length") >= 1, "the device menu lists something")
+        js(page, "sndStart()")
+        until(lambda: nl.showEngine.soundPlayer() is not None, "Pulse to start")
+        player = nl.showEngine.soundPlayer()
+        js(page, "sndSlider('sensitivity', 250); sndSlider('floor', 90)")
+        until(lambda: player.mode.sensitivity == 2.5 and player.mode.ceiling == 90, "sliders to apply live")
+        js(page, "sndSlider('floor', 20); sndPal(0, 'hue', 120)")
+        until(lambda: player.mode.palette[0]["hue"] == 120 and player.mode.floor == 20, "a palette edit to apply live")
+        js(page, "sndPartAdd(); sndPart(1, 'target', '@fill'); sndPart(1, 'drive', 'high')")
+        until(lambda: len(player.mode.parts) == 2 and player.mode.parts[1]["target"] == "@fill" and player.mode.parts[1]["drive"] == "high",
+              "an added part to apply live")
+        js(page, "sndPaletteKind('cct')")
+        until(lambda: player.mode.palette == [{"temp": 2900}, {"temp": 4300}], "whites to apply live")
+        waitFor(page, "document.getElementById('sndStatus').textContent.indexOf('Playing Pulse') === 0 && document.querySelectorAll('#sndMeters .snd-meter').length === 5", "the status and meters")
+        js(page, "document.getElementById('soundCard').scrollIntoView()")
+        spin(400)
+        view.grab().save(os.path.join(rig.workdir, "webui_sound.png"))
+        page.runJavaScript("window.prompt = () => 'Web Sound'; window.confirm = () => true")
+        js(page, "sndSaveAs()")
+        until(lambda: "Web Sound" in nl.savedSoundModes, "save as")
+        saved = nl.savedSoundModes["Web Sound"]
+        check(saved["palette"] == [{"temp": 2900}, {"temp": 4300}] and len(saved["parts"]) == 2 and saved["sensitivity"] == 2.5, str(saved))
+        check(nl.savedSoundModes["Pulse"].get("sensitivity") == 1.0, "the original is untouched")
+        waitFor(page, "sndName === 'Web Sound'", "the saved copy selected")
+        js(page, "sndDelete()")
+        until(lambda: "Web Sound" not in nl.savedSoundModes, "delete")
+        js(page, "sndStop()")
+        until(lambda: nl.showEngine.soundPlayer() is None, "stop")
+        js(page, "window.scrollTo(0, 0)")
+
     def timelineEditor():
         page.runJavaScript("window.confirm = () => true")
         js(page, "selectedSeq = %r; tlOpenSelected()" % EXAMPLE)
@@ -453,7 +506,8 @@ def main():
                      ("play, pause, resume, seek, stop", playPauseSeekStop), ("render", render),
                      ("reload", reload), ("light preferences", lightPrefs), ("global preferences", globalPrefs), ("flash guard setting", flashGuardSetting),
                      ("network settings stay desktop-only", securityPrefsRefused), ("preset editor and menu", presetEditor),
-                     ("animation editor, import, duplicate, delete", animationEditor), ("timeline editor", timelineEditor)]:
+                     ("animation editor, import, duplicate, delete", animationEditor), ("timeline editor", timelineEditor),
+                     ("sound panel", soundPanel)]:
         step(name, fn)
     if page.errors:
         results.append(("FAIL", "no JavaScript errors", "; ".join(page.errors[:5])))

@@ -1019,13 +1019,16 @@ def parseSequence(data, clipExists, defaultFps=DEFAULT_SEQUENCE_FPS, resolveTarg
 SOUND_MODE_FORMAT = 1
 SOUND_DRIVES = ("level", "low", "mid", "high", "beat")
 SOUND_FLASH_LIMIT = 2       # flashes a second a sound mode allows itself; the flash guard (3) is the backstop
+SOUND_FLASH_WINDOW_S = 1.05 # a little over a second: evenly paced transitions 0.25 s apart would put five
+                            # in one closed second on a 50 ms frame grid
 SOUND_CHASE_MAX_BPM = 150   # faster than this, chases step on every other beat
 SOUND_ATTACK_MS = 60        # how fast a light rises to a louder value
 SOUND_COLOUR_STEP_MS = 400  # how long a palette step (colour "beat") takes to blend
+ANALYSIS_RANGE_DB = 30.0    # the analysis reads this many dB under the recent peak as 0 (neewerlux_audio.NORM_RANGE_DB)
 
 
 class SoundMode:
-    __slots__ = ("name", "description", "sensitivity", "floor", "ceiling", "smoothing", "fps", "palette",
+    __slots__ = ("name", "description", "sensitivity", "rangeDb", "floor", "ceiling", "smoothing", "fps", "palette",
                  "parts", "fadeInMs", "handbackMs", "raw")
 
 
@@ -1057,6 +1060,7 @@ def parseSoundMode(data, defaultFps=DEFAULT_SEQUENCE_FPS, resolveTarget=None):
         errors.append("a sound mode needs a name")
     m.description = str(data.get("description", ""))
     m.sensitivity = _modeNum(data, "sensitivity", 1.0, 0.1, 5.0, errors)
+    m.rangeDb = _modeNum(data, "range_db", 18.0, 6.0, ANALYSIS_RANGE_DB, errors)
     m.floor = _modeNum(data, "floor", 10, 0, 100, errors, integer=True)
     m.ceiling = _modeNum(data, "ceiling", 75, 0, 100, errors, integer=True)
     if m.floor > m.ceiling:
@@ -1122,9 +1126,9 @@ def parseSoundMode(data, defaultFps=DEFAULT_SEQUENCE_FPS, resolveTarget=None):
 
 
 def soundModeWithParams(mode, params, defaultFps=DEFAULT_SEQUENCE_FPS):
-    """The mode with some top-level values changed (sensitivity, floor, ceiling, smoothing,
-    palette, fps), checked like a saved mode. Returns (SoundMode or None, errors)."""
-    allowed = ("sensitivity", "floor", "ceiling", "smoothing", "palette", "fps")
+    """The mode with some values changed (sensitivity, range_db, floor, ceiling, smoothing,
+    palette, fps, parts), checked like a saved mode. Returns (SoundMode or None, errors)."""
+    allowed = ("sensitivity", "range_db", "floor", "ceiling", "smoothing", "palette", "fps", "parts")
     if not isinstance(params, dict):
         return None, ["params must be an object"]
     bad = [k for k in params if k not in allowed]
@@ -1217,7 +1221,13 @@ class SoundPlayer:
         release = 120.0 + mode.smoothing * 1500.0
         up = 1.0 - math.exp(-dt / SOUND_ATTACK_MS)
         down = 1.0 - math.exp(-dt / release)
-        level = min(1.0, f.get("level", 0.0) * mode.sensitivity)
+        def driveOf(key):
+            # the analysis spans 30 dB; a smaller range makes the same music swing further
+            v = f.get(key, 0.0)
+            if v > 0:
+                v = max(0.0, 1.0 - (1.0 - v) * ANALYSIS_RANGE_DB / mode.rangeDb)
+            return min(1.0, v * mode.sensitivity)
+        level = driveOf("level")
         self._levelEnv += (level - self._levelEnv) * (up if level > self._levelEnv else down)
         beat = f.get("beat")
         newBeat = beat is not None and self._lastBeat is not None and beat != self._lastBeat
@@ -1242,7 +1252,7 @@ class SoundPlayer:
                 self._beatEnv[pi] = be
                 drive = be
             else:
-                drive = min(1.0, f.get(part["drive"], 0.0) * mode.sensitivity)
+                drive = driveOf(part["drive"])
 
             if colour == "centroid":
                 c = self._centroid.get(pi, f.get("centroid", 0.0))
@@ -1286,7 +1296,7 @@ class SoundPlayer:
             # further in luminance than the colour does
             red = (flashLevel(cmd) or (0.0, False))[1]
             level = (cmd["bri"] / 100.0, red)
-            if prev is not None and counter.check(t, level, SOUND_FLASH_LIMIT, 1.0, paced=True):
+            if prev is not None and counter.check(t, level, SOUND_FLASH_LIMIT, SOUND_FLASH_WINDOW_S, paced=True):
                 out[idx] = prev
                 continue
             counter.add(t, level)
@@ -1371,6 +1381,9 @@ class ShowCompositor:
         self._absorbUntil = 0.0  # a sequence ending on a preset: its recall becomes the fade's target, not a cut
         self.ownerPlayer = {} # idx -> the player driving it (to tell a replacement from the same player)
         self._deferred = []
+        # {light: the player that was driving it} for lights switched off by hand during a show:
+        # no layer drives them until a write turns them on, or that player ends
+        self.poweredOff = {}
         self._lightCount = None
         self._thread = None
         self._running = False
@@ -1566,24 +1579,54 @@ class ShowCompositor:
         layer; the write becomes its new revert target instead. Otherwise the write
         goes ahead and any show value still queued for that light is dropped, so a
         stale revert can't land on top of it.
+
+        Two writes always go ahead: Off, which also takes the light out of every layer
+        until a later write turns it back on or the item that was driving it ends
+        (switching a light off must work, whatever is playing), and any write to a light
+        the sound mode drives, which stops the sound mode (it would otherwise keep a light
+        from ever responding).
         """
+        deferred = []
         with self.lock:
+            off = isinstance(value, (list, tuple)) and len(value) > 3 and (value[0] == 0 or (value[1] == 129 and value[3] == 2))
+            power = off or (isinstance(value, (list, tuple)) and len(value) > 1 and value[1] == 129)
+            if off and self.owner.get(idx, 0) > 0:
+                self.poweredOff[idx] = self.ownerPlayer.get(idx)
+            elif not off:
+                self.poweredOff.pop(idx, None)
+            sound = self.layers[LAYER_SOUND]
+            if sound is not None and not power and idx in sound.lastOut:
+                self._endPlayer(LAYER_SOUND, sound, self._nowMs(self.clock()), "manual")
             fade = self.fades.get(idx)
             if fade is not None and fade[3] == 0 and self.clock() > self._absorbUntil:
                 # fading back to its base state and a manual command arrives: that's instant
-                del self.fades[idx]
-                self.owner.pop(idx, None)
-                self.ownerPlayer.pop(idx, None)
-                self.lastCmd.pop(idx, None)
-                self.lastSent.pop(idx, None)
-                self.baseStates.pop(idx, None)
+                self._release(idx)
+            player = self.ownerPlayer.get(idx)
+            ended = player is not None and all(player is not p for p in self.layers.values())
+            if off or (ended and isinstance(player, SoundPlayer) and self.owner.get(idx, 0) > 0):
+                self._release(idx)
             if self.owner.get(idx, 0) > 0:
                 if isinstance(value, (list, tuple)) and len(value) > 1:
                     self.baseStates[idx] = list(OFF_BYTES) if value[0] == 0 else list(value)
-                return True, self.lastSent.get(idx)
-            self.mailbox.pop(idx, None)
-            self.released.pop(idx, None)
-            return False, None
+                blocked = (True, self.lastSent.get(idx))
+            else:
+                self.mailbox.pop(idx, None)
+                self.released.pop(idx, None)
+                blocked = (False, None)
+            deferred, self._deferred = self._deferred, []
+        for d in deferred:
+            d()
+        self._wake.set()
+        return blocked
+
+    def _release(self, idx):
+        """Forget a light's layer state: it is the base's again, with nothing to fade back."""
+        self.fades.pop(idx, None)
+        self.owner.pop(idx, None)
+        self.ownerPlayer.pop(idx, None)
+        self.lastCmd.pop(idx, None)
+        self.lastSent.pop(idx, None)
+        self.baseStates.pop(idx, None)
 
     def takeMailbox(self):
         with self.lock:
@@ -1731,6 +1774,9 @@ class ShowCompositor:
                 out, finished = p.frame(nowMs)
             frames[layer] = (out, p.parallel)
 
+        playing = set(id(p) for p in self.layers.values() if p is not None)
+        for idx in [i for i, p in self.poweredOff.items() if id(p) not in playing]:
+            del self.poweredOff[idx]
         lights = set(self.owner)
         for out, _ in frames.values():
             lights.update(out)
@@ -1740,7 +1786,7 @@ class ShowCompositor:
         stepMs = 1000.0 / HANDBACK_FPS
         for idx in lights:
             win = 0
-            if not self.hooks.isLocked(idx):
+            if not self.hooks.isLocked(idx) and idx not in self.poweredOff:
                 for layer in (LAYER_OVERRIDE, LAYER_EFFECT, LAYER_SHOW, LAYER_SOUND):
                     if layer in frames and idx in frames[layer][0]:
                         win = layer

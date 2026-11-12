@@ -1492,7 +1492,7 @@ def t_soundModeHTTP(rig):
     got = _waitLayers(rig, ["base", "sound", "sound", "sound"])
     check(got == ["base", "sound", "sound", "sound"], "Bands adds the fill (highs): %s" % got)
     r = rig.post("/NeewerLux/sound", {"action": "set", "params": {"parts": []}})
-    check(not r["success"], "only top-level values change while playing")
+    check(not r["success"], "set rejects an invalid mode")
     rig.post("/NeewerLux/sound", {"action": "stop"})
     got = _waitLayers(rig, ["base"] * 4)
     check(got == ["base"] * 4, "stop hands every light back: %s" % got)
@@ -1580,6 +1580,66 @@ def t_soundModeFilesHTTP(rig):
     check(not os.path.exists(os.path.join(nl.soundModesDir, "Test Glow 2.json")), "the file is gone")
 
 
+def t_offWinsDuringShows(rig):
+    """1.4.0: switching a light off works whatever is playing. Off takes it out of every layer
+    (the sequence carries on with the others) until it's turned on, when the sequence takes it
+    back; a show powers on any light that is off when it takes it (lights in standby ignore
+    colour commands)."""
+    nl = rig.nl
+    rig.get("light=*&off", 0.4)
+    t0 = time.monotonic()
+    rig.post("/NeewerLux/sequence", {"action": "play", "sequence": stepSequence("power", [10, 60, 110, 160, 210, 260, 310], 600)})
+    w = waitFor(rig, RIM, t0, lambda d: d[1] == 134, 2.0)
+    kinds = [(d[1], d[3]) if d[1] == 129 else d[1] for d in w]
+    check(kinds and kinds[0] == (129, 1) and 134 in kinds, "a show powers a light on before its first colour: %s" % kinds[:4])
+    t1 = time.monotonic()
+    rig.get("light=3&off", 0.6)
+    w = writesFor(rig, RIM, t1)
+    check(w and w[0][1][1] == 129 and w[0][1][3] == 2, "Off reaches the light during a sequence: %s" % [d for _, d in w][:3])
+    check(len(w) == 1, "and the sequence leaves it off: %s" % [d for _, d in w])
+    check(_layers(rig)[RIM] == "base" and _layers(rig)[KEY] == "show", "the others stay on the sequence: %s" % _layers(rig))
+    t2 = time.monotonic()
+    rig.get("light=3&on", 0.2)
+    w = waitFor(rig, RIM, t2, lambda d: d[1] == 134, 1.5)
+    check(w and w[0][1] == 129 and any(d[1] == 134 for d in w), "On brings it back into the sequence: %s" % [d[1] for d in w])
+    check(_layers(rig)[RIM] == "show", "back on the show layer")
+    rig.post("/NeewerLux/sequence", {"action": "stop"})
+
+
+def t_manualWriteStopsSound(rig):
+    """1.4.0: recalling a preset or moving a slider on a light the sound mode drives stops the
+    sound mode (and its capture), and the new state shows at once; a command to a light it
+    doesn't drive leaves it playing; Off on one of its lights takes just that light out."""
+    nl = rig.nl
+    if _needsNumpy(rig):
+        return
+    _soundSignal(nl)
+    rig.post("/NeewerLux/sound", {"action": "start", "mode": "Pulse"})
+    check(_waitLayers(rig, [None, None, "sound", "sound"])[2:] == ["sound", "sound"], "Pulse running")
+    rig.get("light=1&mode=CCT&temp=40&bri=30", 0.4)
+    check(rig.post("/NeewerLux/sound", {"action": "status"})["running"], "a command to the key (not driven) leaves it playing")
+    rig.get("light=4&off", 0.4)
+    st = rig.post("/NeewerLux/sound", {"action": "status"})
+    check(st["running"] and _layers(rig)[AMB] == "base", "Off on the background takes only that light out")
+    t0 = time.monotonic()
+    rig.get("light=3&mode=CCT&temp=32&bri=40", 0.6)
+    st = rig.post("/NeewerLux/sound", {"action": "status"})
+    check(not st["running"] and not st["capturing"], "a slider-style command on the rim stops the sound mode: %s" % st)
+    w = writesFor(rig, RIM, t0)
+    check(w and w[-1][1][1] == 135 and w[-1][1][4] == 32, "and the rim shows it: %s" % [d for _, d in w][-2:])
+    check(_waitLayers(rig, ["base"] * 4) == ["base"] * 4, "every light is back on the base")
+
+    rig.get("light=4&on", 0.3)
+    rig.post("/NeewerLux/presets", {"action": "save", "index": 3, "entries": [{"light": "*", "mode": "CCT", "temp": 45, "bri": 25}]})
+    rig.post("/NeewerLux/sound", {"action": "start", "mode": "Pulse"})
+    check(_waitLayers(rig, [None, None, "sound", "sound"])[2:] == ["sound", "sound"], "Pulse running again")
+    t1 = time.monotonic()
+    rig.get("use_preset=3", 0.8)
+    check(not rig.post("/NeewerLux/sound", {"action": "status"})["running"], "recalling a preset stops it")
+    w = writesFor(rig, AMB, t1)
+    check(w and w[-1][1][1] == 135 and w[-1][1][4] == 45, "and the preset shows: %s" % [d for _, d in w][-2:])
+
+
 def t_compositorWakesOnlyWhenDue(rig):
     """Ticking only when a light's output can change sends exactly what ticking every
     millisecond sends (same commands, each within the 1 ms the fine ticker can lag), for
@@ -1631,7 +1691,8 @@ TESTS = [t_maxBrightnessHTTP, t_maxBrightnessAnimationAndSequence, t_minBrightne
          t_positionTargetsAndSweep, t_animationModeValidation, t_exactAnimationTiming, t_handbackFade, t_blendCommands, t_fadeInEverywhere,
          t_fadesOnlyBetweenItems,
          t_addSimulatedRig, t_compositorWakesOnlyWhenDue, t_handBackToRunningLayerFades,
-         t_soundModeHTTP, t_soundUnderShowAndEffects, t_soundRespectsLimitsAndLocks, t_soundUnavailable, t_soundModeFilesHTTP]
+         t_soundModeHTTP, t_soundUnderShowAndEffects, t_soundRespectsLimitsAndLocks, t_soundUnavailable, t_soundModeFilesHTTP,
+         t_offWinsDuringShows, t_manualWriteStopsSound]
 
 
 def main():

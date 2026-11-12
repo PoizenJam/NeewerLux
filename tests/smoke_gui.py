@@ -56,6 +56,74 @@ def checkWorkerUsesGuiThread(nl, app, win):
     print("worker to GUI on signals: PASS")
 
 
+def checkSoundTab(nl, app, win, rig):
+    """1.4.0: the Sound tab starts, tunes, edits, saves and stops a sound mode, live."""
+    if nl.audio.np is None:
+        assert win.soundControls.isHidden() and win.soundUnavailableLabel.text(), "without numpy the tab is a note"
+        print("Sound tab: SKIP (numpy not installed)")
+        return
+    np = nl.audio.np
+    t = np.arange(int(0.15 * 48000)) / 48000
+    kick = 0.9 * np.sin(2 * np.pi * (50 + 80 * np.exp(-t * 30)) * t) * np.exp(-t * 12)
+    signal = np.zeros(int(48000 * 16 * 60 / 124.0))
+    for b in range(16):
+        i = int(b * 48000 * 60 / 124.0)
+        signal[i:i + len(kick)] += kick[:len(signal) - i]
+    nl.audioEngine.sourceFactory = lambda device: nl.audio.ArraySource(signal, name="smoke signal")
+    win.soundShowAvailability()
+    assert not win.soundControls.isHidden(), "the tab's controls show when sound modes can run"
+    win.ColorModeTabWidget.setCurrentIndex(win.TAB_SOUND)
+    win.show()
+    win.soundRefreshModes("Pulse")
+    assert win.soundModeCombo.count() == len(nl.savedSoundModes) and win.soundModeCombo.currentText() == "Pulse"
+    assert win.soundPartsTable.rowCount() == 1 and win.soundPaletteBox.count() == 1
+    win.soundStart()
+    pumpUntil(app, lambda: nl.showEngine.soundPlayer() is not None, 3, "Pulse to start")
+    player = nl.showEngine.soundPlayer()
+    win.soundSliders["sensitivity"][0].setValue(250)
+    win.soundSliders["range_db"][0].setValue(10)
+    win.soundSliders["floor"][0].setValue(80)  # past the ceiling: carries it along
+    assert player.mode.sensitivity == 2.5 and player.mode.rangeDb == 10, "sliders apply live"
+    assert player.mode.floor == 80 and player.mode.ceiling == 80, (player.mode.floor, player.mode.ceiling)
+    win.soundSliders["floor"][0].setValue(20)
+    hueSpin = win.soundPaletteBox.itemAt(0).widget().findChildren(nl.SpinBoxWithButtons)[0]
+    hueSpin.setValue(120)
+    assert player.mode.palette[0]["hue"] == 120, "palette edits apply live"
+    win.soundAddPartRow({"target": "@fill", "drive": "high", "colour": 0}, True)
+    assert [1] in player.partLights, "an added part drives its lights: %r" % player.partLights
+    win.soundPaletteKind.setCurrentIndex(1)
+    win.soundPaletteKindChosen(1)
+    assert player.mode.palette == [{"temp": 2900}, {"temp": 4300}], "switching to whites applies live"
+    pumpUntil(app, lambda: (nl.soundStatus()["levels"] or {}).get("level", 0) > 0, 3, "levels")
+    win.soundRefreshStatus()
+    assert "Playing Pulse" in win.soundStatusLabel.text() and "smoke signal" in win.soundStatusLabel.text(), win.soundStatusLabel.text()
+    assert any(bar.value() > 0 for bar in win.soundMeters.values()), "the meters move"
+    assert win.soundDeviceCombo.count() >= 1 and win.prefsSoundDeviceCombo.count() == win.soundDeviceCombo.count()
+    win.resize(1100, 760)
+    app.processEvents()
+    shot = os.path.join(rig.workdir, "sound_tab.png")
+    win.grab().save(shot)
+    print("sound tab screenshot:", shot)
+    realGet, realQ = nl.QInputDialog.getText, nl.QMessageBox.question
+    nl.QInputDialog.getText = staticmethod(lambda *a, **k: ("Smoke Sound", True))
+    nl.QMessageBox.question = staticmethod(lambda *a, **k: nl.QMessageBox.Yes)
+    try:
+        win.soundSaveAs()
+        assert "Smoke Sound" in nl.savedSoundModes and win.soundModeCombo.currentText() == "Smoke Sound", "save as"
+        saved = nl.savedSoundModes["Smoke Sound"]
+        assert saved["palette"] == [{"temp": 2900}, {"temp": 4300}] and len(saved["parts"]) == 2 and saved["range_db"] == 10
+        assert nl.savedSoundModes["Pulse"].get("sensitivity") == 1.0, "the original is untouched"
+        win.soundDelete()
+        assert "Smoke Sound" not in nl.savedSoundModes, "delete"
+    finally:
+        nl.QInputDialog.getText, nl.QMessageBox.question = realGet, realQ
+    nl.stopSound()
+    win.soundRefreshStatus()
+    assert nl.showEngine.soundPlayer() is None and not win.soundStopButton.isEnabled()
+    win.ColorModeTabWidget.setCurrentIndex(0)
+    print("Sound tab: PASS")
+
+
 def main():
     rig = harness.boot(os.path.dirname(HERE))
     nl = rig.nl
@@ -67,6 +135,7 @@ def main():
     win.updateLights()
     app.processEvents()
     checkWorkerUsesGuiThread(nl, app, win)
+    checkSoundTab(nl, app, win, rig)
 
     # Sequences panel and status timer
     nl.savedSequences["Smoke"] = {"format": 1, "name": "Smoke", "duration_ms": 1500,
