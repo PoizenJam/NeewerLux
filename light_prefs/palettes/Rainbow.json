@@ -1,0 +1,18 @@
+{
+  "format": 1,
+  "name": "Rainbow",
+  "palette": [
+    {
+      "hue": 0,
+      "sat": 100
+    },
+    {
+      "hue": 120,
+      "sat": 100
+    },
+    {
+      "hue": 240,
+      "sat": 100
+    }
+  ]
+}

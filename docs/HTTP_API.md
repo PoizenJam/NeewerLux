@@ -96,9 +96,11 @@ Lights following live audio ([SOUND_MODES.md](SOUND_MODES.md)). They play on the
 
 | Request | Effect |
 |---|---|
-| `sound=start\|Pulse` | Start a sound mode (replacing the one playing). `sound=start` alone starts the last one used. |
-| `sound=mode\|Bands` | Switch the playing sound mode |
-| `sound=stop` | Stop it; its lights fade back |
+| `sound=start\|Pulse` | Start a sound mode (replacing whatever sound is playing). `sound=start` alone starts the last one used. |
+| `sound=start\|Colour Drift\|1;3` | Lights 1 and 3 follow Colour Drift; other lights keep following whatever sound they follow (any light target works, such as `@rim`) |
+| `sound=mode\|Bands` | Switch the playing sound mode (also with `\|lights`) |
+| `sound=stop` | Stop sound; its lights fade back |
+| `sound=stop\|3` | Light 3 stops following sound; sound stops when no lights are left |
 
 ### Lights and connection
 
@@ -166,7 +168,8 @@ Per light:
   "stage": {"camera": "front"},
   "handbackFadeMs": 500,
   "fadeInMs": 0,
-  "sound": {"available": true, "reason": "", "running": true, "mode": "Pulse", "params": {"sensitivity": 1.0, "range_db": 18, "floor": 15, "ceiling": 70, "smoothing": 0.5, "fps": 20, "palette": [{"hue": 265, "sat": 85}]},
+  "sound": {"available": true, "reason": "", "running": true, "mode": "Pulse", "params": {"sensitivity": 1.0, "range_db": 18, "floor": 15, "ceiling": 70, "smoothing": 0.5, "fps": 20, "cycle_s": 20, "palette": [{"hue": 265, "sat": 85}]},
+            "assignments": [{"mode": "Pulse", "lights": null}, {"mode": "Colour Drift", "lights": [1]}],
             "lastMode": "Pulse", "device": "", "deviceName": "Speakers (Focusrite USB Audio)", "capturing": true, "error": "",
             "levels": {"level": 0.62, "low": 0.71, "mid": 0.55, "high": 0.4, "centroid": 0.48, "bpm": 124.2, "confidence": 0.81, "beat": 311, "silent": false, "rms_db": -18.4}}
 }
@@ -174,7 +177,7 @@ Per light:
 
 `flashGuard` is `{"enabled": true, "held": 12, "eyeline": "same"}`: whether the flash guard is on, how many changes it has held back since NeewerLux started, and the eye-line setting. `stage.camera` is where the main camera is (for drawing a plan), and `handbackFadeMs` and `fadeInMs` the global fades.
 
-`sound` is the sound mode state, as `POST /NeewerLux/sound` `status` returns it: whether sound modes can run here (`available`, and `reason` when not, such as the audio packages missing), whether one is `running`, which `mode` with which `params`, the capture `device` (`""` = whatever the default output plays) and its name, a capture `error` if the device failed (it retries every 2 s), and the live `levels` (`null` when not capturing): `level`, `low`, `mid`, `high` and `centroid` from 0 to 1, `bpm` (0 until there's a tempo), the tempo `confidence`, `beat` (counts up on each beat), `silent` and `rms_db`.
+`sound` is the sound mode state, as `POST /NeewerLux/sound` `status` returns it: whether sound modes can run here (`available`, and `reason` when not, such as the audio packages missing), whether one is `running`, which `mode` with which `params` (the latest started), the `assignments` (each playing mode and the IDs of the lights given to it, `null` for a mode on its own targets), the capture `device` (`""` = whatever the default output plays) and its name, a capture `error` if the device failed (it retries every 2 s), and the live `levels` (`null` when not capturing): `level`, `low`, `mid`, `high` and `centroid` from 0 to 1, `bpm` (0 until there's a tempo), the tempo `confidence`, `beat` (counts up on each beat), `silent` and `rms_db`.
 
 `layers` holds whatever is playing on each layer (`null` when nothing is); the override entry includes `name`, `keyframe` and `keyframes`, the sound entry `name` and the levels. `sequence` is `null` when no sequence is loaded; `state` is `playing` or `paused`.
 
@@ -247,10 +250,10 @@ The sequence format, targets, render output and timing rules are in [SEQUENCE_FO
 
 | Body | Effect |
 |---|---|
-| `{"action": "start", "mode": "Pulse"}` | Start a sound mode, replacing the one playing, and the capture. Optional `"device"` (an `id` from `devices`; `""` = whatever the default output plays), `"params"` (top-level values for this play, as in `set`), `"fade_in_ms"` and `"handback_fade_ms"`. Without `mode` it starts the last one used. The mode and device are remembered. |
-| `{"action": "mode", "mode": "Bands"}` | Switch the playing mode (fading between them); an error when none is playing |
-| `{"action": "set", "params": {"sensitivity": 1.5, "ceiling": 60}}` | Change the playing mode's `sensitivity`, `range_db`, `floor`, `ceiling`, `smoothing`, `palette`, `fps` or `parts` at once, without saving. The reply has the `params` now in use. |
-| `{"action": "stop"}` | Stop it (its lights fade back) and the capture |
+| `{"action": "start", "mode": "Pulse"}` | Start a sound mode, replacing whatever sound is playing, and the capture. Optional `"lights"` (a light target such as `"1;3"` or `"@rim"`): only those lights follow this mode, leaving whatever sound they followed, and the rest of the sound layer plays on (starting it if nothing plays). Optional `"device"` (an `id` from `devices`; `""` = whatever the default output plays), `"params"` (top-level values for this play, as in `set`; `"palette"` can be a saved palette's name), `"fade_in_ms"` and `"handback_fade_ms"`. Without `mode` it starts the last one used. The mode and device are remembered. |
+| `{"action": "mode", "mode": "Bands"}` | Switch the playing mode (fading between them), optionally with `"lights"`; an error when none is playing |
+| `{"action": "set", "params": {"sensitivity": 1.5, "ceiling": 60}}` | Change a playing mode's `sensitivity`, `range_db`, `floor`, `ceiling`, `smoothing`, `palette` (colours, or a saved palette's name), `cycle_s`, `fps` or `parts` at once, without saving: the one named in `"mode"`, else the latest started. The reply has the `params` now in use. |
+| `{"action": "stop"}` | Stop sound (its lights fade back) and the capture. With `"lights"`, only those lights stop following sound; it stops when none are left. |
 | `{"action": "device", "device": "..."}` | Choose the capture device (remembered); takes effect at once if a mode is playing |
 | `{"action": "devices"}` | `{"devices": [{"id", "name", "loopback"}], "device"}`: first `""` (the default output, followed when it changes), then each output's playback (`loopback` true) and each input |
 | `{"action": "status"}` | The `sound` part of `status_json` |
@@ -259,10 +262,13 @@ The sequence format, targets, render output and timing rules are in [SEQUENCE_FO
 | `{"action": "validate", "mode": {...}}` | Check one: `errors` and `warnings` (a target that matches no light right now) |
 | `{"action": "save", "mode": {...}, "original": "Old Name", "overwrite": false}` | Validate and save. `original` renames; saving over another needs `"overwrite": true`. |
 | `{"action": "delete", "name": "..."}` | Delete it (stops it first if it's playing) |
+| `{"action": "palettes"}` | Saved palettes: `{"palettes": [{"name", "palette"}]}` |
+| `{"action": "save_palette", "name": "Neon", "palette": [...], "overwrite": false}` | Save a palette to `light_prefs/palettes`; replacing one needs `"overwrite": true` |
+| `{"action": "delete_palette", "name": "Neon"}` | Delete a saved palette |
 
 When the audio packages aren't installed, `start` answers `"success": false` with the reason in `errors`; the file actions still work.
 
-Light commands, batches and preset recalls that reach a light the sound mode drives stop the sound mode (and its capture) and show at once. An Off command reaches its light whatever is playing and takes it out of the sound mode, sequence or effect that was driving it until a later command switches it on; a show switches on a light that is off before it drives it.
+Light commands, batches and preset recalls that reach a light following sound take that light out of the sound layer and show at once; sound (and its capture) stops when no lights are left. An Off command reaches its light whatever is playing and takes it out of the sound mode, sequence or effect that was driving it until a later command switches it on; a show switches on a light that is off before it drives it.
 
 ### POST /NeewerLux/presets
 
@@ -272,7 +278,7 @@ The desktop's preset menu and editor. Preset numbers are 1-based. Every reply th
 |---|---|
 | `{"action": "list"}` | `{"presets": [preset, ...]}` |
 | `{"action": "get", "index": 3}` | One preset: `{"index", "name", "custom", "global", "entries"}`. `custom` is false while it's still the factory default; `global` is true when it applies to whichever lights it's recalled on rather than to specific lights. |
-| `{"action": "save", "index": 3, "name": "Stream", "entries": [...]}` | Replace its contents (and name, if given). Each entry: `{"target": "-1" or a light, "mode": "CCT"/"HSI"/"Scene", "bri", "temp" (Kelvin or hundreds), "hue", "sat", "scene"}`. One entry with target `"-1"` makes a global preset; entries per light make a snapshot. Optional `"fade_ms"`: how long recalling it fades in (`null` = the global Fade in). `list` and `get` report `fade_ms`. An entry read with `"off": true` (the light was off in the snapshot) keeps that when sent back. |
+| `{"action": "save", "index": 3, "name": "Stream", "entries": [...]}` | Replace its contents (and name, if given). Each entry: `{"target": "-1" or a light, "mode": "CCT"/"HSI"/"Scene", "bri", "temp" (Kelvin or hundreds), "hue", "sat", "scene"}`. One entry with target `"-1"` makes a global preset; entries per light make a snapshot. Optional `"fade_ms"`: how long recalling it fades in (`null` = the global Fade in). `list` and `get` report `fade_ms`. An entry read with `"off": true` (the light was off in the snapshot) keeps that when sent back. An entry for a single light can have `"sound": "Pulse"`: recalling the preset sets that light following the sound mode, its colour being what it returns to when sound stops (not written on recall). |
 | `{"action": "rename", "index": 3, "name": "Stream"}` | Rename (empty clears; up to 20 characters) |
 | `{"action": "move", "index": 3, "direction": "left"}` | Swap with its neighbour (`left` or `right`) |
 | `{"action": "duplicate", "index": 3}` | Insert a copy after it, named "... (copy)" |
@@ -293,7 +299,7 @@ Every value in a request is checked before any is applied; a request with an inv
 
 ## Changes by API version
 
-NeewerLux 1.4.0 adds, within version 2 (nothing changes for existing clients): the `sound` layer, `POST /NeewerLux/sound`, `sound=` requests, `stop_layer=sound` (and `all` includes it) and `sound` in `status_json`.
+NeewerLux 1.4.0 adds, within version 2 (nothing changes for existing clients): the `sound` layer, `POST /NeewerLux/sound`, `sound=` requests, `stop_layer=sound` (and `all` includes it) and `sound` in `status_json` (with `assignments`: which lights follow which mode), sound on some lights only (`lights`, `sound=start|Mode|lights`, `sound=stop|lights`), saved palettes, colour `cycle` and `cycle_s`, and `sound` on preset entries.
 
 **2** (NeewerLux 1.3.3): `apiVersion` and `version` fields; structured per-light state and `sequences` in `list_json`; JSON batch `temp` accepts Kelvin; light commands are coalesced per light instead of answered with "Server is busy"; POST batch stops an override animation like GET commands do; editing over HTTP: `/NeewerLux/presets`, animation `get`/`save`/`duplicate`/`delete`/`reload`, sequence `get`/`delete`/`editor` and renaming on save. Also part of this version, from 1.3.1 and 1.3.2: layers, sequences, `status_json`, `stop_layer`, `/NeewerLux/sequence` and `/NeewerLux/settings`.
 

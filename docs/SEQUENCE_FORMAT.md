@@ -344,7 +344,7 @@ current frame with the Fade back of the item that let go (0 cuts).
 | override (highest) | the Stream Deck pedal, the GUI Play button, every `animate` URL without a layer | One at a time, as in v1.3.0: a new one replaces the old, and "Revert on finish" (the global setting, which the `revert` field still changes) decides whether lights go back afterwards. |
 | effect | channel point redeems, bits, subs, raids: anything Streamer.bot triggers | Queued (up to 10 waiting) or `replace` to cut in. Forever-looping effects stop after the Looping effect time limit (default 30 s). `revert` applies to that request only. |
 | show | sequences, or an animation used as a background look | One at a time. |
-| sound | a sound mode following live audio ([SOUND_MODES.md](SOUND_MODES.md)); not for animations | One at a time. A bed under everything: a song's sequence takes the lights it uses and gives them back when it ends. |
+| sound | a sound mode following live audio ([SOUND_MODES.md](SOUND_MODES.md)); not for animations | One mode, or several on different lights. A bed under everything: a song's sequence takes the lights it uses and gives them back when it ends. |
 
 Below them all is the base layer: the sliders, presets and plain `mode=` commands. While
 a sequence or effect drives a light, a base change to that light doesn't show; it becomes

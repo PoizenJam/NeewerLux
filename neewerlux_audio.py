@@ -428,6 +428,7 @@ class AudioEngine:
         self.error = ""
         self._thread = None
         self._stop = threading.Event()
+        self._retry = threading.Event()
         self._lock = threading.Lock()
         self._latest = None
         self._latestAt = 0.0
@@ -443,11 +444,17 @@ class AudioEngine:
         self.device = device
         self.error = ""
         self._stop.clear()
+        self._retry.clear()
         self._thread = threading.Thread(target=self._run, name="audioCapture", daemon=True)
         self._thread.start()
 
+    def retry(self):
+        """Try a failed device again now instead of at the next 2 s retry."""
+        self._retry.set()
+
     def stop(self):
         self._stop.set()
+        self._retry.set()
         if self._thread is not None:
             self._thread.join(2.0)
         self._thread = None
@@ -482,4 +489,5 @@ class AudioEngine:
                 self.error = (type(e).__name__ + ": " + str(e)).strip()
                 with self._lock:
                     self._latest = None
-                self._stop.wait(2.0)
+                self._retry.wait(2.0)
+                self._retry.clear()

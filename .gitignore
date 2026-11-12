@@ -44,6 +44,14 @@ light_prefs/sound_modes/*
 !light_prefs/sound_modes/Beat Chase.json
 !light_prefs/sound_modes/Colour Drift.json
 !light_prefs/sound_modes/Warm Glow.json
+# and palettes
+!light_prefs/palettes/
+light_prefs/palettes/*
+!light_prefs/palettes/Neon.json
+!light_prefs/palettes/Sunset.json
+!light_prefs/palettes/Ocean.json
+!light_prefs/palettes/Rainbow.json
+!light_prefs/palettes/Warm Whites.json
 
 # OS noise
 .DS_Store

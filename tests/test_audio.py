@@ -348,10 +348,93 @@ def t_docExamplesValidate():
     check(count >= 2, "docs examples checked: %d" % count)
 
 
+def t_colourCycle():
+    """Colour "cycle" goes round the palette (back to its first colour) over cycle_s, blending
+    between colours; one colour goes once round the colour wheel; it can't be set faster than
+    4 s or a second per colour."""
+    base = {"name": "Cycle", "floor": 50, "ceiling": 50, "parts": [{"target": "@rim", "drive": "level", "colour": "cycle"}]}
+    mode, errors, _ = show.parseSoundMode(dict(base, palette=[{"hue": 0, "sat": 100}, {"hue": 120, "sat": 100}, {"hue": 240, "sat": 100}], cycle_s=6))
+    check(mode is not None, str(errors))
+    player = show.SoundPlayer(mode, resolve, lambda: {"level": 0.5})
+    player.start(1000.0)
+    hues = {}
+    for ms in range(0, 6001, 50):
+        out, _ = player.frame(1000.0 + ms)
+        hues[ms] = out[2]["hue"]
+    check(hues[0] == 0 and hues[2000] == 120 and hues[4000] == 240 and hues[6000] == 0, "palette colours on time: %s" % [hues[k] for k in (0, 2000, 4000, 6000)])
+    check(hues[1000] == 60 and hues[5000] == 300, "blending between them (the short way round): %d, %d" % (hues[1000], hues[5000]))
+    steps = [abs((hues[k + 50] - hues[k] + 540) % 360 - 180) for k in range(0, 6000, 50)]
+    check(max(steps) <= 4, "a smooth drift, at most %d degrees a frame" % max(steps))
+    one, errors, _ = show.parseSoundMode(dict(base, palette=[{"hue": 200, "sat": 70}], cycle_s=8))
+    player = show.SoundPlayer(one, resolve, lambda: {"level": 0.5})
+    player.start(0.0)
+    seen = [player.frame(float(ms))[0][2] for ms in (0, 2000, 4000)]
+    check([c["hue"] for c in seen] == [200, 290, 20] and all(c["sat"] == 70 for c in seen), "one colour goes round the wheel: %s" % seen)
+    white, errors, _ = show.parseSoundMode(dict(base, palette=[{"temp": 3200}]))
+    player = show.SoundPlayer(white, resolve, lambda: {"level": 0.5})
+    player.start(0.0)
+    check({player.frame(float(ms))[0][2]["temp"] for ms in (0, 5000, 9000)} == {32}, "one white stays put")
+    check(mode.cycleS == 6 and white.cycleS == 20, "default 20 s")
+    for pal, cyc, ok in (([{"hue": 0}], 3, False), ([{"hue": 0}], 4, True), ([{"hue": h} for h in range(0, 360, 60)], 5, False),
+                         ([{"hue": h} for h in range(0, 360, 60)], 6, True)):
+        m, errors, _ = show.parseSoundMode(dict(base, palette=pal, cycle_s=cyc))
+        check((m is not None) == ok, "%d colours, cycle_s %s: %s" % (len(pal), cyc, errors))
+    many, _, _ = show.parseSoundMode(dict(base, palette=[{"hue": h} for h in range(0, 360, 12)]))
+    check(many.cycleS == 30, "the default stretches to a second a colour: %s" % many.cycleS)
+
+
+def t_voices():
+    """Several modes at once on different lights: assign moves lights between modes, release
+    takes them out (the player reports when none are left), and each mode drives only its own."""
+    pulse = show.parseSoundMode({"name": "A", "floor": 10, "ceiling": 10, "palette": [{"hue": 10, "sat": 100}],
+                                 "parts": [{"target": "@rim;@background", "drive": "level", "colour": 0}]})[0]
+    other = show.parseSoundMode({"name": "B", "floor": 90, "ceiling": 90, "palette": [{"hue": 200, "sat": 100}],
+                                 "parts": [{"target": "@key", "drive": "level", "colour": 0},
+                                           {"target": "@rim", "drive": "high", "colour": 0, "floor": 40, "ceiling": 40}]})[0]
+    player = show.SoundPlayer(pulse, resolve, lambda: {"level": 0.5, "high": 0.5})
+    player.start(0.0)
+    check(sorted(player.lights()) == [2, 3] and player.name == "A", "the mode's own targets")
+    player.assign(other, [2, 1])
+    out, _ = player.frame(0.0)
+    check(out[3]["hue"] == 10 and out[2]["hue"] == 200 and out[1]["hue"] == 200, "lights follow their mode: %s" % out)
+    check(out[2]["bri"] == 40 and out[1]["bri"] == 90, "each assigned light follows the part naming it, else the first: %s" % out)
+    check(player.name == "B" and player.assignments() == [{"mode": "A", "lights": None}, {"mode": "B", "lights": [1, 2]}], str(player.assignments()))
+    player.assign(pulse, [1])
+    check(player.assignments()[-1] == {"mode": "A", "lights": [1]} and player.voices[1].lights == [2], str(player.assignments()))
+    check(not player.release([2, 3]) and sorted(player.lights()) == [1], "release some")
+    check(player.release([1]) and player.lights() == [], "release the last")
+    player.assign(other)
+    check(player.assignments() == [{"mode": "B", "lights": None}], "no lights: replaces every assignment")
+
+
+def t_retryNow():
+    """Refresh tries a failed device again at once instead of at the next 2 s retry."""
+    import time
+    fails = [1]
+    def factory(device):
+        if fails[0]:
+            fails[0] = 0
+            raise OSError("device unplugged")
+        return au.ArraySource(np.zeros(SR), name="back")
+    engine = au.AudioEngine(factory)
+    engine.start("")
+    end = time.monotonic() + 3
+    while not engine.error:
+        check(time.monotonic() < end, "the failure is reported")
+        time.sleep(0.01)
+    t0 = time.monotonic()
+    engine.retry()
+    while engine.features() is None:
+        check(time.monotonic() < t0 + 1.5, "retry() reopens it well before the 2 s retry")
+        time.sleep(0.01)
+    check(engine.deviceName == "back" and not engine.error, "recovered")
+    engine.stop()
+
+
 TESTS = [t_tempoOfClickTracks, t_tempoOfDrumPattern, t_tempoChange, t_bandsAndCentroid, t_silenceAndGaps,
          t_levelIsRelative, t_shippedModesValid, t_shippedModesUnderFlashLimit, t_modesMoveWithTheMusic,
          t_modesAimAtRoles, t_beatChase, t_warmGlowIsWhiteOnly, t_silenceSettlesAtTheFloor, t_modeValidation,
-         t_docExamplesValidate]
+         t_docExamplesValidate, t_colourCycle, t_voices, t_retryNow]
 
 
 def main():

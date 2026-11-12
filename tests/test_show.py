@@ -1606,10 +1606,11 @@ def t_offWinsDuringShows(rig):
     rig.post("/NeewerLux/sequence", {"action": "stop"})
 
 
-def t_manualWriteStopsSound(rig):
-    """1.4.0: recalling a preset or moving a slider on a light the sound mode drives stops the
-    sound mode (and its capture), and the new state shows at once; a command to a light it
-    doesn't drive leaves it playing; Off on one of its lights takes just that light out."""
+def t_manualWriteReleasesSound(rig):
+    """1.4.0: recalling a preset or moving a slider on a light the sound layer drives takes that
+    light out of the sound layer and shows the new state at once; the layer (and its capture)
+    stops when it has no lights left. A command to a light it doesn't drive leaves it playing;
+    Off takes a light out only until it is switched back on."""
     nl = rig.nl
     if _needsNumpy(rig):
         return
@@ -1623,21 +1624,147 @@ def t_manualWriteStopsSound(rig):
     check(st["running"] and _layers(rig)[AMB] == "base", "Off on the background takes only that light out")
     t0 = time.monotonic()
     rig.get("light=3&mode=CCT&temp=32&bri=40", 0.6)
-    st = rig.post("/NeewerLux/sound", {"action": "status"})
-    check(not st["running"] and not st["capturing"], "a slider-style command on the rim stops the sound mode: %s" % st)
     w = writesFor(rig, RIM, t0)
-    check(w and w[-1][1][1] == 135 and w[-1][1][4] == 32, "and the rim shows it: %s" % [d for _, d in w][-2:])
+    check(w and w[-1][1][1] == 135 and w[-1][1][4] == 32, "the rim shows the command at once: %s" % [d for _, d in w][-2:])
+    st = rig.post("/NeewerLux/sound", {"action": "status"})
+    check(st["running"] and _layers(rig)[RIM] == "base", "the rim leaves the sound layer; the background (off) still follows it")
+    rig.get("light=4&mode=CCT&temp=45&bri=20", 0.6)
+    st = rig.post("/NeewerLux/sound", {"action": "status"})
+    check(not st["running"] and not st["capturing"], "a command to its last light stops the sound layer and capture: %s" % st)
     check(_waitLayers(rig, ["base"] * 4) == ["base"] * 4, "every light is back on the base")
 
-    rig.get("light=4&on", 0.3)
     rig.post("/NeewerLux/presets", {"action": "save", "index": 3, "entries": [{"light": "*", "mode": "CCT", "temp": 45, "bri": 25}]})
     rig.post("/NeewerLux/sound", {"action": "start", "mode": "Pulse"})
     check(_waitLayers(rig, [None, None, "sound", "sound"])[2:] == ["sound", "sound"], "Pulse running again")
     t1 = time.monotonic()
     rig.get("use_preset=3", 0.8)
-    check(not rig.post("/NeewerLux/sound", {"action": "status"})["running"], "recalling a preset stops it")
+    check(not rig.post("/NeewerLux/sound", {"action": "status"})["running"], "recalling a global preset stops it")
     w = writesFor(rig, AMB, t1)
     check(w and w[-1][1][1] == 135 and w[-1][1][4] == 45, "and the preset shows: %s" % [d for _, d in w][-2:])
+
+
+def t_soundOnSomeLights(rig):
+    """1.4.0: a sound mode can be put on some lights only (HTTP GET and POST): those lights leave
+    whatever sound they followed, the rest play on; stop with lights takes only those out."""
+    nl = rig.nl
+    if _needsNumpy(rig):
+        return
+    _soundSignal(nl)
+    rig.post("/NeewerLux/sound", {"action": "start", "mode": "Pulse"})
+    check(_waitLayers(rig, [None, None, "sound", "sound"])[2:] == ["sound", "sound"], "Pulse on its own targets")
+    rig.get("sound=start|Colour%20Drift|1", 0.2)
+    check(_waitLayers(rig, ["sound", "base", "sound", "sound"]) == ["sound", "base", "sound", "sound"], "the key joins, on Colour Drift")
+    st = rig.post("/NeewerLux/sound", {"action": "status"})
+    check(st["assignments"] == [{"mode": "Pulse", "lights": None}, {"mode": "Colour Drift", "lights": [1]}], str(st["assignments"]))
+    rig.post("/NeewerLux/sound", {"action": "start", "mode": "colour drift", "lights": "3"})
+    st = rig.post("/NeewerLux/sound", {"action": "status"})
+    check(st["assignments"] == [{"mode": "Pulse", "lights": None}, {"mode": "Colour Drift", "lights": [1, 3]}],
+          "the rim moves from Pulse to Colour Drift: %s" % st["assignments"])
+    player = nl.showEngine.soundPlayer()
+    check([sorted(set(i for ls in v.partLights for i in ls)) for v in player.voices] == [[AMB], [KEY, RIM]], "lights per mode")
+    r = rig.post("/NeewerLux/sound", {"action": "set", "mode": "Pulse", "params": {"floor": 33}})
+    check(r["success"] and player.voices[0].mode.floor == 33 and player.voices[1].mode.floor != 33, "set changes only the named mode")
+    r = rig.post("/NeewerLux/sound", {"action": "set", "mode": "Bands", "params": {"floor": 33}})
+    check(not r["success"] and "isn't playing" in r["errors"][0], str(r))
+    # the chase in Beat Chase steps through the lights it was given, in sweep order
+    rig.post("/NeewerLux/sound", {"action": "start", "mode": "Beat Chase", "lights": "1;2"})
+    chase = nl.showEngine.soundPlayer().voices[-1]
+    check(chase.partLights == [[FILL, KEY]], "assigned lights join the chase in sweep order: %s" % chase.partLights)
+    rig.get("sound=stop|1;2;3", 0.2)
+    check(_waitLayers(rig, ["base", "base", "base", "sound"]) == ["base", "base", "base", "sound"], "stop on some lights")
+    st = rig.post("/NeewerLux/sound", {"action": "status"})
+    check(st["running"] and st["assignments"] == [{"mode": "Pulse", "lights": None}], str(st["assignments"]))
+    r = rig.post("/NeewerLux/sound", {"action": "start", "mode": "Pulse", "lights": "@nothing"})
+    check(not r["success"] and "no light matches" in r["errors"][0], str(r))
+    rig.post("/NeewerLux/sound", {"action": "stop", "lights": "4"})
+    st = rig.post("/NeewerLux/sound", {"action": "status"})
+    check(not st["running"] and not st["capturing"], "stopping its last light stops the layer and capture")
+    rig.post("/NeewerLux/sound", {"action": "start", "mode": "Pulse", "lights": "2"})
+    check(_waitLayers(rig, ["base", "sound", "base", "base"]) == ["base", "sound", "base", "base"], "a start with lights when nothing plays")
+    rig.post("/NeewerLux/sound", {"action": "stop"})
+
+
+def t_presetSounds(rig):
+    """1.4.0: a snapshot preset can set lights following a sound mode; their preset colour is
+    what they return to. A snapshot taken while sound plays saves it; the prefs line round-trips
+    and moves with the preset."""
+    nl = rig.nl
+    if _needsNumpy(rig):
+        return
+    _soundSignal(nl)
+    entries = [{"target": "AA:00:00:00:00:03", "mode": "HSI", "hue": 100, "sat": 80, "bri": 50, "sound": "Pulse"},
+               {"target": "AA:00:00:00:00:01", "mode": "CCT", "temp": 40, "bri": 30},
+               {"target": "-1", "mode": "CCT", "temp": 40, "bri": 30, "sound": "Pulse"}]
+    r = rig.post("/NeewerLux/presets", {"action": "save", "index": 4, "entries": entries[:2]})
+    check(r["success"], str(r))
+    got = rig.post("/NeewerLux/presets", {"action": "get", "index": 4})["preset"]["entries"]
+    check(got[0].get("sound") == "Pulse" and "sound" not in got[1], "the editor entries carry it: %s" % got)
+    check(nl.entriesToSounds(entries) == {"AA:00:00:00:00:03": "Pulse"}, "global entries can't follow sound")
+    t0 = time.monotonic()
+    rig.get("use_preset=4", 0.2)
+    check(_waitLayers(rig, ["base", "base", "sound", "base"]) == ["base", "base", "sound", "base"], "the rim follows Pulse, alone")
+    st = rig.post("/NeewerLux/sound", {"action": "status"})
+    check(st["assignments"] == [{"mode": "Pulse", "lights": [3]}], str(st["assignments"]))
+    check(any(d[1] == 135 and d[4] == 40 for _, d in writesFor(rig, KEY, t0)), "the key gets its colour")
+    check(not any(d[1] == 134 and d[3] == 100 and d[6] == 50 for _, d in writesFor(rig, RIM, t0)), "the rim isn't written its colour")
+    t1 = time.monotonic()
+    rig.post("/NeewerLux/sound", {"action": "stop"})
+    _waitLayers(rig, ["base"] * 4)
+    back = lambda: [d for _, d in writesFor(rig, RIM, t1)][-1:] == [[120, 134, 4, 100, 0, 80, 50, 232]]
+    end = time.monotonic() + 2
+    while not back() and time.monotonic() < end:
+        time.sleep(0.02)
+    check(back(), "and returns to its preset colour: %s" % [d for _, d in writesFor(rig, RIM, t1)][-2:])
+
+    line = nl.presetSoundLine(3)  # preset 4
+    check(line == "presetSound3=AA:00:00:00:00:03|Pulse", line)
+    nl.presetSounds.clear()
+    nl.parsePresetSoundLine(line)
+    check(nl.presetSounds == {3: {"AA:00:00:00:00:03": "Pulse"}}, "the prefs line round-trips: %s" % nl.presetSounds)
+    rig.post("/NeewerLux/presets", {"action": "move", "index": 4, "direction": "left"})
+    check(nl.presetSounds == {2: {"AA:00:00:00:00:03": "Pulse"}}, "it moves with the preset: %s" % nl.presetSounds)
+
+    rig.post("/NeewerLux/sound", {"action": "start", "mode": "Pulse"})
+    _waitLayers(rig, [None, None, "sound", "sound"])
+    nl.saveCustomPreset("snapshot", 6)
+    following = sorted(nl.presetSounds.get(6, {}).values())
+    check(following == ["Pulse", "Pulse"] and len(nl.customLightPresets[6]) == 4, "a snapshot saves the lights following sound: %s" % nl.presetSounds.get(6))
+    rig.get("light=*&mode=CCT&temp=56&bri=40", 0.5)
+    check(not rig.post("/NeewerLux/sound", {"action": "status"})["running"], "a write to every light stops it")
+    nl.saveCustomPreset("snapshot", 6)
+    check(6 not in nl.presetSounds, "a snapshot without sound clears it")
+
+
+def t_paletteLibrary(rig):
+    """1.4.0: saved palettes over HTTP (list, save, delete) and by name in start and set."""
+    nl = rig.nl
+    pals = rig.post("/NeewerLux/sound", {"action": "palettes"})
+    names = [p["name"] for p in pals["palettes"]]
+    check(all(n in names for n in ("Neon", "Sunset", "Ocean", "Rainbow", "Warm Whites")), str(names))
+    mine = [{"hue": 10, "sat": 90}, {"hue": 50, "sat": 90}]
+    check(rig.post("/NeewerLux/sound", {"action": "save_palette", "name": "Test Pal", "palette": mine})["success"], "save")
+    check(os.path.exists(os.path.join(nl.palettesDir, "Test Pal.json")), "the file is written")
+    r = rig.post("/NeewerLux/sound", {"action": "save_palette", "name": "test pal", "palette": mine[:1]})
+    check(not r["success"] and "exists" in r["errors"][0], str(r))
+    check(rig.post("/NeewerLux/sound", {"action": "save_palette", "name": "test pal", "palette": mine[:1], "overwrite": True})["success"], "overwrite")
+    check(nl.savedPalettes == {**{n: nl.savedPalettes[n] for n in names}, "test pal": mine[:1]} and len(os.listdir(nl.palettesDir)) == 6,
+          "one file, renamed: %s" % os.listdir(nl.palettesDir))
+    r = rig.post("/NeewerLux/sound", {"action": "save_palette", "name": "Bad", "palette": [{"hue": 1}, {"temp": 3000}]})
+    check(not r["success"] and "not a mix" in r["errors"][0], str(r))
+    nl.loadAllSoundModes()
+    check(nl.savedPalettes.get("test pal") == mine[:1], "reloads from disk")
+    if not _needsNumpy(rig):
+        _soundSignal(nl)
+        r = rig.post("/NeewerLux/sound", {"action": "start", "mode": "Pulse", "params": {"palette": "neon"}})
+        check(r["success"] and nl.showEngine.soundPlayer().mode.palette == nl.savedPalettes["Neon"], str(r))
+        r = rig.post("/NeewerLux/sound", {"action": "set", "params": {"palette": "Test Pal"}})
+        check(r["success"] and nl.showEngine.soundPlayer().mode.palette == mine[:1], str(r))
+        r = rig.post("/NeewerLux/sound", {"action": "set", "params": {"palette": "Nope"}})
+        check(not r["success"] and "no palette named" in r["errors"][0], str(r))
+        rig.post("/NeewerLux/sound", {"action": "stop"})
+    check(rig.post("/NeewerLux/sound", {"action": "delete_palette", "name": "TEST PAL"})["success"], "delete")
+    check("test pal" not in nl.savedPalettes and not os.path.exists(os.path.join(nl.palettesDir, "Test Pal.json")), "gone")
+    check(not rig.post("/NeewerLux/sound", {"action": "delete_palette", "name": "Test Pal"})["success"], "deleting it twice fails")
 
 
 def t_compositorWakesOnlyWhenDue(rig):
@@ -1692,7 +1819,8 @@ TESTS = [t_maxBrightnessHTTP, t_maxBrightnessAnimationAndSequence, t_minBrightne
          t_fadesOnlyBetweenItems,
          t_addSimulatedRig, t_compositorWakesOnlyWhenDue, t_handBackToRunningLayerFades,
          t_soundModeHTTP, t_soundUnderShowAndEffects, t_soundRespectsLimitsAndLocks, t_soundUnavailable, t_soundModeFilesHTTP,
-         t_offWinsDuringShows, t_manualWriteStopsSound]
+         t_offWinsDuringShows, t_manualWriteReleasesSound, t_soundOnSomeLights,
+         t_presetSounds, t_paletteLibrary]
 
 
 def main():

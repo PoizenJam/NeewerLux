@@ -235,28 +235,50 @@ factoryDefaultPresets = [
 numOfPresets = 8 # how many presets are active (can grow beyond 8)
 presetNames = {} # dict of {preset_index: "custom name"} for user-assigned names
 presetFades = {} # {preset_index: ms}: how long recalling that preset fades in (unset = the global Fade in)
+presetSounds = {} # {preset_index: {light target: sound mode name}}: lights a snapshot preset sets following a sound mode
 
 
 def _presetFadesSwap(a, b):
-    fa, fb = presetFades.pop(a, None), presetFades.pop(b, None)
-    if fa is not None:
-        presetFades[b] = fa
-    if fb is not None:
-        presetFades[a] = fb
+    for store in (presetFades, presetSounds):
+        fa, fb = store.pop(a, None), store.pop(b, None)
+        if fa is not None:
+            store[b] = fa
+        if fb is not None:
+            store[a] = fb
 
 
 def _presetFadesDelete(idx):
-    shifted = {(k if k < idx else k - 1): v for k, v in presetFades.items() if k != idx}
-    presetFades.clear()
-    presetFades.update(shifted)
+    for store in (presetFades, presetSounds):
+        shifted = {(k if k < idx else k - 1): v for k, v in store.items() if k != idx}
+        store.clear()
+        store.update(shifted)
 
 
 def _presetFadesDuplicate(idx):
-    shifted = {(k if k <= idx else k + 1): v for k, v in presetFades.items()}
-    if idx in presetFades:
-        shifted[idx + 1] = presetFades[idx]
-    presetFades.clear()
-    presetFades.update(shifted)
+    for store in (presetFades, presetSounds):
+        shifted = {(k if k <= idx else k + 1): v for k, v in store.items()}
+        if idx in store:
+            shifted[idx + 1] = copy.deepcopy(store[idx])
+        store.clear()
+        store.update(shifted)
+
+
+def presetSoundLine(idx):
+    """A preset's sound assignments as a prefs line: presetSoundN=target|mode;target|mode
+    (mode names URL-quoted)."""
+    pairs = presetSounds.get(idx) or {}
+    return "presetSound" + str(idx) + "=" + ";".join(t + "|" + urllib.parse.quote(m, safe=" ") for t, m in pairs.items())
+
+
+def parsePresetSoundLine(line):
+    key, value = line.split("=", 1)
+    pairs = {}
+    for item in value.split(";"):
+        if "|" in item:
+            t, m = item.split("|", 1)
+            pairs[t] = urllib.parse.unquote(m)
+    if pairs:
+        presetSounds[int(key[len("presetSound"):])] = pairs
 
 # ============================================================================
 # CUSTOM ANIMATION SYSTEM
@@ -276,6 +298,8 @@ savedSequences = {}            # dict of {name: sequence_dict} loaded from disk
 sequencesDir = os.path.dirname(os.path.abspath(sys.argv[0])) + os.sep + "light_prefs" + os.sep + "sequences"
 soundModesDir = os.path.dirname(os.path.abspath(sys.argv[0])) + os.sep + "light_prefs" + os.sep + "sound_modes"
 savedSoundModes = {}           # dict of {name: sound mode dict} loaded from disk
+palettesDir = os.path.dirname(os.path.abspath(sys.argv[0])) + os.sep + "light_prefs" + os.sep + "palettes"
+savedPalettes = {}             # dict of {name: [colours]} loaded from disk
 audioEngine = audio.AudioEngine()  # live capture and analysis, started with a sound mode
 lightShowPrefs = {}            # {MAC: {"role", "side", "order", "eyeline", "maxBri", "minBri", "locked", "depth", "height", "aim"}}
 _lastWritten = {}              # {MAC: bytes last actually written, after CCT-only conversion and limits}, for display
@@ -903,6 +927,15 @@ try: # try to load the GUI
             sceneCombo.setVisible(False)
             formGrid.addWidget(sceneCombo, 2, 1)
 
+            formGrid.addWidget(QLabel("Sound:"), 5, 0)
+            soundCombo = QComboBox()
+            soundCombo.addItem("None", "")
+            for name in sorted(savedSoundModes):
+                soundCombo.addItem("Follows " + name, name)
+            soundCombo.setToolTip("Recalling the preset sets this light following a sound mode; the colour above\n"
+                                  "is what it returns to when the sound stops. Only for single lights, not All Lights.")
+            formGrid.addWidget(soundCombo, 5, 1)
+
             editorLay.addLayout(formGrid)
 
             # Color preview
@@ -989,6 +1022,8 @@ try: # try to load the GUI
                 r = selectedRow[0]
                 if 0 <= r < len(entries) and entries[r].get("off"):
                     e["off"] = True  # a snapshot of a light that was off stays off
+                if soundCombo.currentData() and e["target"] != "-1":
+                    e["sound"] = soundCombo.currentData()
                 return e
 
             def _loadEditor(entry):
@@ -1016,7 +1051,15 @@ try: # try to load the GUI
                 elif mode == "Scene":
                     sceneCombo.setCurrentIndex(max(0, entry.get("scene", 1) - 1))
                     p2Slider.setValue(entry.get("bri", 100))
+                sound = entry.get("sound", "")
+                if sound and soundCombo.findData(sound) < 0:
+                    soundCombo.addItem("Follows " + sound + " (missing)", sound)
+                soundCombo.setCurrentIndex(max(0, soundCombo.findData(sound)))
+                _updateSoundEnabled()
                 _updatePreview()
+
+            def _updateSoundEnabled():
+                soundCombo.setEnabled(targetCombo.currentData() not in (None, "-1"))
 
             def _setTableRow(row, entry):
                 mode = entry.get("mode", "CCT")
@@ -1025,7 +1068,7 @@ try: # try to load the GUI
                 tgtItem = QTableWidgetItem(_targetLabel(entry.get("target", "-1")))
                 tgtItem.setTextAlignment(QtC.AlignCenter)
                 table.setItem(row, 1, tgtItem)
-                mItem = QTableWidgetItem(mode)
+                mItem = QTableWidgetItem(mode + (" + " + entry["sound"] if entry.get("sound") else ""))
                 mItem.setTextAlignment(QtC.AlignCenter)
                 table.setItem(row, 2, mItem)
 
@@ -1154,6 +1197,7 @@ try: # try to load the GUI
 
             # Wire signals
             modeCombo.currentTextChanged.connect(_onModeChanged)
+            targetCombo.currentIndexChanged.connect(lambda i: _updateSoundEnabled())
             for s in [p1Slider, p2Slider, p3Slider]:
                 s.valueChanged.connect(lambda v: _updatePreview())
             table.selectionModel().selectionChanged.connect(lambda: _onRowSelected())
@@ -1215,6 +1259,7 @@ try: # try to load the GUI
                     return
 
                 customLightPresets[idx] = presetData
+                _setPresetSounds(idx, entries)
                 newName = nameField.text().strip()[:20]
                 if newName:
                     presetNames[idx] = newName
@@ -1536,7 +1581,7 @@ try: # try to load the GUI
             self.seqRefreshList()
 
         # ---------------------------------------------------------------- SOUND TAB
-        SOUND_EDITABLE = ("sensitivity", "range_db", "floor", "ceiling", "smoothing", "palette", "parts")
+        SOUND_EDITABLE = ("sensitivity", "range_db", "floor", "ceiling", "smoothing", "palette", "cycle_s", "parts")
         SOUND_TARGETS = ["@rim;@background;@practical", "@all", "@key", "@fill", "@rim", "@background", "@practical",
                          "@front", "@back", "@left", "@right", "@high", "@low"]
         SOUND_DRIVES = [("level", "Level"), ("low", "Bass"), ("mid", "Mids"), ("high", "Treble"), ("beat", "Beat")]
@@ -1546,7 +1591,8 @@ try: # try to load the GUI
             self._soundDraft = None
             self._soundLoading = False
             self.soundStartButton.clicked.connect(self.soundStart)
-            self.soundStopButton.clicked.connect(stopSound)
+            self.soundStartSelectedButton.clicked.connect(lambda: self.soundStart(selected=True))
+            self.soundStopButton.clicked.connect(lambda: stopSound())
             self.soundModeCombo.currentIndexChanged.connect(self.soundModeChosen)
             self.soundDeviceCombo.activated.connect(lambda i: self.soundDeviceChosen(self.soundDeviceCombo))
             self.prefsSoundDeviceCombo.activated.connect(lambda i: self.soundDeviceChosen(self.prefsSoundDeviceCombo))
@@ -1555,6 +1601,10 @@ try: # try to load the GUI
                 slider.valueChanged.connect(lambda v, k=key: self.soundSliderMoved(k, v))
             self.soundPaletteKind.activated.connect(self.soundPaletteKindChosen)
             self.soundPaletteAdd.clicked.connect(self.soundPaletteAddEntry)
+            self.soundCycleSpin.valueChanged.connect(self.soundCycleChanged)
+            self.soundPalettePresetCombo.activated.connect(self.soundPalettePresetChosen)
+            self.soundPaletteSaveButton.clicked.connect(self.soundPaletteSave)
+            self.soundPaletteDeleteButton.clicked.connect(self.soundPaletteDelete)
             self.soundPartAdd.clicked.connect(lambda: self.soundAddPartRow({"target": "@background", "drive": "level", "colour": 0}, True))
             self.soundSaveButton.clicked.connect(self.soundSave)
             self.soundSaveAsButton.clicked.connect(self.soundSaveAs)
@@ -1581,6 +1631,7 @@ try: # try to load the GUI
             self.soundModeCombo.setCurrentIndex(max(0, i))
             self._soundLoading = False
             self.soundLoadDraft(self.soundModeCombo.currentText())
+            self.soundRefreshPalettes()  # loaded with the modes
 
         def soundModeChosen(self, index):
             if self._soundLoading:
@@ -1633,11 +1684,13 @@ try: # try to load the GUI
             self.soundApplyLive(changes)
 
         def soundApplyLive(self, params):
-            """Edits show at once when the mode being edited is the one playing."""
-            player = showEngine.soundPlayer() if showEngine is not None else None
-            if player is None or self._soundDraft is None or player.name.lower() != str(self._soundDraft.get("name", "")).lower():
+            """Edits show at once when the mode being edited is playing (on any lights)."""
+            if self._soundDraft is None:
                 return
-            result = setSoundParams({k: params[k] for k in params if k != "range_db" or params[k] >= 6})
+            name = str(self._soundDraft.get("name", ""))
+            if name.lower() not in [a["mode"].lower() for a in soundStatus()["assignments"]]:
+                return
+            result = setSoundParams({k: params[k] for k in params if k != "range_db" or params[k] >= 6}, name)
             if not result["success"]:
                 self.soundStatusLabel.setText("Not applied: " + "; ".join(result["errors"]))
 
@@ -1651,6 +1704,15 @@ try: # try to load the GUI
             palette = self._soundDraft.get("palette", [{"hue": 240, "sat": 100}]) if self._soundDraft else []
             white = bool(palette) and "temp" in palette[0]
             self.soundPaletteKind.setCurrentIndex(1 if white else 0)
+            # a cycle never moves faster than a colour a second (show.SOUND_CYCLE_MIN_S)
+            minCycle = max(show.SOUND_CYCLE_MIN_S, len(palette))
+            cycle = self._soundDraft.get("cycle_s", max(20, minCycle)) if self._soundDraft else 20
+            self.soundCycleSpin.blockSignals(True)
+            self.soundCycleSpin.setMinimum(minCycle)
+            self.soundCycleSpin.setValue(int(round(max(cycle, minCycle))))
+            self.soundCycleSpin.blockSignals(False)
+            if self._soundDraft is not None and "cycle_s" in self._soundDraft and self._soundDraft["cycle_s"] < minCycle:
+                self._soundDraft["cycle_s"] = minCycle
             for i, entry in enumerate(palette):
                 row = QWidget()
                 lay = QHBoxLayout(row)
@@ -1722,6 +1784,55 @@ try: # try to load the GUI
                     part["colour"] = min(part["colour"], len(self._soundDraft["palette"]) - 1)
             self._soundPaletteEdited()
 
+        def soundCycleChanged(self, v):
+            if self._soundLoading or self._soundDraft is None:
+                return
+            self._soundDraft["cycle_s"] = int(v)
+            self.soundApplyLive({"cycle_s": int(v)})
+
+        # saved palettes (light_prefs/palettes), shared by every mode
+        def soundRefreshPalettes(self, select=None):
+            combo = self.soundPalettePresetCombo
+            combo.clear()
+            combo.addItem("Load a palette...", "")
+            for name in sorted(savedPalettes, key=str.lower):
+                combo.addItem(name, name)
+            combo.setCurrentIndex(max(0, combo.findData(select or "")))
+
+        def soundPalettePresetChosen(self, index):
+            name = self.soundPalettePresetCombo.itemData(index)
+            if not name or self._soundDraft is None or name not in savedPalettes:
+                return
+            self._soundDraft["palette"] = [dict(c) for c in savedPalettes[name]]
+            for part in self._soundDraft.get("parts", []):
+                if isinstance(part.get("colour"), int):
+                    part["colour"] = min(part["colour"], len(self._soundDraft["palette"]) - 1)
+            self._soundPaletteEdited()
+            self.soundStatusLabel.setText("Loaded palette " + name + " (Save keeps it in this mode)")
+
+        def soundPaletteSave(self):
+            if self._soundDraft is None:
+                return
+            current = self.soundPalettePresetCombo.currentData() or ""
+            name, ok = QInputDialog.getText(self, "Save palette", "Palette name:", text=current)
+            if not ok or not name.strip():
+                return
+            result = savePalette(name, self._soundDraft.get("palette", []))
+            if not result["success"] and any("exists" in e for e in result["errors"]):
+                if QMessageBox.question(self, "Replace palette", "A palette named " + name.strip() + " exists. Replace it?") != QMessageBox.Yes:
+                    return
+                result = savePalette(name, self._soundDraft.get("palette", []), overwrite=True)
+            self.soundStatusLabel.setText("Saved palette " + result["palette"] if result["success"] else "Not saved: " + "; ".join(result["errors"]))
+            if result["success"]:
+                self.soundRefreshPalettes(result["palette"])
+
+        def soundPaletteDelete(self):
+            name = self.soundPalettePresetCombo.currentData()
+            if not name or QMessageBox.question(self, "Delete palette", "Delete the palette " + name + "?") != QMessageBox.Yes:
+                return
+            deletePalette(name)
+            self.soundRefreshPalettes()
+
         def _soundPaletteEdited(self):
             self._soundLoading = True
             self.soundRebuildPalette()
@@ -1729,7 +1840,7 @@ try: # try to load the GUI
             for part in self._soundDraft.get("parts", []):
                 self.soundAddPartRow(part, False)
             self._soundLoading = False
-            self.soundApplyLive({"palette": self._soundDraft["palette"], "parts": self._soundDraft.get("parts", [])})
+            self.soundApplyLive({k: self._soundDraft[k] for k in ("palette", "cycle_s", "parts") if k in self._soundDraft})
 
         # parts: which lights, what drives their brightness, which colour, chase
         def soundAddPartRow(self, part, isNew):
@@ -1739,8 +1850,9 @@ try: # try to load the GUI
             target = QComboBox()
             target.setEditable(True)
             target.addItems(self.SOUND_TARGETS)
+            target.view().setMinimumWidth(target.view().sizeHintForColumn(0) + 24)  # the list is wider than the cell
             target.setEditText(part.get("target", "@all"))
-            target.setToolTip("Lights by role (@rim), position (@back.left, @high), number (1;3) or @all, joined with ;")
+            self._soundTargetShown(target)
             drive = QComboBox()
             for key, label in self.SOUND_DRIVES:
                 drive.addItem(label, key)
@@ -1748,9 +1860,14 @@ try: # try to load the GUI
             colour = QComboBox()
             n = len(self._soundDraft.get("palette", [])) if self._soundDraft else 1
             for i in range(n):
-                colour.addItem("Palette %d" % (i + 1), i)
-            colour.addItem("Follows the sound", "centroid")
+                colour.addItem("Colour %d" % (i + 1), i)
+            colour.addItem("Cycles", "cycle")
             colour.addItem("Steps on the beat", "beat")
+            colour.addItem("Follows the sound", "centroid")
+            colour.setToolTip("Colour N: always that palette colour\n"
+                              "Cycles: moves round the palette over the Cycle time\n"
+                              "Steps on the beat: the next palette colour on each beat\n"
+                              "Follows the sound: low, bassy sound picks the first colours, bright sound the last")
             colour.setCurrentIndex(max(0, colour.findData(part.get("colour", 0))))
             chase = QCheckBox()
             chase.setChecked(bool(part.get("chase", False)))
@@ -1762,14 +1879,20 @@ try: # try to load the GUI
             remove.clicked.connect(lambda _=False, w=remove: self.soundRemovePartRow(w))
             for col, w in enumerate((target, drive, colour, chase, remove)):
                 table.setCellWidget(row, col, w)
-            table.setRowHeight(row, 30)
+            table.setRowHeight(row, 36)  # the theme pads combo boxes; less clips the text
             target.lineEdit().editingFinished.connect(self.soundPartsEdited)
+            target.lineEdit().editingFinished.connect(lambda w=target: self._soundTargetShown(w))
             target.activated.connect(lambda i: self.soundPartsEdited())
             drive.activated.connect(lambda i: self.soundPartsEdited())
             colour.activated.connect(lambda i: self.soundPartsEdited())
             chase.toggled.connect(lambda c: self.soundPartsEdited())
             if isNew:
                 self.soundPartsEdited()
+
+        def _soundTargetShown(self, combo):
+            combo.lineEdit().setCursorPosition(0)  # show the start of a long target, not its end
+            combo.setToolTip("Now: " + combo.currentText() + "\nLights by role (@rim), position (@back.left, @high), "
+                             "number (1;3) or @all, joined with ;")
 
         def soundRemovePartRow(self, button):
             table = self.soundPartsTable
@@ -1794,11 +1917,21 @@ try: # try to load the GUI
             if parts:
                 self.soundApplyLive({"parts": parts})
 
-        def soundStart(self):
+        def soundStart(self, selected=False):
             name = self.soundModeCombo.currentText()
             params = {k: self._soundDraft[k] for k in self.SOUND_EDITABLE if self._soundDraft and k in self._soundDraft}
-            result = startSound(name, params=params)
-            if not result["success"]:
+            lights = None
+            if selected:
+                chosen = self.selectedLights()
+                if not chosen:
+                    self.soundStatusLabel.setText("Select the lights to follow " + name + " in the light list first")
+                    return
+                lights = ";".join(availableLights[i][0].address for i in chosen)
+            result = startSound(name, params=params, lights=lights)
+            if result["success"]:
+                self._soundShown = self.soundStatusLabel.text()  # drops any note, so the status shows now
+                self.soundRefreshStatus()
+            else:
                 self.soundStatusLabel.setText("Couldn't start: " + "; ".join(result["errors"]))
 
         def soundSave(self):
@@ -1849,6 +1982,8 @@ try: # try to load the GUI
                 for d in devices:
                     combo.addItem(d["name"], d["id"])
                 combo.setCurrentIndex(max(0, combo.findData(soundDevice)))
+            if audioEngine.error:
+                audioEngine.retry()  # a device that was missing may be back
 
         def soundDeviceChosen(self, combo):
             setSoundDevice(combo.currentData())
@@ -1861,7 +1996,8 @@ try: # try to load the GUI
                 return
             st = soundStatus()
             if st["running"]:
-                text = "Playing " + st["mode"] + (", listening to " + st["deviceName"] if st["deviceName"] else ", starting...")
+                plays = [a["mode"] + ("" if a["lights"] is None else " on " + ", ".join(map(str, a["lights"]))) for a in st["assignments"]]
+                text = "Playing " + "; ".join(plays) + (", listening to " + st["deviceName"] if st["deviceName"] else ", starting...")
                 if st["mode"] != self.soundModeCombo.currentText() and (self._soundDraft is None or not self.soundStartButton.hasFocus()):
                     self._soundLoading = True
                     self.soundModeCombo.setCurrentIndex(max(0, self.soundModeCombo.findText(st["mode"])))
@@ -1871,8 +2007,16 @@ try: # try to load the GUI
                 text = "Not playing"
             if st["error"]:
                 text += "\nDevice problem (retrying): " + st["error"]
-            if not self.soundStatusLabel.text().startswith(("Saved", "Not saved", "Couldn't", "Not applied")) or st["running"] != getattr(self, "_soundWasRunning", None):
+            # anything else in the label is a note from an action (saved, couldn't start...): it
+            # stays 4 s, or until playing starts or stops
+            now = time.monotonic()
+            if self.soundStatusLabel.text() != getattr(self, "_soundShown", None):
+                self._soundNoteSince = getattr(self, "_soundNoteSince", None) or now
+            else:
+                self._soundNoteSince = None
+            if self._soundNoteSince is None or now - self._soundNoteSince > 4 or st["running"] != getattr(self, "_soundWasRunning", None):
                 self.soundStatusLabel.setText(text)
+                self._soundShown, self._soundNoteSince = text, None
             self._soundWasRunning = st["running"]
             self.soundStopButton.setEnabled(st["running"])
             levels = st["levels"] or {}
@@ -3501,7 +3645,11 @@ try: # try to load the GUI
                     self.checkLightTab(currentlySelectedRow) # if we're on CCT, check to see if this light can use extended values + on Prefs, update Prefs
 
                     # RECALL LAST SENT SETTING FOR THIS PARTICULAR LIGHT, IF A SETTING EXISTS
-                    if availableLights[currentlySelectedRow][3] != []: # if the last set parameters aren't empty
+                    # (not on the Sound tab: picking lights for "On selected" mustn't switch tabs or
+                    # send them the sliders' value, which would take them out of the sound layer)
+                    if self.ColorModeTabWidget.currentIndex() == self.TAB_SOUND:
+                        pass
+                    elif availableLights[currentlySelectedRow][3] != []: # if the last set parameters aren't empty
                         if availableLights[currentlySelectedRow][6] != False: # if the light is listed as being turned ON
                             sendValue = availableLights[currentlySelectedRow][3] # make the current "sendValue" the last set parameter so it doesn't re-send it on re-load
 
@@ -4224,6 +4372,8 @@ try: # try to load the GUI
                         customPresetsToWrite.append("presetName" + str(idx) + "=" + name)
                 for idx, ms in sorted(presetFades.items()):
                     customPresetsToWrite.append("presetFade" + str(idx) + "=" + str(ms))
+                for idx in sorted(presetSounds):
+                    customPresetsToWrite.append(presetSoundLine(idx))
 
                 # Determine if there's anything non-default to save
                 hasNonDefaultContent = len(customPresetsToWrite) > 1 or numOfPresets != 8
@@ -4707,6 +4857,13 @@ def recallCustomPreset(numOfPreset, updateGUI=True, loop=None):
             mainWindow.lightTable.setFocus() # set the focus to the light table, in order to show which rows are selected
             mainWindow.selectRows(changedLights) # select those rows affected by the lights above
 
+        # Lights the preset sets following a sound mode aren't written: their colour becomes what
+        # they return to when the sound stops (a write would take them out of the sound layer)
+        soundLights = _recallPresetSounds(numOfPreset) if presetSounds.get(numOfPreset) else []
+        if soundLights:
+            showEngine.fadeBase(soundLights, 0)
+            changedLights = [i for i in changedLights if i not in soundLights]
+
         # Fade in (the preset's own time, else the global Fade in): the compositor fades the lights
         # it can; the rest go the usual way. Always use the threadAction approach for those, it is
         # safe from both GUI and HTTP threads.
@@ -4733,6 +4890,8 @@ def savePresetsToFile():
                 customPresetsToWrite.append("presetName" + str(idx) + "=" + name)
         for idx, ms in sorted(presetFades.items()):
             customPresetsToWrite.append("presetFade" + str(idx) + "=" + str(ms))
+        for idx in sorted(presetSounds):
+            customPresetsToWrite.append(presetSoundLine(idx))
 
         hasNonDefaultContent = len(customPresetsToWrite) > 1 or numOfPresets != 8
         if hasNonDefaultContent:
@@ -4769,6 +4928,9 @@ def presetToEntries(presetIdx):
             e.update(mode="CCT", bri=100, temp=56)
         if m in (7, 8, 9):
             e["off"] = True  # snapshot of a light that was off; kept through edits
+        sound = (presetSounds.get(presetIdx) or {}).get(e["target"])
+        if sound and e["target"] != "-1":
+            e["sound"] = sound
         result.append(e)
     return result or [{"target": "-1", "mode": "CCT", "temp": globalCCTMax // 100, "bri": 100}]
 
@@ -4792,6 +4954,20 @@ def entriesToPreset(entries):
             params[0] += 3
         result.append([t, params])
     return result
+
+
+def entriesToSounds(entries):
+    """The sound assignments in editor entries: {target: sound mode} (global entries have none)."""
+    return {str(e["target"]): str(e["sound"]) for e in entries
+            if e.get("sound") and str(e.get("target", "-1")) != "-1"}
+
+
+def _setPresetSounds(idx, entries):
+    sounds = entriesToSounds(entries)
+    if sounds:
+        presetSounds[idx] = sounds
+    else:
+        presetSounds.pop(idx, None)
 
 
 def _presetsChanged():
@@ -4838,6 +5014,7 @@ def presetEditAction(action, body):
         except (TypeError, ValueError) as e:
             return {"success": False, "errors": ["bad entry: " + str(e)]}
         customLightPresets[idx] = data
+        _setPresetSounds(idx, entries)
         if "name" in body:
             name = str(body.get("name") or "").strip()[:20].replace("=", "")
             if name:
@@ -4987,6 +5164,14 @@ def saveCustomPreset(presetType, numOfPreset, selectedLights = []):
                 listConstructor.append(listBuilder(selectedLights[a]))
 
         customLightPresets[numOfPreset] = listConstructor
+        # lights following a sound mode are saved following it (their colour is what they return to)
+        following = soundModeOfLights()
+        lights = selectedLights or range(len(availableLights))
+        sounds = {entry[0]: following[i] for i, entry in zip(lights, listConstructor) if i in following}
+        if sounds:
+            presetSounds[numOfPreset] = sounds
+            return
+    presetSounds.pop(numOfPreset, None)
 
 def listBuilder(selectedLight):
     paramsListBuilder = [] # the cut-down list of parameters to return to the main preset constructor
@@ -5082,6 +5267,11 @@ def loadCustomPresets(presetsFilePath):
                         customLightPresets.append(getDefaultPreset(len(customLightPresets)))
             except ValueError:
                 pass
+        elif line.startswith("presetSound"):
+            try:
+                parsePresetSoundLine(line)
+            except (ValueError, IndexError):
+                pass
         elif line.startswith("presetFade"):
             try:
                 keyVal = line.split("=", 1)
@@ -5107,7 +5297,7 @@ def loadCustomPresets(presetsFilePath):
     # Filter out non-matching lines (and the numOfPresets/presetName lines)
     filteredPresets = []
     for line in customPresets:
-        if line.startswith("numOfPresets=") or line.startswith("presetName") or line.startswith("presetFade"):
+        if line.startswith(("numOfPresets=", "presetName", "presetFade", "presetSound")):
             continue
         if any(x in line for x in acceptable_arguments):
             filteredPresets.append("--" + line)
@@ -6662,10 +6852,14 @@ def processHTMLCommands(paramsList, loop):
             stopSound()
 
     elif paramsList[3] == "sound":
-        # sound=start|Mode, stop, mode|Mode
-        soundParts = str(paramsList[2]).split("|")
-        soundVerb = soundParts[0].strip().lower()
-        result = soundAction(soundVerb, {"mode": soundParts[1].strip() if len(soundParts) > 1 else None})
+        # sound=start|Mode|lights, stop|lights, mode|Mode|lights (lights optional)
+        soundParts = [p.strip() for p in str(paramsList[2]).split("|")]
+        soundVerb = soundParts[0].lower()
+        if soundVerb == "stop":
+            soundBody = {"lights": soundParts[1] if len(soundParts) > 1 else None}
+        else:
+            soundBody = {"mode": soundParts[1] if len(soundParts) > 1 else None, "lights": soundParts[2] if len(soundParts) > 2 else None}
+        result = soundAction(soundVerb, soundBody)
         if not result.get("success"):
             printDebugString("HTTP: sound " + soundVerb + " failed: " + "; ".join(result.get("errors", [result.get("error", "")])))
 
@@ -7852,9 +8046,10 @@ def soundAvailable():
 
 
 def loadAllSoundModes():
-    """Load every sound mode JSON file in light_prefs/sound_modes/."""
+    """Load every sound mode JSON file in light_prefs/sound_modes/, and the palettes."""
     global savedSoundModes
     savedSoundModes = {}
+    loadAllPalettes()
     if not os.path.isdir(soundModesDir):
         return
     for filename in sorted(os.listdir(soundModesDir)):
@@ -7867,6 +8062,85 @@ def loadAllSoundModes():
                 savedSoundModes[str(data["name"])] = data
         except (IOError, OSError, ValueError) as e:
             printDebugString("Could not load sound mode " + filename + ": " + str(e))
+
+
+def loadAllPalettes():
+    """Load every palette JSON file in light_prefs/palettes/ ({"name", "palette"})."""
+    global savedPalettes
+    savedPalettes = {}
+    if not os.path.isdir(palettesDir):
+        return
+    for filename in sorted(os.listdir(palettesDir)):
+        if not filename.lower().endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(palettesDir, filename), "r", encoding="utf-8") as f:
+                data = json.load(f)
+            palette, errors = show.parsePalette(data.get("palette") if isinstance(data, dict) else None)
+            if data.get("name") and not errors:
+                savedPalettes[str(data["name"])] = palette
+        except (IOError, OSError, ValueError, AttributeError) as e:
+            printDebugString("Could not load palette " + filename + ": " + str(e))
+
+
+def resolvePaletteName(name):
+    return next((key for key in savedPalettes if key.lower() == str(name).strip().lower()), None)
+
+
+def _paletteFilesNamed(name):
+    found = []
+    if os.path.isdir(palettesDir):
+        for filename in os.listdir(palettesDir):
+            path = os.path.join(palettesDir, filename)
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    if str(json.load(f).get("name", "")).lower() == str(name).lower():
+                        found.append(path)
+            except (IOError, OSError, ValueError, AttributeError):
+                continue
+    return found
+
+
+def savePalette(name, palette, overwrite=False):
+    """Save a palette as light_prefs/palettes/<name>.json."""
+    name = str(name or "").strip()
+    palette, errors = show.parsePalette(palette)
+    if not name:
+        errors.append("a palette needs a name")
+    if errors:
+        return {"success": False, "errors": errors}
+    existing = resolvePaletteName(name)
+    if existing is not None and not overwrite:
+        return {"success": False, "errors": ["a palette named " + repr(existing) + " exists; send \"overwrite\": true to replace it"]}
+    for path in _paletteFilesNamed(name):
+        os.remove(path)
+    os.makedirs(palettesDir, exist_ok=True)
+    safeName = "".join(c for c in name if c.isalnum() or c in " _-").strip() or "palette"
+    with open(os.path.join(palettesDir, safeName + ".json"), "w", encoding="utf-8") as f:
+        json.dump({"format": 1, "name": name, "palette": palette}, f, indent=2)
+    savedPalettes.pop(existing, None)
+    savedPalettes[name] = palette
+    return {"success": True, "palette": name, "errors": []}
+
+
+def deletePalette(name):
+    resolved = resolvePaletteName(name)
+    if resolved is None:
+        return False
+    for path in _paletteFilesNamed(resolved):
+        os.remove(path)
+    savedPalettes.pop(resolved)
+    return True
+
+
+def _paletteByName(params):
+    """params with a palette given by name swapped for its colours. Returns (params, error)."""
+    if not isinstance(params, dict) or not isinstance(params.get("palette"), str):
+        return params, None
+    resolved = resolvePaletteName(params["palette"])
+    if resolved is None:
+        return params, "no palette named " + repr(params["palette"])
+    return dict(params, palette=[dict(c) for c in savedPalettes[resolved]]), None
 
 
 def resolveSoundModeName(name):
@@ -7951,10 +8225,12 @@ def _rememberSound(**changes):
             printDebugString("Couldn't save the sound settings (" + str(e) + ")")
 
 
-def startSound(modeName=None, device=None, params=None, fadeIn=None, fadeOut=None):
-    """Start a sound mode on the sound layer (replacing the one playing), starting capture if
-    needed. modeName and device default to the last ones used; params change the mode's
-    top-level values for this play. Returns a dict with success and errors."""
+def startSound(modeName=None, device=None, params=None, fadeIn=None, fadeOut=None, lights=None):
+    """Start a sound mode on the sound layer, starting capture if needed. Without lights it
+    replaces whatever the layer plays and drives the mode's own targets; with lights (a target
+    such as "1;3" or "@rim") only those lights follow it, the rest of the layer playing on.
+    modeName and device default to the last ones used; params change the mode's top-level
+    values for this play. Returns a dict with success and errors."""
     ok, why = soundAvailable()
     if not ok:
         return {"success": False, "errors": [why]}
@@ -7964,36 +8240,62 @@ def startSound(modeName=None, device=None, params=None, fadeIn=None, fadeOut=Non
         return {"success": False, "errors": ["no sound mode named " + repr(modeName or soundMode)],
                 "available": sorted(savedSoundModes)}
     mode, errors, warns = buildSoundMode(savedSoundModes[resolved])
+    params, paletteError = _paletteByName(params)
+    if paletteError:
+        return {"success": False, "errors": [paletteError]}
     if mode is not None and params:
         mode, errors = show.soundModeWithParams(mode, params, seqFrameRate)
     if mode is None:
         return {"success": False, "errors": errors, "warnings": warns}
+    indexes = None
+    if lights not in (None, ""):
+        indexes = _showResolve(str(lights))
+        if not indexes:
+            return {"success": False, "errors": ["no light matches " + repr(str(lights))]}
     device = soundDevice if device is None else str(device)
     audioEngine.start(device)
-    player = show.SoundPlayer(mode, _showResolve, audioEngine.features)
-    if _fadeValue(fadeIn) is not None:
-        player.fadeInMs = _fadeValue(fadeIn)
-    if _fadeValue(fadeOut) is not None:
-        player.fadeOutMs = _fadeValue(fadeOut)
-    showEngine.playSound(player)
+    if indexes is None or not showEngine.assignSound(mode, indexes):
+        player = show.SoundPlayer(mode, _showResolve, audioEngine.features, indexes)
+        if _fadeValue(fadeIn) is not None:
+            player.fadeInMs = _fadeValue(fadeIn)
+        if _fadeValue(fadeOut) is not None:
+            player.fadeOutMs = _fadeValue(fadeOut)
+        showEngine.playSound(player)
     _rememberSound(mode=resolved, device=device)
-    printDebugString("Sound mode '" + resolved + "' playing")
+    printDebugString("Sound mode '" + resolved + "' playing" + ("" if indexes is None else " on lights " + str(lights)))
     return {"success": True, "mode": resolved, "errors": [], "warnings": warns}
 
 
-def stopSound():
-    """Stop the sound mode (its lights fade back) and the capture."""
-    stopped = showEngine.stopLayer(show.LAYER_SOUND) if showEngine is not None else False
+def stopSound(lights=None):
+    """Stop the sound layer (its lights fade back) and the capture; with lights (a target),
+    only those lights stop following sound, and the layer stops when none are left."""
+    if lights not in (None, ""):
+        indexes = _showResolve(str(lights))
+        result = showEngine.releaseSound(indexes) if showEngine is not None and indexes else None
+        if result != "stopped":
+            return result == "released"
+        stopped = True
+    else:
+        stopped = showEngine.stopLayer(show.LAYER_SOUND) if showEngine is not None else False
     audioEngine.stop()
     return stopped
 
 
-def setSoundParams(params):
-    """Change the playing mode's top-level values (not saved)."""
+def setSoundParams(params, modeName=None):
+    """Change a playing mode's top-level values (not saved): the named one, else the latest
+    started."""
     player = showEngine.soundPlayer() if showEngine is not None else None
     if player is None:
         return {"success": False, "errors": ["no sound mode is playing"]}
-    mode, errors = show.soundModeWithParams(player.mode, params, seqFrameRate)
+    with showEngine.lock:
+        base = player.mode if modeName in (None, "") else \
+            next((v.mode for v in player.voices if v.mode.name.lower() == str(modeName).lower()), None)
+    if base is None:
+        return {"success": False, "errors": [repr(str(modeName)) + " isn't playing"]}
+    params, paletteError = _paletteByName(params)
+    if paletteError:
+        return {"success": False, "errors": [paletteError]}
+    mode, errors = show.soundModeWithParams(base, params, seqFrameRate)
     if mode is None:
         return {"success": False, "errors": errors}
     with showEngine.lock:
@@ -8011,7 +8313,38 @@ def setSoundDevice(device):
 
 def _soundParams(mode):
     return {"sensitivity": mode.sensitivity, "range_db": mode.rangeDb, "floor": mode.floor, "ceiling": mode.ceiling,
-            "smoothing": mode.smoothing, "fps": mode.fps, "palette": mode.palette}
+            "smoothing": mode.smoothing, "cycle_s": mode.cycleS, "fps": mode.fps, "palette": mode.palette}
+
+
+def soundModeOfLights():
+    """{light index: name of the sound mode it follows} for the sound layer playing now."""
+    player = showEngine.soundPlayer() if showEngine is not None else None
+    if player is None:
+        return {}
+    with showEngine.lock:
+        return {i: v.mode.name for v in player.voices for lights in v.partLights for i in lights}
+
+
+def _recallPresetSounds(numOfPreset):
+    """Start a snapshot preset's sound assignments. Returns the light indexes now following sound."""
+    found = []
+    for target, modeName in (presetSounds.get(numOfPreset) or {}).items():
+        result = startSound(modeName, lights=target)
+        if result["success"]:
+            found += [i for i in _showResolve(target) if i not in found]
+        else:
+            printDebugString("Preset " + str(numOfPreset + 1) + ": " + target + " not following " + modeName + ": " + "; ".join(result["errors"]))
+    return found
+
+
+def _soundAssignments(player):
+    """Which mode each light follows, lights by the ID HTTP clients use (null: the mode's own targets)."""
+    def lightID(idx):
+        prefID = availableLights[idx][8] if idx < len(availableLights) and len(availableLights[idx]) > 8 else 0
+        return prefID if prefID > 0 else idx + 1
+    with showEngine.lock:
+        found = player.assignments()
+    return [{"mode": a["mode"], "lights": None if a["lights"] is None else [lightID(i) for i in a["lights"]]} for a in found]
 
 
 def soundStatus():
@@ -8025,6 +8358,7 @@ def soundStatus():
     return {"available": ok, "reason": why, "running": player is not None,
             "mode": player.name if player is not None else None,
             "params": _soundParams(player.mode) if player is not None else None,
+            "assignments": _soundAssignments(player) if player is not None else [],
             "lastMode": soundMode, "device": soundDevice, "deviceName": audioEngine.deviceName if audioEngine.running else "",
             "capturing": audioEngine.running, "error": audioEngine.error, "levels": levels}
 
@@ -8033,15 +8367,16 @@ def soundAction(action, body):
     """POST /NeewerLux/sound (docs/HTTP_API.md)."""
     if action == "start":
         return startSound(body.get("mode"), body.get("device"), body.get("params"),
-                          body.get("fade_in_ms"), body.get("handback_fade_ms"))
+                          body.get("fade_in_ms"), body.get("handback_fade_ms"), body.get("lights"))
     if action == "stop":
-        return {"success": True, "stopped": stopSound()}
+        return {"success": True, "stopped": stopSound(body.get("lights"))}
     if action == "mode":
         if showEngine is None or showEngine.soundPlayer() is None:
             return {"success": False, "errors": ["no sound mode is playing; use start"]}
-        return startSound(body.get("mode"), None, body.get("params"), body.get("fade_in_ms"), body.get("handback_fade_ms"))
+        return startSound(body.get("mode"), None, body.get("params"), body.get("fade_in_ms"), body.get("handback_fade_ms"),
+                          body.get("lights"))
     if action == "set":
-        return setSoundParams(body.get("params"))
+        return setSoundParams(body.get("params"), body.get("mode"))
     if action == "device":
         return setSoundDevice(body.get("device", ""))
     if action == "status":
@@ -8050,10 +8385,19 @@ def soundAction(action, body):
         ok, why = audio.captureAvailable()
         if not ok:
             return {"success": False, "errors": [why]}
+        if audioEngine.error:
+            audioEngine.retry()
         try:
             return {"success": True, "devices": audio.listDevices(), "device": soundDevice}
         except Exception as e:  # the audio system refused to list devices
             return {"success": False, "errors": [str(e)]}
+    if action == "palettes":
+        return {"success": True, "palettes": [{"name": n, "palette": p} for n, p in sorted(savedPalettes.items())]}
+    if action == "save_palette":
+        return savePalette(body.get("name"), body.get("palette"), bool(body.get("overwrite", False)))
+    if action == "delete_palette":
+        ok = deletePalette(body.get("name", ""))
+        return {"success": ok, "errors": [] if ok else ["no palette named " + repr(body.get("name", ""))]}
     if action in ("list", "reload"):
         if action == "reload":
             loadAllSoundModes()

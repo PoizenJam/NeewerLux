@@ -72,6 +72,8 @@ def checkSoundTab(nl, app, win, rig):
     nl.audioEngine.sourceFactory = lambda device: nl.audio.ArraySource(signal, name="smoke signal")
     win.soundShowAvailability()
     assert not win.soundControls.isHidden(), "the tab's controls show when sound modes can run"
+    tabs = win.ColorModeTabWidget
+    assert win.TAB_SOUND == tabs.indexOf(win.ANM) + 1 and win.TAB_ANIM == win.TAB_SOUND + 1, "Sound sits after Scene"
     win.ColorModeTabWidget.setCurrentIndex(win.TAB_SOUND)
     win.show()
     win.soundRefreshModes("Pulse")
@@ -89,25 +91,45 @@ def checkSoundTab(nl, app, win, rig):
     hueSpin = win.soundPaletteBox.itemAt(0).widget().findChildren(nl.SpinBoxWithButtons)[0]
     hueSpin.setValue(120)
     assert player.mode.palette[0]["hue"] == 120, "palette edits apply live"
+    combo = win.soundPalettePresetCombo
+    assert combo.findData("Neon") > 0, "the saved palettes are listed"
+    win.soundPalettePresetChosen(combo.findData("Neon"))
+    assert player.mode.palette == nl.savedPalettes["Neon"] and win.soundPaletteBox.count() == 3, "loading a saved palette applies live"
+    colourCombo = win.soundPartsTable.cellWidget(0, 2)
+    colourCombo.setCurrentIndex(colourCombo.findData("cycle"))
+    colourCombo.activated.emit(colourCombo.currentIndex())
+    win.soundCycleSpin.setValue(9)
+    assert player.mode.parts[0]["colour"] == "cycle" and player.mode.cycleS == 9, "Cycles and its time apply live"
+    win.soundCycleSpin.setValue(2)
+    assert win.soundCycleSpin.value() == 4, "the cycle can't go under 4 s"
     win.soundAddPartRow({"target": "@fill", "drive": "high", "colour": 0}, True)
-    assert [1] in player.partLights, "an added part drives its lights: %r" % player.partLights
+    assert 1 in player.lights(), "an added part drives its lights: %r" % player.lights()
     win.soundPaletteKind.setCurrentIndex(1)
     win.soundPaletteKindChosen(1)
     assert player.mode.palette == [{"temp": 2900}, {"temp": 4300}], "switching to whites applies live"
     pumpUntil(app, lambda: (nl.soundStatus()["levels"] or {}).get("level", 0) > 0, 3, "levels")
-    win.soundRefreshStatus()
-    assert "Playing Pulse" in win.soundStatusLabel.text() and "smoke signal" in win.soundStatusLabel.text(), win.soundStatusLabel.text()
+    # the "Loaded palette" note gives way to the status after 4 s
+    pumpUntil(app, lambda: win.soundRefreshStatus() or "Playing Pulse" in win.soundStatusLabel.text(), 6, "the status after the note")
+    assert "smoke signal" in win.soundStatusLabel.text(), win.soundStatusLabel.text()
     assert any(bar.value() > 0 for bar in win.soundMeters.values()), "the meters move"
     assert win.soundDeviceCombo.count() >= 1 and win.prefsSoundDeviceCombo.count() == win.soundDeviceCombo.count()
     win.resize(1100, 760)
     app.processEvents()
+    lightsCol = win.soundPartsTable.columnWidth(0)
+    assert lightsCol >= 180, "the Lights column has room for a target: %d px" % lightsCol
     shot = os.path.join(rig.workdir, "sound_tab.png")
     win.grab().save(shot)
+    win.soundPartsTable.grab().save(os.path.join(rig.workdir, "sound_parts.png"))
     print("sound tab screenshot:", shot)
     realGet, realQ = nl.QInputDialog.getText, nl.QMessageBox.question
     nl.QInputDialog.getText = staticmethod(lambda *a, **k: ("Smoke Sound", True))
     nl.QMessageBox.question = staticmethod(lambda *a, **k: nl.QMessageBox.Yes)
     try:
+        win.soundPaletteSave()
+        assert nl.savedPalettes.get("Smoke Sound") == [{"temp": 2900}, {"temp": 4300}], "save a palette"
+        assert win.soundPalettePresetCombo.currentData() == "Smoke Sound"
+        win.soundPaletteDelete()
+        assert "Smoke Sound" not in nl.savedPalettes, "delete a palette"
         win.soundSaveAs()
         assert "Smoke Sound" in nl.savedSoundModes and win.soundModeCombo.currentText() == "Smoke Sound", "save as"
         saved = nl.savedSoundModes["Smoke Sound"]
@@ -117,6 +139,17 @@ def checkSoundTab(nl, app, win, rig):
         assert "Smoke Sound" not in nl.savedSoundModes, "delete"
     finally:
         nl.QInputDialog.getText, nl.QMessageBox.question = realGet, realQ
+    win.soundRefreshModes("Colour Drift")
+    tabs.setCurrentIndex(win.TAB_SOUND)
+    win.lightTable.clearSelection()
+    win.selectRows([0])
+    win.selectionChanged()
+    assert tabs.currentIndex() == win.TAB_SOUND, "picking a light on the Sound tab stays there"
+    win.soundStartSelectedButton.click()
+    pumpUntil(app, lambda: nl.soundStatus()["assignments"][-1:] == [{"mode": "Colour Drift", "lights": [1]}], 3,
+              "the selected light on Colour Drift: %s, %s" % (win.soundStatusLabel.text(), nl.soundStatus()["assignments"]))
+    win.soundRefreshStatus()
+    assert "Colour Drift on 1" in win.soundStatusLabel.text(), win.soundStatusLabel.text()
     nl.stopSound()
     win.soundRefreshStatus()
     assert nl.showEngine.soundPlayer() is None and not win.soundStopButton.isEnabled()
@@ -285,7 +318,7 @@ def main():
     # Spin boxes: Qt's own arrows end up under the text area on Windows, and Qt 6.12 squashes the
     # text of NoButtons boxes, so every spin box hides its arrows through the theme and keeps a
     # usable text area. Walks the main window, every editor and the modal dialogs (exec intercepted).
-    from PySide6.QtWidgets import QAbstractSpinBox, QStyle, QStyleOptionSpinBox
+    from PySide6.QtWidgets import QAbstractSpinBox, QStyle, QStyleOptionSpinBox, QComboBox
     from PySide6.QtCore import QRect
     from neewerlux_ui import SpinBoxWithButtons, DoubleSpinBoxWithButtons
 
@@ -314,6 +347,9 @@ def main():
     def inspect(dlg):
         seen.append(dlg.windowTitle())
         native.extend(nativeSpins(dlg))
+        if dlg.windowTitle().startswith("Edit Preset"):
+            sound = [c for c in dlg.findChildren(QComboBox) if c.findData("Pulse") >= 0]
+            assert sound and sound[0].itemData(0) == "", "the preset editor offers a sound mode per light"
         return 0
     nl.pyside_exec = inspect
     try:

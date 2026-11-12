@@ -938,8 +938,14 @@ class Ui_MainWindow(object):
         self.soundModeCombo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         modeRow.addWidget(self.soundModeCombo, 1)
         self.soundStartButton = QPushButton("\u25B6 Start")
+        self.soundStartButton.setToolTip("Play this mode on the lights it names, replacing whatever sound is playing")
+        self.soundStartSelectedButton = QPushButton("On selected")
+        self.soundStartSelectedButton.setToolTip("Only the lights selected in the light list follow this mode;\n"
+                                                 "other lights keep following whatever sound they follow")
         self.soundStopButton = QPushButton("\u25A0 Stop")
+        self.soundStopButton.setToolTip("Stop sound on every light")
         modeRow.addWidget(self.soundStartButton)
+        modeRow.addWidget(self.soundStartSelectedButton)
         modeRow.addWidget(self.soundStopButton)
         soundLeft.addLayout(modeRow)
         self.soundDescLabel = QLabel("")
@@ -965,23 +971,49 @@ class Ui_MainWindow(object):
             self.soundSliders[key] = (slider, value)
         soundLeft.addLayout(soundGrid)
 
+        palLabel = QLabel("Palette: the colours this mode uses. Each group of lights below picks one of them, "
+                          "or moves through them (cycling, on the beat, or with the sound).")
+        palLabel.setWordWrap(True)
+        soundLeft.addWidget(palLabel)
         palRow = QHBoxLayout()
-        palRow.addWidget(QLabel("Palette:"))
         self.soundPaletteKind = QComboBox()
         self.soundPaletteKind.addItems(["Colours", "White (Kelvin)"])
         self.soundPaletteKind.setToolTip("Colours (hue and saturation) or whites (colour temperature) for CCT-only lights")
         palRow.addWidget(self.soundPaletteKind)
         self.soundPaletteAdd = QPushButton("+ Colour")
         palRow.addWidget(self.soundPaletteAdd)
+        palRow.addWidget(QLabel("Cycle:"))
+        self.soundCycleSpin = SpinBoxWithButtons(None, 4, 600, 20, " s")
+        self.soundCycleSpin.setToolTip("How long lights set to \"Cycles\" take to go round the whole palette\n"
+                                       "(one colour goes once round the colour wheel)")
+        palRow.addWidget(self.soundCycleSpin)
         palRow.addStretch(1)
         soundLeft.addLayout(palRow)
+        palPresetRow = QHBoxLayout()
+        palPresetRow.addWidget(QLabel("Saved palettes:"))
+        self.soundPalettePresetCombo = QComboBox()
+        self.soundPalettePresetCombo.setToolTip("Load a saved palette into this mode (replacing its colours)")
+        self.soundPalettePresetCombo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        palPresetRow.addWidget(self.soundPalettePresetCombo, 1)
+        self.soundPaletteSaveButton = QPushButton("Save palette...")
+        self.soundPaletteSaveButton.setToolTip("Save these colours as a palette to use in other modes")
+        self.soundPaletteDeleteButton = QPushButton("Delete palette")
+        palPresetRow.addWidget(self.soundPaletteSaveButton)
+        palPresetRow.addWidget(self.soundPaletteDeleteButton)
+        soundLeft.addLayout(palPresetRow)
         self.soundPaletteBox = QVBoxLayout(); self.soundPaletteBox.setSpacing(2)
         soundLeft.addLayout(self.soundPaletteBox)
 
         soundLeft.addWidget(QLabel("Lights and what drives them:"))
         self.soundPartsTable = QTableWidget(0, 5)
-        self.soundPartsTable.setHorizontalHeaderLabels(["Lights", "Brightness follows", "Colour", "Chase", ""])
-        self.soundPartsTable.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.soundPartsTable.setHorizontalHeaderLabels(["Lights", "Brightness", "Colour", "Chase", ""])
+        partsHeader = self.soundPartsTable.horizontalHeader()
+        partsHeader.setSectionResizeMode(0, QHeaderView.Stretch)
+        for col in (1, 2, 3):
+            partsHeader.setSectionResizeMode(col, QHeaderView.ResizeToContents)
+        partsHeader.setSectionResizeMode(4, QHeaderView.Fixed)
+        self.soundPartsTable.setColumnWidth(4, 34)
+        self.soundPartsTable.horizontalHeaderItem(1).setToolTip("What drives these lights' brightness")
         self.soundPartsTable.verticalHeader().setVisible(False)
         self.soundPartsTable.setMinimumHeight(150)
         soundLeft.addWidget(self.soundPartsTable)
@@ -1001,7 +1033,9 @@ class Ui_MainWindow(object):
         soundLeft.addStretch(1)
         soundLay.addWidget(soundLeftScroll, 3)
 
-        soundRight = QVBoxLayout(); soundRight.setSpacing(4)
+        soundRightBox = QWidget()
+        soundRightBox.setMaximumWidth(230)  # the meters need little room; the parts table needs it
+        soundRight = QVBoxLayout(soundRightBox); soundRight.setSpacing(4); soundRight.setContentsMargins(0, 0, 0, 0)
         self.soundStatusLabel = QLabel("Not playing")
         self.soundStatusLabel.setWordWrap(True)
         soundRight.addWidget(self.soundStatusLabel)
@@ -1017,8 +1051,9 @@ class Ui_MainWindow(object):
         self.soundTempoLabel = QLabel("Tempo: -")
         soundRight.addWidget(self.soundTempoLabel)
         soundRight.addStretch(1)
-        soundLay.addLayout(soundRight, 2)
-        self.ColorModeTabWidget.addTab(self.soundTab, "Sound")
+        soundLay.addWidget(soundRightBox, 1)
+        # after Scene: sound is a bed under animations and sequences
+        self.ColorModeTabWidget.insertTab(self.ColorModeTabWidget.indexOf(self.animTab), self.soundTab, "Sound")
 
         # --- LIGHT PREFS ---
         # Two columns: the light itself on the left, its part in shows on the right
@@ -1421,7 +1456,7 @@ copied between installations.</p>
 <tr><td><b>list / list_json</b></td><td>List lights, presets, and animations</td></tr>
 <tr><td><b>animate=Name|...|revert|layer|queue|target</b></td><td>Optional layer (override, effect, show), queue mode (queue, replace) and target such as <code>@rim</code></td></tr>
 <tr><td><b>stop_layer=effect</b></td><td>Stop a layer (<code>effect_all</code> also clears the effect queue; also <code>show</code>, <code>sound</code>, <code>all</code>)</td></tr>
-<tr><td><b>sound=start|Pulse</b></td><td>Start a sound mode (lights following live audio); also <code>mode|Name</code>, <code>stop</code></td></tr>
+<tr><td><b>sound=start|Pulse</b></td><td>Start a sound mode (lights following live audio); also <code>mode|Name</code>, <code>stop</code>; add <code>|1;3</code> for some lights only (<code>stop|3</code>)</td></tr>
 <tr><td><b>sequence=play|Name</b></td><td>Play a sequence; also <code>pause</code>, <code>resume</code>, <code>stop</code></td></tr>
 <tr><td><b>status_json</b></td><td>Layers, sequence position, and each light's layer and approximate colour</td></tr>
 </table>

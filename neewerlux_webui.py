@@ -170,7 +170,7 @@ a:hover { text-decoration: underline; }
 .snd-row input[type=number] { width:64px; }
 .snd-swatch { display:inline-block; width:18px; height:18px; border:1px solid #666; border-radius:3px; }
 .snd-part { flex-wrap:wrap; border-top:1px solid var(--border); padding-top:3px; }
-.snd-part input[list] { flex:2; min-width:150px; }
+.snd-part input[list] { flex:1 1 100%; }  /* a target gets its own line, so a long one is readable */
 .snd-meter { display:flex; align-items:center; gap:6px; font-size:11px; margin:2px 0; }
 .snd-meter span { min-width:120px; color:var(--muted); }
 .snd-meter > div { flex:1; height:8px; background:var(--border); border-radius:4px; overflow:hidden; }
@@ -552,6 +552,48 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
         </div>
     </div>
 
+    <!-- SOUND -->
+    <div class="card" id="soundCard">
+        <div class="card-header">Sound</div>
+        <div class="card-body">
+            <div id="sndUnavailable" style="display:none;color:var(--muted);font-size:12px"></div>
+            <div id="sndControls">
+                <div class="snd-row"><label>Listen to</label><select id="sndDevice" onchange="sndSetDevice(this.value)" title="What an output plays (loopback), or an input such as a microphone or audio interface"></select>
+                    <button class="btn small" onclick="sndDevices()" title="List the audio devices again">Refresh</button></div>
+                <div class="snd-row"><label>Mode</label><select id="sndMode" onchange="sndModeChosen(this.value)"></select></div>
+                <div id="sndDesc" style="color:var(--muted);font-size:11px;margin:2px 0 6px"></div>
+                <div class="btn-row">
+                    <button class="btn success" onclick="sndStart()" title="Play this mode on the lights it names, replacing whatever sound is playing">&#x25B6; Start</button>
+                    <button class="btn" onclick="sndStart(true)" title="Only the lights chosen as Target in the control panel follow this mode; other lights keep following whatever sound they follow">On target lights</button>
+                    <button class="btn danger" id="sndStopBtn" onclick="sndStop()">&#x25A0; Stop</button>
+                </div>
+                <div id="sndStatus" style="padding:6px 0;font-size:12px;color:var(--accent);font-weight:600;text-align:center">Not playing</div>
+                <div id="sndMeters"></div>
+                <div id="sndTempo" style="font-size:12px;color:var(--muted);margin-bottom:6px">Tempo: -</div>
+                <div id="sndSliders"></div>
+                <div style="color:var(--muted);font-size:11px;margin:6px 0 2px">Palette: the colours this mode uses. Each group of lights below picks one of them, or moves through them (cycling, on the beat, or with the sound).</div>
+                <div class="snd-row"><label>Palette</label><select id="sndPalKind" onchange="sndPaletteKind(this.value)"><option value="hsi">Colours</option><option value="cct">White (Kelvin)</option></select>
+                    <button class="btn small" onclick="sndPaletteAdd()">+ Colour</button>
+                    <span title="How long lights set to Cycles take to go round the whole palette (one colour goes once round the colour wheel)">Cycle <input type="number" id="sndCycle" min="4" max="600" value="20" onchange="sndCycle(this.value)"> s</span></div>
+                <div class="snd-row"><label>Saved</label><select id="sndPalPreset" onchange="sndPalPresetChosen(this.value)" title="Load a saved palette into this mode (replacing its colours)"></select>
+                    <button class="btn small" onclick="sndPalSave()" title="Save these colours as a palette to use in other modes">Save palette</button>
+                    <button class="btn small" onclick="sndPalDelete()">Delete</button></div>
+                <div id="sndPalette"></div>
+                <div style="font-size:12px;margin:6px 0 2px">Lights and what drives them</div>
+                <div id="sndParts"></div>
+                <datalist id="sndTargets"><option value="@rim;@background;@practical"><option value="@all"><option value="@key"><option value="@fill"><option value="@rim"><option value="@background"><option value="@practical"><option value="@front"><option value="@back"><option value="@left"><option value="@right"><option value="@high"><option value="@low"></datalist>
+                <div class="btn-row" style="margin-top:6px">
+                    <button class="btn small" onclick="sndPartAdd()" title="Add a group of lights (by role, position or number)">+ Lights</button>
+                    <button class="btn small" onclick="sndSave()">Save</button>
+                    <button class="btn small" onclick="sndSaveAs()">Save as</button>
+                    <button class="btn small" onclick="sndRevert()" title="Go back to the saved mode">Revert</button>
+                    <button class="btn small" onclick="sndDelete()">Delete</button>
+                </div>
+                <div style="color:var(--muted);font-size:11px;margin-top:8px">A sound mode plays under sequences and effects. A preset or slider on one of its lights takes that light out (sound stops when no lights are left); switching a light off takes it out until it is switched on.</div>
+            </div>
+        </div>
+    </div>
+
     <!-- ANIMATIONS -->
     <div class="card">
         <div class="card-header">Animations</div>
@@ -626,42 +668,6 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
                 <button class="btn small" onclick="seqDelete()">Delete</button>
             </div>
             <div style="color:var(--muted);font-size:11px;margin-top:8px">Sliders and presets don't interrupt a playing sequence: they become what the lights return to when it ends.</div>
-        </div>
-    </div>
-
-    <!-- SOUND -->
-    <div class="card" id="soundCard">
-        <div class="card-header">Sound</div>
-        <div class="card-body">
-            <div id="sndUnavailable" style="display:none;color:var(--muted);font-size:12px"></div>
-            <div id="sndControls">
-                <div class="snd-row"><label>Listen to</label><select id="sndDevice" onchange="sndSetDevice(this.value)" title="What an output plays (loopback), or an input such as a microphone or audio interface"></select>
-                    <button class="btn small" onclick="sndDevices()" title="List the audio devices again">Refresh</button></div>
-                <div class="snd-row"><label>Mode</label><select id="sndMode" onchange="sndModeChosen(this.value)"></select></div>
-                <div id="sndDesc" style="color:var(--muted);font-size:11px;margin:2px 0 6px"></div>
-                <div class="btn-row">
-                    <button class="btn success" onclick="sndStart()">&#x25B6; Start</button>
-                    <button class="btn danger" id="sndStopBtn" onclick="sndStop()">&#x25A0; Stop</button>
-                </div>
-                <div id="sndStatus" style="padding:6px 0;font-size:12px;color:var(--accent);font-weight:600;text-align:center">Not playing</div>
-                <div id="sndMeters"></div>
-                <div id="sndTempo" style="font-size:12px;color:var(--muted);margin-bottom:6px">Tempo: -</div>
-                <div id="sndSliders"></div>
-                <div class="snd-row"><label>Palette</label><select id="sndPalKind" onchange="sndPaletteKind(this.value)"><option value="hsi">Colours</option><option value="cct">White (Kelvin)</option></select>
-                    <button class="btn small" onclick="sndPaletteAdd()">+ Colour</button></div>
-                <div id="sndPalette"></div>
-                <div style="font-size:12px;margin:6px 0 2px">Lights and what drives them</div>
-                <div id="sndParts"></div>
-                <datalist id="sndTargets"><option value="@rim;@background;@practical"><option value="@all"><option value="@key"><option value="@fill"><option value="@rim"><option value="@background"><option value="@practical"><option value="@front"><option value="@back"><option value="@left"><option value="@right"><option value="@high"><option value="@low"></datalist>
-                <div class="btn-row" style="margin-top:6px">
-                    <button class="btn small" onclick="sndPartAdd()" title="Add a group of lights (by role, position or number)">+ Lights</button>
-                    <button class="btn small" onclick="sndSave()">Save</button>
-                    <button class="btn small" onclick="sndSaveAs()">Save as</button>
-                    <button class="btn small" onclick="sndRevert()" title="Go back to the saved mode">Revert</button>
-                    <button class="btn small" onclick="sndDelete()">Delete</button>
-                </div>
-                <div style="color:var(--muted);font-size:11px;margin-top:8px">A sound mode plays under sequences and effects. A preset or slider on one of its lights stops it; switching a light off takes just that light out.</div>
-            </div>
         </div>
     </div>
 
@@ -823,10 +829,12 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
             </div>
             <div class="api-section">
                 <h3>Sound modes</h3>
-                <div class="api-desc">Lights following live audio: start, switch, stop (GET)</div>
+                <div class="api-desc">Lights following live audio: start, switch, stop, optionally on some lights only (GET)</div>
                 <div class="api-code">GET /NeewerLux/doAction?sound=start|Pulse</div>
-                <div class="api-desc">JSON API: start, stop, mode, set, device, devices, status (with live levels and tempo), list, get, save, delete, validate, reload</div>
-                <div class="api-code">POST /NeewerLux/sound {"action":"set","params":{"sensitivity":1.5}}</div>
+                <div class="api-code">GET /NeewerLux/doAction?sound=start|Colour Drift|1;3</div>
+                <div class="api-code">GET /NeewerLux/doAction?sound=stop|3</div>
+                <div class="api-desc">JSON API: start, stop, mode, set, device, devices, status (with live levels and tempo), list, get, save, delete, validate, reload, palettes, save_palette, delete_palette</div>
+                <div class="api-code">POST /NeewerLux/sound {"action":"set","params":{"sensitivity":1.5,"palette":"Neon"}}</div>
             </div>
             <div class="api-section">
                 <h3>Editing</h3>
@@ -880,7 +888,7 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
             <label>Fade in (ms)</label><span><input type="number" id="peFade" min="-1" max="10000" step="100" style="width:110px"> <span class="hint" style="display:inline">-1 = the global Fade in</span></span>
         </div>
         <div class="tl-hint">One entry for all lights makes a global preset (it applies to whichever lights you recall it on). Entries for individual lights make a snapshot.</div>
-        <table class="edit-table"><thead><tr><th>#</th><th>Light</th><th>Mode</th><th>Values</th><th></th></tr></thead><tbody id="peRows"></tbody></table>
+        <table class="edit-table"><thead><tr><th>#</th><th>Light</th><th>Mode</th><th>Values</th><th title="Recalling the preset sets this light following a sound mode; its colour is what it returns to when the sound stops. Single lights only.">Sound</th><th></th></tr></thead><tbody id="peRows"></tbody></table>
         <div class="toolbar" style="margin-top:8px">
             <button class="btn small" onclick="peAdd()">+ Entry</button>
             <button class="btn small" onclick="peDup()">Duplicate</button>
@@ -1836,7 +1844,8 @@ let pe = null;
 async function peOpen(idx) {
     const d = await postJSON('/NeewerLux/presets', {action: 'get', index: idx});
     if (!d.success) { logMsg('Can\'t open preset ' + idx + ': ' + errText(d), 'err'); return; }
-    pe = {index: idx, entries: JSON.parse(JSON.stringify(d.preset.entries)), sel: 0};
+    const modes = await postJSON('/NeewerLux/sound', {action: 'list'});
+    pe = {index: idx, entries: JSON.parse(JSON.stringify(d.preset.entries)), sel: 0, soundModes: modes.success ? modes.modes.map(m => m.name) : []};
     document.getElementById('peTitle').textContent = 'Edit preset ' + idx;
     document.getElementById('peName').value = d.preset.name || '';
     document.getElementById('peFade').value = d.preset.fade_ms == null ? -1 : d.preset.fade_ms;
@@ -1855,12 +1864,18 @@ function peRender() {
     rows.innerHTML = pe.entries.map((e, i) => '<tr data-i="' + i + '"' + (i === pe.sel ? ' class="selected"' : '') + '>'
         + '<td>' + (i + 1) + '</td><td><select class="pe-target">' + lightOptions(e.target, true) + '</select></td>'
         + '<td><select class="pe-mode">' + ['CCT', 'HSI', 'Scene'].map(m => '<option' + ((e.mode || 'CCT') === m ? ' selected' : '') + '>' + m + '</option>').join('') + '</select></td>'
-        + '<td>' + peValues(e) + '</td><td>' + (e.off ? '<span title="This light was off when the snapshot was taken" style="color:var(--muted)">off</span>' : '') + '</td></tr>').join('');
+        + '<td>' + peValues(e) + '</td><td>' + peSoundSelect(e) + '</td><td>' + (e.off ? '<span title="This light was off when the snapshot was taken" style="color:var(--muted)">off</span>' : '') + '</td></tr>').join('');
     rows.querySelectorAll('tr').forEach(tr => {
         const i = +tr.dataset.i;
         tr.onclick = () => { if (pe.sel !== i) { peRead(); pe.sel = i; rows.querySelectorAll('tr').forEach(r => r.classList.toggle('selected', +r.dataset.i === i)); } };
-        tr.querySelectorAll('input,select').forEach(el => el.onchange = () => { peRead(); if (el.classList.contains('pe-mode')) peRender(); });
+        tr.querySelectorAll('input,select').forEach(el => el.onchange = () => { peRead(); if (el.classList.contains('pe-mode') || el.classList.contains('pe-target')) peRender(); });
     });
+}
+function peSoundSelect(e) {
+    if (String(e.target) === '-1') return '<span style="color:var(--muted)" title="Only single lights can follow a sound mode from a preset">-</span>';
+    const names = pe.soundModes.slice();
+    if (e.sound && !names.includes(e.sound)) names.push(e.sound);
+    return '<select class="pe-sound"><option value="">None</option>' + names.map(n => '<option value="' + esc(n) + '"' + (e.sound === n ? ' selected' : '') + '>' + esc(n) + '</option>').join('') + '</select>';
 }
 function peRead() {
     // table to entries
@@ -1876,6 +1891,7 @@ function peRead() {
             n.bri = e.bri != null ? e.bri : 100;
         }
         if (e.off) n.off = true;
+        if (q('pe-sound') && q('pe-sound').value && String(n.target) !== '-1') n.sound = q('pe-sound').value;
         pe.entries[i] = n;
     });
 }
@@ -2943,6 +2959,10 @@ const SND_DRIVES = [['level', 'Level'], ['low', 'Bass'], ['mid', 'Mids'], ['high
 const SND_METERS = [['level', 'Level'], ['low', 'Bass'], ['mid', 'Mids'], ['high', 'Treble'], ['centroid', 'Brightness of sound']];
 async function sndPost(body) { return postJSON('/NeewerLux/sound', body); }
 function sndPlaying() { const s = lastStatus && lastStatus.sound; return s && s.running ? s.mode : null; }
+function sndIsPlaying(name) {
+    const s = lastStatus && lastStatus.sound;
+    return !!(s && s.running && (s.assignments || []).some(a => a.mode.toLowerCase() === String(name).toLowerCase()));
+}
 async function sndLoadModes(select) {
     const d = await sndPost({action: 'list'});
     const sel = document.getElementById('sndMode');
@@ -2965,20 +2985,20 @@ async function sndModeChosen(name) {
 }
 function sndEditable() {
     const out = {};
-    ['sensitivity', 'range_db', 'floor', 'ceiling', 'smoothing', 'palette', 'parts'].forEach(k => { if (sndDraft[k] !== undefined) out[k] = sndDraft[k]; });
+    ['sensitivity', 'range_db', 'floor', 'ceiling', 'smoothing', 'palette', 'cycle_s', 'parts'].forEach(k => { if (sndDraft[k] !== undefined) out[k] = sndDraft[k]; });
     return out;
 }
 let sndLiveChain = Promise.resolve(), sndLivePending = null;
 function sndLive(params) {
     // edits show at once when the mode being edited is the one playing. They go one request at
     // a time (the server could apply concurrent ones out of order), merged while one is out.
-    if (!sndDraft || (sndPlaying() || '').toLowerCase() !== String(sndDraft.name).toLowerCase()) return;
+    if (!sndDraft || !sndIsPlaying(sndDraft.name)) return;
     sndLivePending = Object.assign(sndLivePending || {}, JSON.parse(JSON.stringify(params)));
     sndLiveChain = sndLiveChain.then(async () => {
         if (!sndLivePending) return;
         const p = sndLivePending;
         sndLivePending = null;
-        const d = await sndPost({action: 'set', params: p});
+        const d = await sndPost({action: 'set', mode: sndDraft.name, params: p});
         if (!d.success) document.getElementById('sndStatus').textContent = 'Not applied: ' + errText(d);
     });
 }
@@ -2994,6 +3014,11 @@ function sndRender() {
     const pal = d.palette || [{hue: 240, sat: 100}];
     const white = pal.length && pal[0].temp !== undefined;
     document.getElementById('sndPalKind').value = white ? 'cct' : 'hsi';
+    const minCycle = Math.max(4, pal.length);
+    const cyc = document.getElementById('sndCycle');
+    cyc.min = minCycle;
+    cyc.value = Math.max(minCycle, Math.round(d.cycle_s !== undefined ? d.cycle_s : Math.max(20, minCycle)));
+    if (d.cycle_s !== undefined && d.cycle_s < minCycle) d.cycle_s = minCycle;
     document.getElementById('sndPalette').innerHTML = pal.map((e, i) => {
         const sw = '<span class="snd-swatch" style="background:' + sndColour(e) + '"></span>';
         const inputs = white
@@ -3002,11 +3027,11 @@ function sndRender() {
         return '<div class="snd-row">' + (i + 1) + ' ' + sw + inputs + (pal.length > 1 ? ' <button class="btn small" onclick="sndPalRemove(' + i + ')" title="Remove this colour">x</button>' : '') + '</div>';
     }).join('');
     document.getElementById('sndParts').innerHTML = (d.parts || []).map((p, i) => {
-        const colours = pal.map((e, j) => [j, 'Palette ' + (j + 1)]).concat([['centroid', 'Follows the sound'], ['beat', 'Steps on the beat']]);
+        const colours = pal.map((e, j) => [j, 'Colour ' + (j + 1)]).concat([['cycle', 'Cycles'], ['beat', 'Steps on the beat'], ['centroid', 'Follows the sound']]);
         return '<div class="snd-row snd-part">'
-            + '<input list="sndTargets" value="' + esc(p.target || '') + '" onchange="sndPart(' + i + ',\'target\',this.value)" title="Lights by role (@rim), position (@back.left, @high), number (1;3) or @all, joined with ;">'
+            + '<input type="text" list="sndTargets" value="' + esc(p.target || '') + '" onchange="sndPart(' + i + ',\'target\',this.value)" title="Lights by role (@rim), position (@back.left, @high), number (1;3) or @all, joined with ;">'
             + '<select onchange="sndPart(' + i + ',\'drive\',this.value)">' + SND_DRIVES.map(([v, l]) => '<option value="' + v + '"' + ((p.drive || 'level') === v ? ' selected' : '') + '>' + l + '</option>').join('') + '</select>'
-            + '<select onchange="sndPart(' + i + ',\'colour\',this.value)">' + colours.map(([v, l]) => '<option value="' + v + '"' + (String(p.colour === undefined ? 0 : p.colour) === String(v) ? ' selected' : '') + '>' + l + '</option>').join('') + '</select>'
+            + '<select onchange="sndPart(' + i + ',\'colour\',this.value)" title="Colour N: always that palette colour. Cycles: round the palette over the Cycle time. Steps on the beat: the next colour each beat. Follows the sound: bassy sound picks the first colours, bright sound the last.">' + colours.map(([v, l]) => '<option value="' + v + '"' + (String(p.colour === undefined ? 0 : p.colour) === String(v) ? ' selected' : '') + '>' + l + '</option>').join('') + '</select>'
             + '<label title="Step through these lights one at a time on the beat"><input type="checkbox"' + (p.chase ? ' checked' : '') + ' onchange="sndPart(' + i + ',\'chase\',this.checked)"> Chase</label>'
             + '<button class="btn small" onclick="sndPartRemove(' + i + ')" title="Remove these lights">x</button></div>';
     }).join('');
@@ -3037,10 +3062,43 @@ function sndPaletteAdd() {
     sndDraft.palette.push(sndDraft.palette.length && sndDraft.palette[0].temp !== undefined ? {temp: 4000} : {hue: 200, sat: 90});
     sndRender(); sndLive({palette: sndDraft.palette});
 }
+function sndCycle(v) { sndDraft.cycle_s = Math.max(+document.getElementById('sndCycle').min, Number(v)); sndRender(); sndLive({cycle_s: sndDraft.cycle_s}); }
+let sndPalettes = [];
+async function sndLoadPalettes(select) {
+    const d = await sndPost({action: 'palettes'});
+    sndPalettes = d.success ? d.palettes : [];
+    document.getElementById('sndPalPreset').innerHTML = '<option value="">Load a palette...</option>'
+        + sndPalettes.map(p => '<option value="' + esc(p.name) + '">' + esc(p.name) + '</option>').join('');
+    document.getElementById('sndPalPreset').value = select || '';
+}
+function sndPalPresetChosen(name) {
+    const p = sndPalettes.find(x => x.name === name);
+    if (!p || !sndDraft) return;
+    sndDraft.palette = JSON.parse(JSON.stringify(p.palette));
+    (sndDraft.parts || []).forEach(q => { if (typeof q.colour === 'number') q.colour = Math.min(q.colour, sndDraft.palette.length - 1); });
+    sndRender();
+    sndLive({palette: sndDraft.palette, parts: sndDraft.parts, cycle_s: sndDraft.cycle_s});
+    document.getElementById('sndStatus').textContent = 'Loaded palette ' + name + ' (Save keeps it in this mode)';
+}
+async function sndPalSave() {
+    if (!sndDraft) return;
+    const name = prompt('Palette name', document.getElementById('sndPalPreset').value || '');
+    if (!name || !name.trim()) return;
+    let d = await sndPost({action: 'save_palette', name: name, palette: sndDraft.palette});
+    if (!d.success && errText(d).includes('exists') && confirm('A palette named ' + name.trim() + ' exists. Replace it?')) d = await sndPost({action: 'save_palette', name: name, palette: sndDraft.palette, overwrite: true});
+    document.getElementById('sndStatus').textContent = d.success ? 'Saved palette ' + d.palette : 'Not saved: ' + errText(d);
+    if (d.success) sndLoadPalettes(d.palette);
+}
+async function sndPalDelete() {
+    const name = document.getElementById('sndPalPreset').value;
+    if (!name || !confirm('Delete the palette ' + name + '?')) return;
+    await sndPost({action: 'delete_palette', name: name});
+    sndLoadPalettes();
+}
 function sndPaletteKind(kind) {
     sndDraft.palette = kind === 'cct' ? [{temp: 2900}, {temp: 4300}] : [{hue: 265, sat: 85}];
     (sndDraft.parts || []).forEach(p => { if (typeof p.colour === 'number') p.colour = Math.min(p.colour, sndDraft.palette.length - 1); });
-    sndRender(); sndLive({palette: sndDraft.palette, parts: sndDraft.parts});
+    sndRender(); sndLive({palette: sndDraft.palette, parts: sndDraft.parts, cycle_s: sndDraft.cycle_s});
 }
 function sndPart(i, key, v) {
     const p = sndDraft.parts[i];
@@ -3050,8 +3108,10 @@ function sndPart(i, key, v) {
 }
 function sndPartAdd() { (sndDraft.parts = sndDraft.parts || []).push({target: '@background', drive: 'level', colour: 0}); sndRender(); sndLive({parts: sndDraft.parts}); }
 function sndPartRemove(i) { sndDraft.parts.splice(i, 1); sndRender(); if (sndDraft.parts.length) sndLive({parts: sndDraft.parts}); }
-async function sndStart() {
-    const d = await sndPost({action: 'start', mode: document.getElementById('sndMode').value, params: sndDraft ? sndEditable() : undefined});
+async function sndStart(onTarget) {
+    const body = {action: 'start', mode: document.getElementById('sndMode').value, params: sndDraft ? sndEditable() : undefined};
+    if (onTarget) body.lights = document.getElementById('targetLight').value;
+    const d = await sndPost(body);
     if (!d.success) document.getElementById('sndStatus').textContent = "Couldn't start: " + errText(d);
     pollStatus();
 }
@@ -3094,11 +3154,20 @@ function renderSoundStatus() {
     document.getElementById('sndUnavailable').textContent = s.reason || '';
     document.getElementById('sndControls').style.display = s.available ? 'block' : 'none';
     if (!s.available) return;
-    if (!sndDraft && !sndEditing) { sndEditing = 1; sndLoadModes().then(() => { sndEditing = 0; }); sndDevices(); }
+    if (!sndDraft && !sndEditing) { sndEditing = 1; sndLoadModes().then(() => { sndEditing = 0; }); sndDevices(); sndLoadPalettes(); }
     const st = document.getElementById('sndStatus');
-    let text = s.running ? 'Playing ' + s.mode + (s.deviceName ? ', listening to ' + s.deviceName : ', starting...') : 'Not playing';
+    const plays = (s.assignments || []).map(a => a.mode + (a.lights ? ' on ' + a.lights.join(', ') : '')).join('; ');
+    let text = s.running ? 'Playing ' + plays + (s.deviceName ? ', listening to ' + s.deviceName : ', starting...') : 'Not playing';
     if (s.error) text += ' (device problem, retrying: ' + s.error + ')';
-    if (!/^(Saved|Not saved|Couldn't|Not applied)/.test(st.textContent) || s.running !== renderSoundStatus.was) st.textContent = text;
+    // anything else in the status is a note from an action: it stays 4 s, or until playing starts or stops
+    const now = Date.now();
+    if (st.textContent !== renderSoundStatus.shown) renderSoundStatus.noteSince = renderSoundStatus.noteSince || now;
+    else renderSoundStatus.noteSince = 0;
+    if (!renderSoundStatus.noteSince || now - renderSoundStatus.noteSince > 4000 || s.running !== renderSoundStatus.was) {
+        st.textContent = text;
+        renderSoundStatus.shown = text;
+        renderSoundStatus.noteSince = 0;
+    }
     renderSoundStatus.was = s.running;
     document.getElementById('sndStopBtn').disabled = !s.running;
     if (s.running && sndDraft && s.mode !== sndName && !sndEditing) { document.getElementById('sndMode').value = s.mode; sndLoad(s.mode); }

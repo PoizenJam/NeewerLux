@@ -305,19 +305,21 @@ def main():
                     last.querySelector('.pe-mode').onchange();""")
         js(page, """const rows = document.querySelectorAll('#peRows tr'); const last = rows[rows.length - 1];
                     last.querySelector('.pe-hue').value = '275'; last.querySelector('.pe-bri').value = '35';
+                    last.querySelector('.pe-sound').value = 'Pulse';
                     document.querySelectorAll('#peRows tr')[0].querySelector('.pe-target').value = '1';
                     document.getElementById('peName').value = 'Web Preset'; document.getElementById('peFade').value = '450'; peSave();""")
         spin(700)
         got = rig.post(P, {"action": "get", "index": 2})["preset"]
         check(got.get("fade_ms") == 450 and nl.presetFades.get(1) == 450, "preset fade from the web editor: " + str(got.get("fade_ms")))
-        check(got["name"] == "Web Preset" and {"target": "2", "mode": "HSI", "bri": 35, "hue": 275, "sat": 100} in got["entries"], "saved from the web editor: " + str(got))
+        check(got["name"] == "Web Preset" and {"target": "2", "mode": "HSI", "bri": 35, "hue": 275, "sat": 100, "sound": "Pulse"} in got["entries"], "saved from the web editor: " + str(got))
+        check(nl.presetSounds.get(1) == {"2": "Pulse"}, "the sound column saves: %s" % nl.presetSounds)
         check(not js(page, "document.getElementById('presetModal').classList.contains('open')"), "editor closes after saving")
         waitFor(page, "[...document.querySelectorAll('#presetGrid .preset-btn')].some(b => b.textContent.includes('Web Preset'))", "preset button shows the name")
         count = len(nl.customLightPresets)
         js(page, "presetAction('duplicate', 2, 'dup')")
         spin(500)
         check(len(nl.customLightPresets) == count + 1 and nl.presetNames.get(2) == "Web Preset (copy)", "duplicate from the web")
-        check(nl.presetFades.get(2) == 450, "the copy keeps the fade")
+        check(nl.presetFades.get(2) == 450 and nl.presetSounds.get(2) == {"2": "Pulse"}, "the copy keeps the fade and sound")
         js(page, "presetAction('move', 3, 'moved', {direction: 'left'})")
         spin(500)
         check(nl.presetNames.get(1) == "Web Preset (copy)", "move from the web")
@@ -325,6 +327,7 @@ def main():
         spin(500)
         check(len(nl.customLightPresets) == count, "delete from the web")
         nl.presetFades.clear()
+        nl.presetSounds.clear()
 
     def animationEditor():
         A = "/NeewerLux/animate"
@@ -397,6 +400,15 @@ def main():
         js(page, "sndPartAdd(); sndPart(1, 'target', '@fill'); sndPart(1, 'drive', 'high')")
         until(lambda: len(player.mode.parts) == 2 and player.mode.parts[1]["target"] == "@fill" and player.mode.parts[1]["drive"] == "high",
               "an added part to apply live")
+        waitFor(page, "document.getElementById('sndPalPreset').options.length === %d" % (len(nl.savedPalettes) + 1), "the saved palettes")
+        js(page, "document.getElementById('sndPalPreset').value = 'Neon'; sndPalPresetChosen('Neon')")
+        until(lambda: player.mode.palette == nl.savedPalettes["Neon"], "a saved palette to load live")
+        js(page, "sndPart(0, 'colour', 'cycle'); sndCycle(9)")
+        until(lambda: player.mode.parts[0]["colour"] == "cycle" and player.mode.cycleS == 9, "Cycles and its time to apply live")
+        js(page, "sndCycle(1)")
+        until(lambda: player.mode.cycleS == 4, "the cycle stops at 4 s")
+        check(js(page, "[...document.querySelectorAll('#sndParts .snd-part')[0].querySelectorAll('select')[1].options].map(o => o.value).join()") == "0,1,2,cycle,beat,centroid",
+              "colour choices: each palette colour, Cycles, Steps on the beat, Follows the sound")
         js(page, "sndPaletteKind('cct')")
         until(lambda: player.mode.palette == [{"temp": 2900}, {"temp": 4300}], "whites to apply live")
         waitFor(page, "document.getElementById('sndStatus').textContent.indexOf('Playing Pulse') === 0 && document.querySelectorAll('#sndMeters .snd-meter').length === 5", "the status and meters")
@@ -404,6 +416,11 @@ def main():
         spin(400)
         view.grab().save(os.path.join(rig.workdir, "webui_sound.png"))
         page.runJavaScript("window.prompt = () => 'Web Sound'; window.confirm = () => true")
+        js(page, "sndPalSave()")
+        until(lambda: nl.savedPalettes.get("Web Sound") == [{"temp": 2900}, {"temp": 4300}], "save a palette")
+        waitFor(page, "document.getElementById('sndPalPreset').value === 'Web Sound'", "the saved palette selected")
+        js(page, "sndPalDelete()")
+        until(lambda: "Web Sound" not in nl.savedPalettes, "delete a palette")
         js(page, "sndSaveAs()")
         until(lambda: "Web Sound" in nl.savedSoundModes, "save as")
         saved = nl.savedSoundModes["Web Sound"]
@@ -412,6 +429,15 @@ def main():
         waitFor(page, "sndName === 'Web Sound'", "the saved copy selected")
         js(page, "sndDelete()")
         until(lambda: "Web Sound" not in nl.savedSoundModes, "delete")
+        js(page, "document.getElementById('sndMode').value = 'Colour Drift'; sndModeChosen('Colour Drift')")
+        until(lambda: (nl.soundStatus()["assignments"] or [{}])[-1].get("mode") == "Colour Drift", "switching mode while playing")
+        js(page, "document.getElementById('targetLight').value = '2'; sndStart(true)")
+        until(lambda: nl.soundStatus()["assignments"] == [{"mode": "Colour Drift", "lights": None}, {"mode": "Colour Drift", "lights": [2]}],
+              "On target lights")
+        waitFor(page, "document.getElementById('sndStatus').textContent.indexOf('Colour Drift on 2') >= 0", "the status names the lights")
+        js(page, "document.getElementById('targetLight').value = '*'")
+        check(js(page, "document.getElementById('soundCard').compareDocumentPosition(document.getElementById('animList')) & Node.DOCUMENT_POSITION_FOLLOWING") > 0,
+              "the Sound card comes before Animations")
         js(page, "sndStop()")
         until(lambda: nl.showEngine.soundPlayer() is None, "stop")
         js(page, "window.scrollTo(0, 0)")

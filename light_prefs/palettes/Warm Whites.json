@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "name": "Warm Whites",
+  "palette": [
+    {
+      "temp": 2700
+    },
+    {
+      "temp": 3500
+    }
+  ]
+}

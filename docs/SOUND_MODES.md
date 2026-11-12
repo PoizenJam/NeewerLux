@@ -14,8 +14,9 @@ A sound mode runs on its own **sound** layer, underneath everything else:
 
 - Sequences, stream effects and animations play over it on the lights they drive, and give those lights back to it when they end, with their Fade back. A song's sequence starting while a sound mode runs takes over the lights it uses; when it ends, the sound mode carries on.
 - Lights a mode doesn't aim at stay as they are. The shipped modes leave the key light alone.
-- Recalling a preset, moving a slider or sending a colour to one of the lights a sound mode drives stops the sound mode: what you just set takes over at once, and its other lights fade back. Commands to lights it doesn't drive leave it playing.
-- Switching a light off works whatever is playing: it takes that light out of the sound mode (or a sequence or effect) until you switch it on again, and the others carry on. A light that is off when a sound mode, sequence or effect takes it is switched on first.
+- A mode can also be put on chosen lights only (**On selected** on the desktop, **On target lights** on the web, `lights` over HTTP, or a preset). Those lights leave whatever sound they followed and the rest carry on, so different lights can follow different modes at once. A light given to a mode follows the first part whose target includes it, or the first part if none does; a chase steps through the lights it was given in sweep order.
+- Recalling a preset, moving a slider or sending a colour to a light that follows sound takes that light out of the sound layer: what you just set shows at once, and the other lights carry on. When no lights are left, sound stops (and stops listening). Commands to lights that don't follow sound leave it playing.
+- Switching a light off works whatever is playing: it takes that light out of the sound layer (or a sequence or effect) until you switch it on again, and the others carry on. A light that is off when a sound mode, sequence or effect takes it is switched on first.
 - Brightness limits, Locked lights and the CCT-only fallback apply as for everything else.
 - Starting a sound mode uses its Fade in (else the global one); stopping it hands the lights back with its Fade back (else the global one). Switching to another mode fades between them the same way.
 - A sound mode keeps each light to at most 2 flashes in any second by itself (the flash guard's limit is 3), so it swells and steps rather than strobes. It judges brightness swings as if the light were white, so a CCT-only light showing a colour as white stays within the limit too.
@@ -61,7 +62,8 @@ Every 21 ms or so NeewerLux measures:
 | `ceiling` | no | 0 to 100 (75) | Brightness at full. Not below `floor`. |
 | `smoothing` | no | 0 to 1 (0.5) | How slowly lights fall back and colours drift: 0 is quick (about 0.1 s), 1 is slow (about 1.6 s). Rises are always quick (60 ms). |
 | `fps` | no | 1 to 30 | Updates a second. Default: the Sequence frame rate in Global Preferences (20). |
-| `palette` | no | list | Colours, either all `{"hue": 0-360, "sat": 0-100}` or all `{"temp": 2700-10000}` (Kelvin). Default: one blue. |
+| `palette` | no | list | Colours, either all `{"hue": 0-360, "sat": 0-100}` or all `{"temp": 2700-10000}` (Kelvin). Default: one blue. The parts pick from it (below). |
+| `cycle_s` | no | seconds (20) | How long a part with colour `cycle` takes to go round the whole palette. At least 4, and at least one second per palette colour, so a cycle drifts rather than flashes. |
 | `fade_in_ms`, `handback_fade_ms` | no | 0 to 10000 | This mode's Fade in and Fade back; without them the global ones apply. |
 | `parts` | yes | list | What each group of lights does (below). Later parts win where they overlap. |
 
@@ -71,11 +73,15 @@ Each part:
 |---|---|---|---|
 | `target` | yes | light target | Which lights, as anywhere else: `@rim`, `@background.left`, `@back.high`, `1;3`, `@all`, joined with `;`. Listed in sweep order. |
 | `drive` | no | `level` (default), `low`, `mid`, `high`, `beat` | What sets the brightness. `beat` jumps to full on each beat and falls back by `smoothing`. |
-| `colour` | no | palette index (0), `centroid`, `beat` | A fixed palette colour; a colour along the palette set by `centroid` (first entry for bass-heavy sound, last for bright); or the next palette colour on each step, blended over 0.4 s. |
+| `colour` | no | palette index (0), `cycle`, `beat`, `centroid` | A fixed palette colour; `cycle`: round the palette and back to its first colour over `cycle_s`, blending between colours (a palette of one colour goes once round the colour wheel, keeping its saturation; one white stays put); `beat`: the next palette colour on each step, blended over 0.4 s; `centroid`: a colour along the palette set by the centroid (first entry for bass-heavy sound, last for bright). |
 | `chase` | no | `true` / `false` (false) | Step through the part's lights one at a time on the beat (every other beat above 150 BPM): the current light rises, the others fall back. The brightest step scales with the level. |
 | `floor`, `ceiling` | no | 0 to 100 | This part's own brightness range. |
 
 Hue blends take the short way round the colour wheel. Avoid palettes that cross saturated red (hues within 20 of 0) back and forth: changes to and from saturated red count as flashes.
+
+## Saved palettes
+
+Palettes can be saved on their own, in `light_prefs/palettes/` (`{"format": 1, "name": "Neon", "palette": [...]}`), and loaded into any mode: **Saved palettes** on the Sound tab and card, or by name in `start` and `set` over HTTP (`"params": {"palette": "Neon"}`). Loading one replaces the mode's colours in the working copy; Save keeps it in the mode. Shipped: Neon, Sunset, Ocean, Rainbow (red, green and blue, which `cycle` turns into a full rainbow) and Warm Whites.
 
 ## Shipped modes
 
@@ -108,6 +114,10 @@ A second example, the shipped Bands:
 
 ## Controlling it
 
-On the desktop, the **Sound** tab: what to listen to (also in Global Preferences, Lights and shows), the mode, Start and Stop, sliders for sensitivity, range, floor, ceiling and smoothing, the palette, the lights each part drives and what drives them, live meters and the tempo, and Save, Save as, Revert and Delete. Changes show on the lights at once while that mode plays, and are kept only when you save. The web dashboard has the same **Sound** card.
+On the desktop, the **Sound** tab (after Scene): what to listen to (also in Global Preferences, Lights and shows), the mode, Start, On selected and Stop, sliders for sensitivity, range, floor, ceiling and smoothing, the palette with its cycle time and saved palettes, the lights each part drives and what drives them, live meters and the tempo, and Save, Save as, Revert and Delete. Changes show on the lights at once while that mode plays (on any lights), and are kept only when you save. Picking lights in the light list while on the Sound tab doesn't switch tabs or send them the sliders' colour. The web dashboard has the same **Sound** card.
 
-Over HTTP: `POST /NeewerLux/sound` with `start`, `stop`, `mode`, `set` (change sensitivity, range, floor, ceiling, smoothing, palette, fps or parts while it plays, without saving), `device`, `devices`, `status` (including the live levels and tempo) and the file actions `list`, `get`, `save`, `delete`, `validate`, `reload`; or `GET /NeewerLux/doAction?sound=start|Pulse`. See [HTTP_API.md](HTTP_API.md).
+If the device stops working (unplugged, a driver error), NeewerLux keeps trying it every 2 seconds and carries on by itself when it's back; Refresh lists the devices again and tries at once.
+
+A snapshot preset can set lights following a sound mode: the **Sound** column in the preset editors (desktop and web), for single lights. The light's colour in the preset is what it returns to when sound stops; recalling the preset doesn't write that colour, since a write would take the light out of the sound layer. Saving a snapshot while sound plays saves the lights that follow it.
+
+Over HTTP: `POST /NeewerLux/sound` with `start`, `stop`, `mode` (each with optional `lights`), `set` (change sensitivity, range, floor, ceiling, smoothing, palette, cycle_s, fps or parts while it plays, without saving; `mode` names which playing mode), `device`, `devices`, `status` (including the live levels, the tempo and which lights follow which mode), the file actions `list`, `get`, `save`, `delete`, `validate`, `reload`, and the palette actions `palettes`, `save_palette`, `delete_palette`; or `GET /NeewerLux/doAction?sound=start|Pulse`, `sound=start|Colour Drift|1;3`, `sound=stop|3`. See [HTTP_API.md](HTTP_API.md).
