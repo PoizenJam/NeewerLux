@@ -223,6 +223,9 @@ def main():
     def nativeSpins(root):
         bad = []
         for w in root.findChildren(QAbstractSpinBox):
+            # as it will be on screen: a dialog that was built but never shown isn't styled yet,
+            # and Qt 6.11 then reserves the arrows' room
+            w.ensurePolished()
             opt = QStyleOptionSpinBox()
             opt.initFrom(w)
             opt.rect = QRect(0, 0, 120, 30)

@@ -405,8 +405,11 @@ def t_fadesOnlyBetweenItems(rig):
         for fin, back in ((0, 0), (400, 500)):
             nl.fadeInMs, nl.handbackFadeMs = fin, back
             rig.get("light=*&mode=CCT&temp=56&bri=20", 0.6)
-            t0 = time.monotonic()
+            tReq = time.monotonic()
             rig.get("light=*&animate=Ambulance", 2.2)
+            # windows count from the animation's first write, not the request: a slower request
+            # (Windows) would otherwise move its first keyframe in or out of the window
+            t0 = writesFor(rig, FILL, tReq)[0][0]
             runs[fin] = hsi(t0, fin / 1000.0 + 0.03, 2.2)
             if fin:
                 blend = hsi(t0, 0, fin / 1000.0 - 0.03)
