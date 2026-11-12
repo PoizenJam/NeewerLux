@@ -1,17 +1,24 @@
-# Build NeewerLux Windows EXE on release tag push
-# Creates a GitHub Release with:
+# Build NeewerLux on every push to main and keep one draft release per version up to date:
 #   - NeewerLux-<version>-Windows.zip  (PyInstaller --onedir EXE + light_prefs/)
 #   - NeewerLux-<version>-Source.zip   (Python source distribution)
+# The version comes from pyproject.toml. Each push replaces the draft for that version, so the
+# newest test build is always on the Releases page. A draft creates no tag; publishing it
+# creates v<version> at the commit it was built from. Pushing with a version that is already
+# published fails instead of touching the published release: bump the version first.
 
 name: Build Release
 
 on:
   push:
-    tags:
-      - 'v*'  # Trigger on version tags like v1.0.0
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: write  # Needed to create releases
+
+concurrency:
+  group: release-draft
+  cancel-in-progress: true  # a newer push supersedes a build still running
 
 jobs:
   build-windows-exe:
@@ -47,7 +54,7 @@ jobs:
 
       - name: Create EXE zip
         run: |
-          $version = "${{ github.ref_name }}" -replace '^v', ''
+          $version = (Select-String -Path pyproject.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
           Compress-Archive -Path "dist/NeewerLux/*" -DestinationPath "NeewerLux-${version}-Windows.zip"
 
       - name: Upload EXE artifact
@@ -64,7 +71,7 @@ jobs:
 
       - name: Create source zip
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -1)
           zip -r "NeewerLux-${VERSION}-Source.zip" \
             NeewerLux.py \
             light_models.toml \
@@ -100,6 +107,25 @@ jobs:
     needs: [build-windows-exe, build-source]
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Replace the draft for this version
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -1)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          published=$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq ".[] | select(.tag_name == \"v$VERSION\" and (.draft | not)) | .id")
+          if [ -n "$published" ]; then
+            echo "::error::v$VERSION is already published; bump the version in pyproject.toml and NeewerLux.py for new test builds"
+            exit 1
+          fi
+          for id in $(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq ".[] | select(.tag_name == \"v$VERSION\" and .draft) | .id"); do
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"
+          done
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -109,6 +135,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           draft: true
+          tag_name: v${{ steps.version.outputs.version }}
+          name: NeewerLux ${{ steps.version.outputs.version }}
+          target_commitish: ${{ github.sha }}
           generate_release_notes: true
           files: |
             NeewerLux-*-Windows.zip
