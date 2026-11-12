@@ -10,6 +10,52 @@ sys.path.insert(0, HERE)
 import harness  # noqa: E402
 
 
+def pumpUntil(app, cond, timeout, what):
+    end = time.monotonic() + timeout
+    while not cond():
+        assert time.monotonic() < end, "timed out waiting for " + what
+        app.processEvents()
+        time.sleep(0.01)
+
+
+def checkWorkerUsesGuiThread(nl, app, win):
+    """The worker reaches the window only through signals: a discovery's table refresh runs on the
+    GUI thread and the worker waits for it (updateLights reorders the lights it then connects by
+    index), and the selection it sends to is the GUI's copy."""
+    import threading
+    nl.threadAction = "quit"
+    pumpUntil(app, lambda: nl.threadAction == "finished", 10, "the harness worker to stop")
+    nl.threadAction = ""
+    calls = []
+    realUpdate = win.updateLights
+
+    def recordUpdate(*a, **k):
+        calls.append(threading.current_thread() is threading.main_thread())
+        time.sleep(0.2)
+        realUpdate(*a, **k)
+        calls.append(nl.threadAction)  # still the scan's result: the worker hasn't moved on
+    win.updateLights = recordUpdate
+
+    async def noScan():
+        return "scanned"
+    realFind, nl.findDevices = nl.findDevices, noScan
+    nl.autoConnectToLights = False
+    threading.Thread(target=nl.workerThread, args=(nl.asyncioEventLoop,), name="workerThread", daemon=True).start()
+    nl.threadAction = "discover"
+    pumpUntil(app, lambda: len(calls) == 2 and nl.threadAction == "", 10, "the discovery to finish")
+    assert calls == [True, "scanned"], "updateLights ran on the GUI thread and the worker waited for it: %r" % calls
+    win.updateLights = realUpdate
+    nl.findDevices = realFind
+
+    win.lightTable.selectRow(2)
+    app.processEvents()
+    assert win.selectionSnapshot() == [2], win.selectionSnapshot()
+    win.lightTable.clearSelection()
+    app.processEvents()
+    assert win.selectionSnapshot() == []
+    print("worker to GUI on signals: PASS")
+
+
 def main():
     rig = harness.boot(os.path.dirname(HERE))
     nl = rig.nl
@@ -20,6 +66,7 @@ def main():
     win.setupGlobalLightPrefsTab()
     win.updateLights()
     app.processEvents()
+    checkWorkerUsesGuiThread(nl, app, win)
 
     # Sequences panel and status timer
     nl.savedSequences["Smoke"] = {"format": 1, "name": "Smoke", "duration_ms": 1500,

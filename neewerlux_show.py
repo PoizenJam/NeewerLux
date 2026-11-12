@@ -32,7 +32,8 @@ MAX_FPS = 30
 SLEW_RATE = 0.05          # set_position corrects at most 5% faster or slower than real time
 SLEW_MAX_MS = 250         # larger offsets jump instead of slewing
 EFFECT_QUEUE_MAX = 10
-TICK_MS = 5               # compositor resolution; sends happen only when a light's value changes
+IDLE_TICK_MS = 100        # longest the compositor sleeps while anything plays: it also notices
+                          # changes made outside it (a light connecting, Locked, positions)
 
 OFF_BYTES = [120, 129, 1, 2, 252]
 
@@ -487,6 +488,33 @@ class AnimationTimeline:
         state, kfi = self._evalPass(self.passL, self.startsL, local)
         return state, False, kfi
 
+    def nextChange(self, t):
+        """The first time after t at which frameAt can return something different, or None
+        when it never will (finished, or holding its last frame)."""
+        if not self.keyframes:
+            return None
+        if t < 0:
+            return 0.0
+        if t < self.d0:
+            return self._nextInPass(self.pass0, self.starts0, t, 0.0)
+        if not self.loop:
+            return None
+        n = int((t - self.d0) // self.dL)
+        if self.maxLoops > 0 and 1 + n >= self.maxLoops:
+            return None
+        base = self.d0 + n * self.dL
+        return self._nextInPass(self.passL, self.startsL, t - base, base)
+
+    def _nextInPass(self, segs, starts, local, base):
+        seg = segs[max(0, bisect.bisect_right(starts, local) - 1)]
+        within = local - seg.start
+        if seg.fadeDur > 0 and within < seg.fadeDur:
+            if not seg.steps:
+                return base + local + self.stepMs  # continuous: whoever samples it decides the rate
+            step = seg.fadeDur / seg.steps
+            return base + seg.start + (int(within // step) + 1) * step
+        return base + seg.start + seg.fadeDur + seg.holdDur
+
     def _evalPass(self, segs, starts, local):
         seg = segs[max(0, bisect.bisect_right(starts, local) - 1)]
         kf = self.keyframes[seg.kf]
@@ -578,6 +606,13 @@ class AnimationPlayer:
                 out[idx] = cmd
         self.lastOut = out
         return out, finished
+
+    def nextChange(self, nowMs):
+        """When the next frame can differ (monotonic ms), or None."""
+        n = self.timeline.nextChange(nowMs - self.startMs)
+        if self.maxMs is not None and (n is None or n > self.maxMs):
+            n = self.maxMs
+        return None if n is None else self.startMs + n
 
     def describe(self, nowMs):
         return {"type": "animation", "name": self.name, "elapsed_ms": int(self.elapsed(nowMs)),
@@ -788,6 +823,50 @@ class SequencePlayer:
                 out[idx] = v
         self.lastOut = out
         return out, False
+
+    def nextChange(self, nowMs):
+        """When the next frame can differ (monotonic ms), or None while paused. Cue onsets and
+        ends land exactly; inside a fade or clip it is the next frame of the cue's own grid
+        (see _stepped), skipping a clip's holds."""
+        c = self.clock
+        if not c.playing or (self.userPaused and self.seq.pausemode == "revert"):
+            return None
+        if nowMs < c.anchor:
+            return c.anchor   # held on its first frame while it fades in
+        if c.slewTotal:
+            return nowMs + self.frameMs
+        pos = self.position(nowMs)
+        nxt = self.seq.duration
+        for cue in self.seq.cues:
+            end = cue.at + cue.dur if cue.dur > 0 else None
+            if cue.at > pos:
+                nxt = min(nxt, cue.at)
+                continue
+            if end is not None:
+                if end <= pos:
+                    continue
+                nxt = min(nxt, end)
+            if cue.kind == "clip":
+                tl = self.timelines.get(cue.index)
+                if tl is None:
+                    continue
+                tau = self._stepped(pos - cue.at)
+                scale = 1.0
+                if cue.fit == "stretch":
+                    scale = (cue.dur / tl.d0) if (cue.dur > 0 and tl.d0 > 0) else 0.0
+                    tau = tau / scale if scale else 0.0
+                n = tl.nextChange(tau)
+                if n is None:
+                    continue
+                # the first frame of the cue's grid that samples the clip at or after its change
+                k = math.ceil(n * scale / self.frameMs - 1e-9)
+            elif cue.fade > 0 and pos < cue.at + cue.fade:
+                k = 0
+            else:
+                continue
+            k = max(k, int((pos - cue.at) // self.frameMs) + 1)
+            nxt = min(nxt, cue.at + k * self.frameMs)
+        return nowMs + (nxt - pos)
 
     def describe(self, nowMs):
         return {"type": "sequence", "name": self.name, "state": self.state,
@@ -1016,22 +1095,45 @@ class ShowCompositor:
         self._wake.set()
 
     def _run(self):
-        period = TICK_MS / 1000.0
-        nextT = self.clock()
+        # Ticks only when some light's output can change (or a command arrives), instead of
+        # every few ms; positions come from the clock, so when it ticks doesn't move anything.
         while self._running:
             if not self.anyActive():
                 self._wake.wait()
                 self._wake.clear()
-                nextT = self.clock()
                 continue
             now = self.clock()
             self.tick(now)
-            nextT += period
-            if nextT < now:
-                nextT = now + period  # skipped ticks are not replayed; positions come from the clock
-            delay = nextT - self.clock()
-            if delay > 0:
-                time.sleep(delay)  # time.sleep is high resolution on Windows from Python 3.11
+            self._sleepUntil(self.nextDueMs(self._nowMs(now)) / 1000.0)
+
+    def _sleepUntil(self, due):
+        # Event waits are only ~15 ms accurate on Windows, time.sleep is precise from Python
+        # 3.11: wait for commands most of the way, then sleep the last stretch.
+        delay = due - self.clock()
+        if delay > 0.03:
+            if self._wake.wait(delay - 0.02):
+                self._wake.clear()
+                return
+            delay = due - self.clock()
+        if delay > 0:
+            time.sleep(delay)
+
+    def nextDueMs(self, nowMs):
+        """The next time a tick could send something: a player's next change, a transition
+        fade's next step, at most IDLE_TICK_MS away."""
+        with self.lock:
+            due = nowMs + IDLE_TICK_MS
+            for p in self.layers.values():
+                if p is not None:
+                    n = p.nextChange(nowMs)
+                    if n is not None and n < due:
+                        due = n
+            stepMs = 1000.0 / HANDBACK_FPS
+            for start, _, _, _ in self.fades.values():
+                due = min(due, start + (int((nowMs - start) // stepMs) + 1) * stepMs)
+        # A boundary computed to land exactly now can still sit a rounding error before the
+        # change it predicts; the next tick then follows 0.1 ms later rather than never.
+        return max(due, nowMs + 0.1)
 
     def tick(self, now=None):
         with self.lock:

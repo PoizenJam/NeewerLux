@@ -76,6 +76,32 @@ def scanFunction(fn, globalsSet, path, problems):
             problems.append("%s:%d %s(): assigns module global '%s' without a global declaration%s" % (path, line, fn.name, name, known))
 
 
+# Functions that run on the worker, HTTP or compositor threads. Qt widgets may only be used on
+# the GUI thread, so these reach the main window only through its signals (mainWindow.xSignal.emit),
+# runOnGui and selectionSnapshot.
+OFF_GUI_THREAD = {"workerThread", "writeToLight", "parallelWriteToLights", "parallelAction", "connectToLight",
+                  "disconnectFromLight", "processMultipleSends", "sendShowFrames", "processHTMLCommands",
+                  "findDevices", "getLightChannelandPower", "printDebugString", "do_GET", "do_POST"}
+GUI_SAFE = {"runOnGui", "selectionSnapshot"}
+
+
+def scanGuiCalls(fn, path, problems):
+    for n in ast.walk(fn):
+        if not isinstance(n, ast.Call):
+            continue
+        chain = []
+        f = n.func
+        while isinstance(f, ast.Attribute):
+            chain.insert(0, f.attr)
+            f = f.value
+        if not (isinstance(f, ast.Name) and f.id == "mainWindow" and chain):
+            continue
+        if chain[0] in GUI_SAFE or (len(chain) == 2 and chain[0].endswith("Signal") and chain[1] == "emit"):
+            continue
+        problems.append("%s:%d %s(): calls mainWindow.%s off the GUI thread (emit a signal or use runOnGui)"
+                        % (path, n.lineno, fn.name, ".".join(chain)))
+
+
 def checkFile(path):
     problems = []
     src = open(path, encoding="utf-8").read()
@@ -91,6 +117,8 @@ def checkFile(path):
     for n in ast.walk(tree):
         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
             scanFunction(n, g, os.path.basename(path), problems)
+            if n.name in OFF_GUI_THREAD and os.path.basename(path) == "NeewerLux.py":
+                scanGuiCalls(n, os.path.basename(path), problems)
     return problems
 
 

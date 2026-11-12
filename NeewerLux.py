@@ -15,7 +15,7 @@
 ##          Windows, Linux/Ubuntu, MacOS and RPi
 ############################################################
 
-NEEWERLUX_VERSION = "1.3.3"
+NEEWERLUX_VERSION = "1.4.0"
 NEEWERLUX_REPO_URL = "https://github.com/poizenjam/NeewerLux/"
 NEEWERLUX_RELEASES_API = "https://api.github.com/repos/poizenjam/NeewerLux/releases/latest"
 
@@ -474,10 +474,16 @@ try: # try to load the GUI
         # Thread-safe signals after presets or animations change over HTTP
         _presetsChangedSignal = QtSignal()
         _animationListSignal = QtSignal()
+        # Background threads never touch widgets: they post a status message, a power change,
+        # or a callable to run on the GUI thread (runOnGui)
+        _statusMessageSignal = QtSignal(str)
+        _lightPowerSignal = QtSignal(int, bool)
+        _guiCallSignal = QtSignal(object)
 
         def __init__(self):
             QMainWindow.__init__(self)
             self.setupUi(self) # set up the main UI
+            self._selectionCache = [] # the light table's selection, for the worker to read (see selectionSnapshot)
             self.setWindowTitle("NeewerLux " + NEEWERLUX_VERSION)
             # Inject version into Info tab
             self.infoText.setHtml(self.infoText.toHtml().replace("{VERSION}", NEEWERLUX_VERSION))
@@ -485,6 +491,10 @@ try: # try to load the GUI
 
             # Connect the thread-safe table update signal
             self._tableUpdateSignal.connect(self.setTheTable)
+            self._statusMessageSignal.connect(self.statusBar.showMessage)
+            self._lightPowerSignal.connect(self._showPowerChange)
+            self._guiCallSignal.connect(lambda call: call())
+            self.lightTable.itemSelectionChanged.connect(self._cacheSelection)
 
             # Sequences panel, and a GUI-thread timer that mirrors show engine state into the labels
             self._sequenceListSignal.connect(self.seqRefreshList)
@@ -3222,6 +3232,37 @@ try: # try to load the GUI
         def returnTableInfo(self, row, column):
             return self.lightTable.item(row, column).text()
 
+        def _showPowerChange(self, row, on):
+            status = self.returnTableInfo(row, 2)
+            if on:
+                self.setTheTable(["", "", status.replace("STBY", "ON"), "Light turned on"], row)
+            else:
+                self.setTheTable(["", "", status.replace("ON", "STBY"), "Light turned off\nA long period of inactivity may require a re-link to the light"], row)
+
+        def _cacheSelection(self):
+            self._selectionCache = self.selectedLights()
+
+        def selectionSnapshot(self):
+            """The light table's selection as of its last change, for background threads (Qt widgets
+            may only be read on the GUI thread)."""
+            return list(self._selectionCache)
+
+        def runOnGui(self, fn):
+            """Run fn on the GUI thread and wait until it has run. For background work that depends
+            on the result: updateLights reorders availableLights, and the worker then connects by
+            index. Gives up waiting if the app is quitting, so a closing window can't deadlock it."""
+            done = threading.Event()
+
+            def call():
+                try:
+                    fn()
+                finally:
+                    done.set()
+            self._guiCallSignal.emit(call)
+            while not done.wait(0.1):
+                if threadAction == "quit":
+                    return
+
         def _appendLog(self, msg):
             """Append a timestamped message to the Log tab (main thread only)."""
             if enableLogTab:
@@ -5374,7 +5415,7 @@ async def writeToLight(selectedLights=0, updateGUI=True, useGlobalValue=True, fr
     try:
         if updateGUI == True:
             if selectedLights == 0:
-                selectedLights = mainWindow.selectedLights() # get the list of currently selected lights from the GUI table
+                selectedLights = mainWindow.selectionSnapshot() # get the list of currently selected lights from the GUI table
         else:
             if type(selectedLights) is int: # if we specify an integer-based index
                 selectedLights = [selectedLights] # convert asked-for light to list
@@ -5467,14 +5508,12 @@ async def writeToLight(selectedLights=0, updateGUI=True, useGlobalValue=True, fr
                                         if currentSendValue[3] == 1: # we turned the light on
                                             availableLights[int(selectedLights[a])][6] = True # toggle the "light on" parameter of this light to ON
 
-                                            changeStatus = mainWindow.returnTableInfo(selectedLights[a], 2).replace("STBY", "ON") if mainWindow is not None else ""
-                                            if mainWindow is not None: mainWindow._tableUpdateSignal.emit(["", "", changeStatus, "Light turned on"], int(selectedLights[a]))
+                                            if mainWindow is not None: mainWindow._lightPowerSignal.emit(int(selectedLights[a]), True)
 
                                         else: # we turned the light off
                                             availableLights[int(selectedLights[a])][6] = False # toggle the "light on" parameter of this light to OFF
 
-                                            changeStatus = mainWindow.returnTableInfo(selectedLights[a], 2).replace("ON", "STBY") if mainWindow is not None else ""
-                                            if mainWindow is not None: mainWindow._tableUpdateSignal.emit(["", "", changeStatus, "Light turned off\nA long period of inactivity may require a re-link to the light"], int(selectedLights[a]))
+                                            if mainWindow is not None: mainWindow._lightPowerSignal.emit(int(selectedLights[a]), False)
                             else:
                                 returnValue = True # we successfully wrote to the light
 
@@ -5497,7 +5536,7 @@ async def writeToLight(selectedLights=0, updateGUI=True, useGlobalValue=True, fr
             await asyncio.sleep(0.05) # wait 1/20th of a second to give the Bluetooth bus a little time to recover
 
             if updateGUI == True:
-                selectedLights = mainWindow.selectedLights() # re-acquire the current list of selected lights
+                selectedLights = mainWindow.selectionSnapshot() # re-acquire the current list of selected lights
     except Exception as e:
         printDebugString("There was an error communicating with light " + str(selectedLights[a] + 1) + " [" + availableLights[selectedLights[a]][0].name + "] " + returnMACname() + " " + availableLights[selectedLights[a]][0].address)
         print(e)
@@ -5719,9 +5758,9 @@ def workerThread(_loop):
                         allDisconnectedSince += 1
                         if allDisconnectedSince >= 2:  # after 2 consecutive all-disconnected cycles, rescan
                             printDebugString("Auto-reconnect: all lights disconnected (likely wake from sleep) - rescanning...")
-                            if hasGUI: mainWindow.statusBar.showMessage("Woke from sleep - rescanning for lights...")
+                            if hasGUI: mainWindow._statusMessageSignal.emit("Woke from sleep - rescanning for lights...")
                             _loop.run_until_complete(findDevices())
-                            if hasGUI: mainWindow.updateLights()
+                            if hasGUI: mainWindow.runOnGui(mainWindow.updateLights)
                             allDisconnectedSince = 0
                     else:
                         allDisconnectedSince = 0
@@ -5748,7 +5787,7 @@ def workerThread(_loop):
             threadAction = _loop.run_until_complete(findDevices()) # add new lights to the main array
 
             if threadAction != "quit":
-                if hasGUI: mainWindow.updateLights() # tell the GUI to update its list of available lights
+                if hasGUI: mainWindow.runOnGui(mainWindow.updateLights) # tell the GUI to update its list of available lights
 
                 if autoConnectToLights == True: # if we're set to automatically link to the lights on startup, then do it here
                     #for a in range(len(availableLights)):
@@ -5765,7 +5804,7 @@ def workerThread(_loop):
 
                 threadAction = ""
         elif threadAction == "connect":
-            selectedLights = mainWindow.selectedLights() if hasGUI else [-1] # get the list of currently selected lights
+            selectedLights = mainWindow.selectionSnapshot() if hasGUI else [-1] # get the list of currently selected lights
 
             if threadAction != "quit": # if we're not supposed to quit, then try to connect to the light(s)
                 _loop.run_until_complete(parallelAction("connect", selectedLights)) # connect to each *selected* light in parallel

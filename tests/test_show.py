@@ -79,12 +79,10 @@ class StubWindow:
         self._tableUpdateSignal = self._Sig()
         self._logSignal = self._Sig()
         self._sequenceListSignal = self._Sig()
+        self._lightPowerSignal = self._Sig()
 
-    def selectedLights(self):
+    def selectionSnapshot(self):
         return list(self.rows)
-
-    def returnTableInfo(self, row, col):
-        return "ON"
 
 
 # ---------------------------------------------------------------------------- tests
@@ -1306,6 +1304,84 @@ def t_shippedContentUnderFlashLimit(rig):
     check(rig.post("/NeewerLux/sequence", {"action": "render", "name": "Example - Four Light Demo"})["flashes"]["limit"] == 3, "render reports flashes")
 
 
+# ----------------------------------------------------------------- 1.4.0: compositor wakes only when due
+
+def _compositorRun(nl, start, endMs, fine):
+    """Play one item on a virtual clock and record every write. fine=True ticks every
+    millisecond (what the old 5 ms loop approximated); otherwise it ticks only at
+    nextDueMs, as the compositor thread does. Transition fades are on (300 ms in, 500 ms back)."""
+    show = nl.show
+    base = list(harness.START_BYTES)
+
+    class Hooks:
+        def lightCount(self): return len(nl.availableLights)
+        def encode(self, idx, cmd): return tuple(sorted(cmd.items()))
+        def currentBytes(self, idx): return list(base)
+        def shownCommand(self, idx): return show.bytesToCommand(base)
+        def isLocked(self, idx): return False
+        def wake(self): pass
+        def globalRevert(self): return True
+        def recallPreset(self, n): pass
+        def onStatus(self, info): pass
+        def fadeInMs(self): return 300
+        def handbackMs(self): return 500
+
+    vt = [0.0]
+    comp = show.ShowCompositor(Hooks(), clock=lambda: vt[0])
+    writes = []
+
+    def drain():
+        for idx, (b, _) in comp.takeMailbox().items():
+            writes.append((vt[0] * 1000, idx, b))
+    start(comp)
+    drain()
+    ticks = 0
+    while comp.anyActive() and vt[0] * 1000 < endMs + 2000:
+        if fine:
+            vt[0] = round(vt[0] + 0.001, 6)
+        else:
+            vt[0] = comp.nextDueMs(vt[0] * 1000) / 1000.0
+        comp.tick(vt[0])
+        ticks += 1
+        drain()
+    return writes, ticks
+
+
+def t_compositorWakesOnlyWhenDue(rig):
+    """Ticking only when a light's output can change sends exactly what ticking every
+    millisecond sends (same commands, each within the 1 ms the fine ticker can lag), for
+    every shipped sequence and animation, with transition fades in and out."""
+    nl = rig.nl
+    show = nl.show
+    items = []
+    for name in sorted(nl.savedSequences):
+        seq, errors, _ = nl.buildSequence(nl.savedSequences[name])
+        check(seq is not None, "%s: %s" % (name, errors))
+        mk = lambda seq=seq: show.SequencePlayer(seq, nl._showResolve, lambda n: nl.savedAnimations.get(nl.resolveAnimationName(n)),
+                                                 nl._sequenceBaseCommand)
+        items.append(("sequence " + name, lambda comp, mk=mk: comp.playSequence(mk(), 0, now=0.0), min(seq.duration, 40000) + 1))
+    for name in sorted(nl.savedAnimations):
+        anim = nl.savedAnimations[name]
+        for speed in (1.0, 2.0):
+            tl = show.AnimationTimeline(anim, speed=speed, fps=10, loop=True, maxLoops=2, stepped=True)
+            dur = tl.duration if tl.duration is not None else 8000
+            mk = lambda tl=tl, name=name: show.AnimationPlayer(name, tl, nl._showResolve, maxMs=8000)
+            items.append(("animation %s x%g" % (name, speed),
+                          lambda comp, mk=mk: comp.playAnimation(mk(), show.LAYER_OVERRIDE, now=0.0), min(dur, 8000)))
+    fineTicks = dueTicks = 0
+    for label, start, endMs in items:
+        ref, nFine = _compositorRun(nl, start, endMs, True)
+        got, nDue = _compositorRun(nl, start, endMs, False)
+        fineTicks += nFine
+        dueTicks += nDue
+        check(len(ref) == len(got), "%s: %d writes ticking every ms, %d ticking when due" % (label, len(ref), len(got)))
+        for (t1, i1, b1), (t2, i2, b2) in zip(ref, got):
+            check(i1 == i2 and b1 == b2 and -0.15 <= t1 - t2 <= 1.01,
+                  "%s: %s at %.1f ms ticking every ms, %s at %.1f ms ticking when due" % (label, (i1, b1), t1, (i2, b2), t2))
+    RESULTS.append("    %d items: %d ticks when due against %d ticking every ms (%.1f%%)"
+                   % (len(items), dueTicks, fineTicks, 100.0 * dueTicks / max(1, fineTicks)))
+
+
 TESTS = [t_maxBrightnessHTTP, t_maxBrightnessAnimationAndSequence, t_minBrightness, t_globalDefaultLimit,
          t_slidersExempt, t_lockedLight, t_roleTargets, t_effectOverPartOfRigRejoinsInSync, t_revertToPresetAtEnd,
          t_endPreset, t_holdAtEnd, t_pauseRevertsAndResumes, t_seekAndSetPosition, t_effectQueueReplaceFull,
@@ -1321,7 +1397,7 @@ TESTS = [t_maxBrightnessHTTP, t_maxBrightnessAnimationAndSequence, t_minBrightne
          t_flashGuardLimitsOutput, t_flashGuardRedFlashes, t_shippedContentUnderFlashLimit,
          t_positionTargetsAndSweep, t_animationModeValidation, t_exactAnimationTiming, t_handbackFade, t_blendCommands, t_fadeInEverywhere,
          t_fadesOnlyBetweenItems,
-         t_addSimulatedRig]
+         t_addSimulatedRig, t_compositorWakesOnlyWhenDue]
 
 
 def main():

@@ -2,6 +2,14 @@
 
 Changes relative to upstream [NeewerLite-Python v0.12d](https://github.com/taburineagle/NeewerLite-Python).
 
+## v1.4.0 - in development
+
+### Changed
+- **Lower CPU use while anything plays.** The show engine used to wake every 5 ms while an animation, sequence or fade was running; it now sleeps until the next moment a light's output can change (the next keyframe, cue, or frame of a fade), checking in at least every 100 ms. On a test machine a sequence or animation went from about 1.5% of a CPU core to about 0.5%. What the lights receive, and when, is unchanged: for every shipped animation and sequence the writes match a 1 ms ticker.
+
+### Fixed
+- **Background work no longer touches the window directly.** After waking from sleep and rescanning, and after a discovery, the Bluetooth worker refreshed the light table itself; it now asks the window to (and waits until it has, since the refresh can reorder the lights it then connects to). The wake-from-sleep status message, the On/Standby status after a power command, and the worker's view of which lights are selected also go through the window's own thread. Qt widgets touched from another thread can crash or corrupt the window at random.
+
 ## v1.3.3 - 2026-11-11
 
 ### Added
