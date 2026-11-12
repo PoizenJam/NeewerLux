@@ -181,11 +181,13 @@ def main():
     fresh.viewCombo.setCurrentIndex(1)
     app.processEvents()
     assert remembered and remembered[-1][0] == "height", "changing the view is remembered: %r" % remembered
-    fresh.resize(1000, 720); app.processEvents()
+    # not below the window's minimum, which depends on the fonts (offscreen Qt on Windows has none of its own)
+    w, h = max(1000, fresh.minimumWidth()), max(720, fresh.minimumHeight())
+    fresh.resize(w, h); app.processEvents()
     fresh.close(); app.processEvents()
-    assert remembered[-1][0] == "height" and remembered[-1][1].endswith("1000,720"), "closing remembers the size: %r" % remembered
+    assert remembered[-1][0] == "height" and remembered[-1][1].endswith("%d,%d" % (w, h)), "closing remembers the size: %r" % remembered
     again = StageWindow(nl.getStageTiles, win, view=remembered[-1][0], geometry=remembered[-1][1])
-    assert again.view.viewMode == "height" and again.width() == 1000 and again.height() == 720, "reopens the same way"
+    assert again.view.viewMode == "height" and again.width() == w and again.height() == h, "reopens the same way"
     again.close()
     nl._rememberStageWindow("height", "10,10,800,600")
     assert nl.stageView == "height" and "stageView=height" in open(nl.globalPrefsFile, encoding="utf-8").read(), "kept in the prefs file"

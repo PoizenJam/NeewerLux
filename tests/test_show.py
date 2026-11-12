@@ -433,9 +433,12 @@ def t_fadesOnlyBetweenItems(rig):
         check(back and bri(back[0]) == 20 and len(back) == 1, "and cuts back when its cue ends: " + str(w))
         keyW = [list(d) for t, d in writesFor(rig, KEY, t1)]
         check(len([d for d in keyW if d[1] == 134 and d[5] < 100]) >= 3, "Key still fades in at the start: " + str(keyW[:5]))
-        time.sleep(1.0)
-        tail = [d for t, d in writesFor(rig, KEY, t1 + 1.8)]
-        check(len(tail) >= 4 and tail[-1][1] == 135, "and fades back at the end: " + str(tail[-3:]))
+        tail = []
+        end = time.monotonic() + 3.0  # waits for the outcome: Windows schedules the worker less tightly
+        while time.monotonic() < end and not (len(tail) >= 4 and tail[-1][1][1] == 135):
+            time.sleep(0.02)
+            tail = [(round(t - t1, 3), d) for t, d in writesFor(rig, KEY, t1 + 1.8)]
+        check(len(tail) >= 4 and tail[-1][1][1] == 135, "and fades back at the end (s after play, bytes): " + str(tail[-4:]))
 
         # restarting the same animation cuts
         nl.fadeInMs = 400
