@@ -336,15 +336,17 @@ returns an error saying so and the JSON form still works.
 
 Animations can play on three layers. Each light follows the highest layer that is
 driving it; lower layers keep running underneath, and when a higher layer lets go of a
-light, the light picks up the lower layer's current frame straight away.
+light (it ends, or a sequence reverts on pause), the light goes back to the lower layer's
+current frame with the Fade back of the item that let go (0 cuts).
 
 | Layer | What it's for | Behaviour |
 |---|---|---|
 | override (highest) | the Stream Deck pedal, the GUI Play button, every `animate` URL without a layer | One at a time, as in v1.3.0: a new one replaces the old, and "Revert on finish" (the global setting, which the `revert` field still changes) decides whether lights go back afterwards. |
 | effect | channel point redeems, bits, subs, raids: anything Streamer.bot triggers | Queued (up to 10 waiting) or `replace` to cut in. Forever-looping effects stop after the Looping effect time limit (default 30 s). `revert` applies to that request only. |
 | show | sequences, or an animation used as a background look | One at a time. |
+| sound | a sound mode following live audio ([SOUND_MODES.md](SOUND_MODES.md)); not for animations | One at a time. A bed under everything: a song's sequence takes the lights it uses and gives them back when it ends. |
 
-Below all three is the base layer: the sliders, presets and plain `mode=` commands. While
+Below them all is the base layer: the sliders, presets and plain `mode=` commands. While
 a sequence or effect drives a light, a base change to that light doesn't show; it becomes
 the state the light returns to when the sequence or effect lets go. Locked lights always
 show the base layer.

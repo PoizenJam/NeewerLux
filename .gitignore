@@ -36,6 +36,14 @@ light_prefs/*
 light_prefs/sequences/*
 !light_prefs/sequences/Example - Four Light Demo.json
 !light_prefs/sequences/Starter - *.json
+# Likewise only the shipped sound modes
+!light_prefs/sound_modes/
+light_prefs/sound_modes/*
+!light_prefs/sound_modes/Pulse.json
+!light_prefs/sound_modes/Bands.json
+!light_prefs/sound_modes/Beat Chase.json
+!light_prefs/sound_modes/Colour Drift.json
+!light_prefs/sound_modes/Warm Glow.json
 
 # OS noise
 .DS_Store

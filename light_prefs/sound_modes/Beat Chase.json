@@ -1,0 +1,31 @@
+{
+  "format": 1,
+  "name": "Beat Chase",
+  "description": "Steps through the rim, background and practical lights in sweep order on the beat, changing colour each step (every other beat above 150 BPM).",
+  "sensitivity": 1.0,
+  "floor": 8,
+  "ceiling": 75,
+  "smoothing": 0.35,
+  "palette": [
+    {
+      "hue": 190,
+      "sat": 90
+    },
+    {
+      "hue": 280,
+      "sat": 85
+    },
+    {
+      "hue": 45,
+      "sat": 90
+    }
+  ],
+  "parts": [
+    {
+      "target": "@rim;@background;@practical",
+      "drive": "beat",
+      "colour": "beat",
+      "chase": true
+    }
+  ]
+}

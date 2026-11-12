@@ -51,6 +51,8 @@ uv run --no-default-groups NeewerLux.py --http
 
 `--no-default-groups` is needed on both commands, because `uv run` re-syncs first and would otherwise reinstall PySide6.
 
+Sound modes need the optional audio packages (numpy, soundcard, soundfile); the Windows download includes them. From source: `uv sync --locked --group audio` (and `--group audio` on `uv run`), or `pip install numpy soundcard soundfile`. Without them sound modes are hidden and everything else works as before.
+
 ## Using it
 
 ### Controlling lights
@@ -112,9 +114,15 @@ Double-click a track to add a cue there (it starts from the colour the light alr
 
 Play previews the edit on screen, in a Stage view under the timeline, without touching the lights. Tick **Send to lights** to play it through the real lights from the playhead; edits made while it plays are sent within a moment. Check validates the sequence, Save writes it (saving under a new name renames it), and Settings holds the frame rate, what happens at the end, while paused and during effects, and the artist, song and description. Cues whose lights aren't connected show on a "No matching light" track so they don't vanish. The web dashboard has the same editor.
 
+### Sound modes
+
+A sound mode makes lights follow whatever is playing, live: game audio, music, a mix. By default NeewerLux listens to what your computer's default output plays (no cable or virtual device needed); any other output or an input, such as an audio interface, can be picked instead. It measures loudness, bass, mids and treble, how bright the sound is and the beat, and the mode turns that into light on the lights it aims at, by role or position. Five come with it: **Pulse** (brightness follows the level), **Bands** (lows on the background, mids on the rim, highs on the fill), **Beat Chase** (steps through the lights on the beat), **Colour Drift** (colour follows how bright the sound is) and **Warm Glow** (white only, for colour-temperature lights). None of them touches the key light. Each has a sensitivity, a floor and ceiling brightness, smoothing and a palette, and they're JSON files in `light_prefs/sound_modes/` like animations, so you can make your own ([docs/SOUND_MODES.md](docs/SOUND_MODES.md)).
+
+Sound plays on its own layer underneath sequences and effects: a song's sequence starting takes the lights it uses and hands them back with its Fade back when it ends, and stream effects play over it as they do over sequences. Brightness limits, Locked lights, the CCT-only fallback and the flash guard all apply, and the modes keep themselves to 2 flashes a second, so they swell and step rather than strobe. It's controlled over HTTP for now (`sound=start|Pulse`, `POST /NeewerLux/sound`); the desktop and web dashboard panels come with the next 1.4 milestone.
+
 ### Effects on top of a sequence
 
-Animations can play on three layers above the sliders and presets. **Override** is the classic one-at-a-time slot that the GUI Play button, a Stream Deck button and any `animate` URL without a layer use. **Effect** is for things Streamer.bot triggers, such as redeems, bits, subs and raids: effects queue up behind each other or cut in, and a forever-looping effect stops after 30 seconds. **Show** holds the sequence. Each light follows the highest layer that is driving it, so an effect on the rim lights leaves the others on the sequence, and when the effect ends the rim lights rejoin the sequence in time with the song.
+Animations can play on three layers above the sliders and presets. **Override** is the classic one-at-a-time slot that the GUI Play button, a Stream Deck button and any `animate` URL without a layer use. **Effect** is for things Streamer.bot triggers, such as redeems, bits, subs and raids: effects queue up behind each other or cut in, and a forever-looping effect stops after 30 seconds. **Show** holds the sequence. Each light follows the highest layer that is driving it, so an effect on the rim lights leaves the others on the sequence, and when the effect ends the rim lights rejoin the sequence in time with the song (with the effect's Fade back).
 
 While a sequence or effect is driving a light, moving a slider or recalling a preset doesn't change that light straight away: the change becomes what the light returns to afterwards. Lights the sequence isn't using, and Locked lights, change immediately.
 
@@ -165,7 +173,7 @@ http://localhost:8080/NeewerLux/doAction?sequence=pause
 http://localhost:8080/NeewerLux/doAction?status_json
 ```
 
-For richer control, POST JSON to `/NeewerLux/batch` (several lights in one request), `/NeewerLux/animate`, `/NeewerLux/sequence` or `/NeewerLux/settings` (`get`, `set_light`, `set_global`):
+For richer control, POST JSON to `/NeewerLux/batch` (several lights in one request), `/NeewerLux/animate`, `/NeewerLux/sequence`, `/NeewerLux/sound` (sound modes) or `/NeewerLux/settings` (`get`, `set_light`, `set_global`):
 
 ```json
 { "action": "play", "name": "Concert Sweep", "speed": 1.0, "loop": true, "maxLoops": 3, "revert": true }

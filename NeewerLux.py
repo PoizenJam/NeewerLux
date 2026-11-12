@@ -51,6 +51,7 @@ from datetime import datetime
 
 import neewerlux_show as show # layered show engine: animation timelines, sequences, compositor
 import neewerlux_sim as sim # simulated lights for testing without hardware
+import neewerlux_audio as audio # sound modes: capture and analysis (numpy, soundcard optional)
 
 # IMPORT BLEAK (this is the library that allows the program to communicate with the lights) - THIS IS NECESSARY!
 try:
@@ -273,6 +274,9 @@ animRevertOnFinish = True  # revert lights to pre-animation state when a non-loo
 showEngine = None              # neewerlux_show.ShowCompositor, created by initShowEngine()
 savedSequences = {}            # dict of {name: sequence_dict} loaded from disk
 sequencesDir = os.path.dirname(os.path.abspath(sys.argv[0])) + os.sep + "light_prefs" + os.sep + "sequences"
+soundModesDir = os.path.dirname(os.path.abspath(sys.argv[0])) + os.sep + "light_prefs" + os.sep + "sound_modes"
+savedSoundModes = {}           # dict of {name: sound mode dict} loaded from disk
+audioEngine = audio.AudioEngine()  # live capture and analysis, started with a sound mode
 lightShowPrefs = {}            # {MAC: {"role", "side", "order", "eyeline", "maxBri", "minBri", "locked", "depth", "height", "aim"}}
 _lastWritten = {}              # {MAC: bytes last actually written, after CCT-only conversion and limits}, for display
 API_VERSION = 2                # HTTP API contract version (docs/HTTP_API.md); v1.3.0 and earlier count as 1
@@ -351,6 +355,8 @@ effectMaxSeconds = 30 # cap for looping effect-layer animations that have no loo
 cameraPosition = "front"  # where the main camera is, from the streamer's seat (drawn on the Stage plan)
 eyelineFlash = "same"     # flashes on eye-line lights: "same", "gentler" (1 a second) or "calm" (one change per 2 s)
 handbackFadeMs = 500      # fade when a layer hands a light back (effect ends, sequence reverts, animation stops); 0 = cut
+soundMode = "Pulse"       # the sound mode last started, and the capture device ("" = what the default output plays)
+soundDevice = ""
 stageView = "plan"        # the desktop Stage window's view, and its size and place ("x,y,w,h"), remembered
 stageGeometry = ""
 fadeInMs = 0              # fade when a preset, animation or sequence takes lights over; 0 = cut (each can set its own)
@@ -2878,6 +2884,10 @@ try: # try to load the GUI
                 finalPrefs.append("stageView=" + stageView)
             if stageGeometry:
                 finalPrefs.append("stageGeometry=" + stageGeometry)
+            if soundMode != "Pulse":  # set by starting a sound mode, kept when saving here
+                finalPrefs.append("soundMode=" + soundMode)
+            if soundDevice:
+                finalPrefs.append("soundDevice=" + soundDevice)
 
             # Simulated lights take effect at the next start (the light list isn't rebuilt live)
             simulatedLights = self.simulatedLightsCombo.currentIndex()
@@ -5700,7 +5710,8 @@ def workerThread(_loop):
             # for 1-2 seconds, causing visible stutters in animation playback.
             # A sequence can run for a whole stream, so during one the connection check and
             # auto-reconnect still run; only the power/channel reads are skipped.
-            sequenceOnly = showEngine is not None and showEngine.sequenceActive() and not showEngine.layerActive(show.LAYER_EFFECT)
+            sequenceOnly = showEngine is not None and (showEngine.sequenceActive() or showEngine.layerActive(show.LAYER_SOUND)) \
+                and not showEngine.layerActive(show.LAYER_EFFECT)
             if not animationRunning and (sequenceOnly or showEngine is None or not showEngine.anyActive()):
                 _bgThreadLogCounter += 1
                 if _bgThreadLogCounter >= 10:  # log every ~30s instead of every ~3s
@@ -5943,7 +5954,7 @@ def processCommands(listToProcess=[]):
     if inStartupMode == True: # if we're using the GUI or CLI, then add these arguments to the list
         acceptable_arguments.extend(["--http", "--cli", "--silent", "--help"])
     else: # if we're using the HTTP server, then add these arguments to the list
-        acceptable_arguments.extend(["--custom_name", "--discover", "--nopage", "--link", "--use_preset", "--save_preset", "--add_preset", "--delete_preset", "--batch", "--animate", "--stop_animate", "--list_animations", "--sequence", "--stop_layer"])
+        acceptable_arguments.extend(["--custom_name", "--discover", "--nopage", "--link", "--use_preset", "--save_preset", "--add_preset", "--delete_preset", "--batch", "--animate", "--stop_animate", "--list_animations", "--sequence", "--stop_layer", "--sound"])
 
     # KICK OUT ANY PARAMETERS THAT AREN'T IN THE "ACCEPTABLE ARGUMENTS" LIST
     for a in range(len(listToProcess) - 1, -1, -1):
@@ -5993,6 +6004,8 @@ def processCommands(listToProcess=[]):
             listToProcess[a] = "--stop_layer=all"
         elif listToProcess[a] == "--sequence":
             listToProcess[a] = "--sequence=status"
+        elif listToProcess[a] == "--sound":
+            listToProcess[a] = "--sound=start"
 
     # PARSE THE ARGUMENT LIST FOR CUSTOM PARAMETERS
     parser = argparse.ArgumentParser()
@@ -6018,7 +6031,8 @@ def processCommands(listToProcess=[]):
         parser.add_argument("--stop_animate", action="store_true") # stop the currently running animation
         parser.add_argument("--list_animations", action="store_true") # list available animations
         parser.add_argument("--sequence", default=-1) # sequence control: play|Name|start_ms, pause, resume, stop, seek|ms, position|ms
-        parser.add_argument("--stop_layer", default=-1) # stop an animation layer: override, effect, effect_all, show, all
+        parser.add_argument("--stop_layer", default=-1) # stop an animation layer: override, effect, effect_all, show, sound, all
+        parser.add_argument("--sound", default=-1) # sound mode: start|Mode, stop, mode|Mode
 
     parser.add_argument("--on", action="store_true", help="Turn the light on")
     parser.add_argument("--off", action="store_true", help="Turn the light off")
@@ -6091,6 +6105,9 @@ def processCommands(listToProcess=[]):
 
         if args.stop_layer != -1:
             return[None, args.nopage, str(args.stop_layer), "stop_layer"]
+
+        if args.sound != -1:
+            return[None, args.nopage, urllib.parse.unquote(str(args.sound)), "sound"]
     else:
         # If we request "LIST" from the CLI, then return a CLI list of lights available
         if args.list == True:
@@ -6147,7 +6164,7 @@ def processHTMLCommands(paramsList, loop):
             return
 
     # Stop the override animation for non-animation HTTP commands (sequences and effects keep running)
-    if paramsList[3] not in ("animate", "stop_animate", "list_animations", "sequence", "stop_layer") and animationRunning:
+    if paramsList[3] not in ("animate", "stop_animate", "list_animations", "sequence", "stop_layer", "sound") and animationRunning:
         stopAnimation()
 
     if paramsList[3] == "discover":
@@ -6286,6 +6303,16 @@ def processHTMLCommands(paramsList, loop):
             stopAnimation("effect", clearQueue=(which != "effect"))
         if which in ("show", "all"):
             stopAnimation("show")
+        if which in ("sound", "all"):
+            stopSound()
+
+    elif paramsList[3] == "sound":
+        # sound=start|Mode, stop, mode|Mode
+        soundParts = str(paramsList[2]).split("|")
+        soundVerb = soundParts[0].strip().lower()
+        result = soundAction(soundVerb, {"mode": soundParts[1].strip() if len(soundParts) > 1 else None})
+        if not result.get("success"):
+            printDebugString("HTTP: sound " + soundVerb + " failed: " + "; ".join(result.get("errors", [result.get("error", "")])))
 
     elif paramsList[3] == "sequence":
         # sequence=play|Name|start_ms, pause, resume, stop, seek|ms, position|ms
@@ -6950,7 +6977,7 @@ def startAnimation(animName, loop, speedMultiplier=1.0, loopOverride=None, fps=5
         printDebugString("Animation '" + str(animName) + "' not found")
         return False
     layerNum = show.LAYER_BY_NAME.get(str(layer).lower(), show.LAYER_OVERRIDE)
-    if layerNum == show.LAYER_BASE:
+    if layerNum in (show.LAYER_BASE, show.LAYER_SOUND):
         layerNum = show.LAYER_OVERRIDE
 
     animation = savedAnimations[resolvedName]
@@ -7455,6 +7482,246 @@ def getStageTiles():
     return tiles
 
 
+# ============================================================================
+# SOUND MODES: lights that follow live audio, on the sound layer
+# ============================================================================
+
+def soundAvailable():
+    """(True, "") when sound modes can run here, else (False, why). Tests swap the capture
+    source for a signal, which needs only the analysis."""
+    if audioEngine.sourceFactory is not audio.SoundcardSource:
+        return audio.available()
+    return audio.captureAvailable()
+
+
+def loadAllSoundModes():
+    """Load every sound mode JSON file in light_prefs/sound_modes/."""
+    global savedSoundModes
+    savedSoundModes = {}
+    if not os.path.isdir(soundModesDir):
+        return
+    for filename in sorted(os.listdir(soundModesDir)):
+        if not filename.lower().endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(soundModesDir, filename), "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict) and data.get("name"):
+                savedSoundModes[str(data["name"])] = data
+        except (IOError, OSError, ValueError) as e:
+            printDebugString("Could not load sound mode " + filename + ": " + str(e))
+
+
+def resolveSoundModeName(name):
+    for key in savedSoundModes:
+        if key.lower() == str(name).lower():
+            return key
+    return None
+
+
+def buildSoundMode(data):
+    """Validate a sound mode dict. Returns (parsed or None, errors, warnings)."""
+    return show.parseSoundMode(data, defaultFps=seqFrameRate, resolveTarget=_showResolve)
+
+
+def _soundModeFilesNamed(name):
+    found = []
+    if not os.path.isdir(soundModesDir):
+        return found
+    for filename in os.listdir(soundModesDir):
+        if not filename.lower().endswith(".json"):
+            continue
+        path = os.path.join(soundModesDir, filename)
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (IOError, OSError, ValueError):
+            continue
+        if isinstance(data, dict) and str(data.get("name", "")).lower() == str(name).lower():
+            found.append(path)
+    return found
+
+
+def saveSoundMode(data, original=None, overwrite=False):
+    """Validate and save a sound mode as light_prefs/sound_modes/<name>.json. original is the
+    name it was opened under: a different name renames it."""
+    mode, errors, warns = buildSoundMode(data)
+    if mode is None:
+        return {"success": False, "errors": errors, "warnings": warns}
+    existing = resolveSoundModeName(mode.name)
+    renaming = original is not None and str(original).lower() != mode.name.lower()
+    if existing is not None and (renaming or original is None) and not overwrite:
+        return {"success": False, "errors": ["a sound mode named " + repr(existing) + " exists; send \"overwrite\": true to replace it"], "warnings": warns}
+    os.makedirs(soundModesDir, exist_ok=True)
+    safeName = "".join(c for c in mode.name if c.isalnum() or c in " _-").strip() or "sound mode"
+    target = os.path.join(soundModesDir, safeName + ".json")
+    for path in _soundModeFilesNamed(mode.name):
+        if os.path.normcase(os.path.abspath(path)) != os.path.normcase(os.path.abspath(target)):
+            os.remove(path)
+    with open(target, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+    for n in [n for n in savedSoundModes if n.lower() == mode.name.lower()]:
+        savedSoundModes.pop(n)
+    savedSoundModes[mode.name] = data
+    if renaming:
+        deleteSoundMode(original)
+    return {"success": True, "mode": mode.name, "errors": [], "warnings": warns}
+
+
+def deleteSoundMode(name):
+    resolved = resolveSoundModeName(name)
+    if resolved is None:
+        return False
+    for path in _soundModeFilesNamed(resolved):
+        os.remove(path)
+    savedSoundModes.pop(resolved, None)
+    return True
+
+
+def _rememberSound(**changes):
+    global soundMode, soundDevice
+    updates = {}
+    if "mode" in changes and changes["mode"] != soundMode:
+        soundMode = changes["mode"]
+        updates["soundMode"] = None if soundMode == "Pulse" else soundMode
+    if "device" in changes and changes["device"] != soundDevice:
+        soundDevice = changes["device"]
+        updates["soundDevice"] = soundDevice or None
+    if updates:
+        try:
+            _updatePrefsFile(updates)
+        except OSError as e:
+            printDebugString("Couldn't save the sound settings (" + str(e) + ")")
+
+
+def startSound(modeName=None, device=None, params=None, fadeIn=None, fadeOut=None):
+    """Start a sound mode on the sound layer (replacing the one playing), starting capture if
+    needed. modeName and device default to the last ones used; params change the mode's
+    top-level values for this play. Returns a dict with success and errors."""
+    ok, why = soundAvailable()
+    if not ok:
+        return {"success": False, "errors": [why]}
+    initShowEngine()
+    resolved = resolveSoundModeName(soundMode if modeName in (None, "") else modeName)
+    if resolved is None:
+        return {"success": False, "errors": ["no sound mode named " + repr(modeName or soundMode)],
+                "available": sorted(savedSoundModes)}
+    mode, errors, warns = buildSoundMode(savedSoundModes[resolved])
+    if mode is not None and params:
+        mode, errors = show.soundModeWithParams(mode, params, seqFrameRate)
+    if mode is None:
+        return {"success": False, "errors": errors, "warnings": warns}
+    device = soundDevice if device is None else str(device)
+    audioEngine.start(device)
+    player = show.SoundPlayer(mode, _showResolve, audioEngine.features)
+    if _fadeValue(fadeIn) is not None:
+        player.fadeInMs = _fadeValue(fadeIn)
+    if _fadeValue(fadeOut) is not None:
+        player.fadeOutMs = _fadeValue(fadeOut)
+    showEngine.playSound(player)
+    _rememberSound(mode=resolved, device=device)
+    printDebugString("Sound mode '" + resolved + "' playing")
+    return {"success": True, "mode": resolved, "errors": [], "warnings": warns}
+
+
+def stopSound():
+    """Stop the sound mode (its lights fade back) and the capture."""
+    stopped = showEngine.stopLayer(show.LAYER_SOUND) if showEngine is not None else False
+    audioEngine.stop()
+    return stopped
+
+
+def setSoundParams(params):
+    """Change the playing mode's top-level values (not saved)."""
+    player = showEngine.soundPlayer() if showEngine is not None else None
+    if player is None:
+        return {"success": False, "errors": ["no sound mode is playing"]}
+    mode, errors = show.soundModeWithParams(player.mode, params, seqFrameRate)
+    if mode is None:
+        return {"success": False, "errors": errors}
+    with showEngine.lock:
+        player.setMode(mode)
+    return {"success": True, "errors": [], "params": _soundParams(mode)}
+
+
+def setSoundDevice(device):
+    device = str(device or "")
+    _rememberSound(device=device)
+    if showEngine is not None and showEngine.soundPlayer() is not None:
+        audioEngine.start(device)
+    return {"success": True, "device": device}
+
+
+def _soundParams(mode):
+    return {"sensitivity": mode.sensitivity, "floor": mode.floor, "ceiling": mode.ceiling,
+            "smoothing": mode.smoothing, "fps": mode.fps, "palette": mode.palette}
+
+
+def soundStatus():
+    """What a sound panel shows: whether it can run, what's playing, the device and the levels."""
+    ok, why = soundAvailable()
+    player = showEngine.soundPlayer() if showEngine is not None else None
+    f = audioEngine.features() if audioEngine.running else None
+    levels = None
+    if f is not None:
+        levels = {k: f[k] for k in ("level", "low", "mid", "high", "centroid", "bpm", "confidence", "beat", "silent", "rms_db")}
+    return {"available": ok, "reason": why, "running": player is not None,
+            "mode": player.name if player is not None else None,
+            "params": _soundParams(player.mode) if player is not None else None,
+            "lastMode": soundMode, "device": soundDevice, "deviceName": audioEngine.deviceName if audioEngine.running else "",
+            "capturing": audioEngine.running, "error": audioEngine.error, "levels": levels}
+
+
+def soundAction(action, body):
+    """POST /NeewerLux/sound (docs/HTTP_API.md)."""
+    if action == "start":
+        return startSound(body.get("mode"), body.get("device"), body.get("params"),
+                          body.get("fade_in_ms"), body.get("handback_fade_ms"))
+    if action == "stop":
+        return {"success": True, "stopped": stopSound()}
+    if action == "mode":
+        if showEngine is None or showEngine.soundPlayer() is None:
+            return {"success": False, "errors": ["no sound mode is playing; use start"]}
+        return startSound(body.get("mode"), None, body.get("params"), body.get("fade_in_ms"), body.get("handback_fade_ms"))
+    if action == "set":
+        return setSoundParams(body.get("params"))
+    if action == "device":
+        return setSoundDevice(body.get("device", ""))
+    if action == "status":
+        return dict(soundStatus(), success=True)
+    if action == "devices":
+        ok, why = audio.captureAvailable()
+        if not ok:
+            return {"success": False, "errors": [why]}
+        try:
+            return {"success": True, "devices": audio.listDevices(), "device": soundDevice}
+        except Exception as e:  # the audio system refused to list devices
+            return {"success": False, "errors": [str(e)]}
+    if action in ("list", "reload"):
+        if action == "reload":
+            loadAllSoundModes()
+        return {"success": True, "modes": [{"name": n, "description": d.get("description", ""), "parts": len(d.get("parts", []))}
+                                           for n, d in sorted(savedSoundModes.items())]}
+    if action == "get":
+        resolved = resolveSoundModeName(body.get("name", ""))
+        if resolved is None:
+            return {"success": False, "errors": ["no sound mode named " + repr(body.get("name", ""))]}
+        return {"success": True, "mode": savedSoundModes[resolved]}
+    if action == "validate":
+        mode, errors, warns = buildSoundMode(body.get("mode"))
+        return {"success": mode is not None, "errors": errors, "warnings": warns}
+    if action == "save":
+        return saveSoundMode(body.get("mode"), body.get("original"), bool(body.get("overwrite", False)))
+    if action == "delete":
+        name = body.get("name", "")
+        player = showEngine.soundPlayer() if showEngine is not None else None
+        if player is not None and player.name.lower() == str(name).lower():
+            stopSound()
+        ok = deleteSoundMode(name)
+        return {"success": ok, "errors": [] if ok else ["no sound mode named " + repr(name)]}
+    return {"success": False, "error": "Unknown action: " + action}
+
+
 def getShowStatus():
     """Layer, sequence and per-light status for the HTTP status endpoints and the GUI."""
     if showEngine is None:
@@ -7476,7 +7743,8 @@ def getShowStatus():
                        "color": show.rgbHex(rgb)})
     return {"apiVersion": API_VERSION, "layers": st["layers"], "sequence": st["sequence"], "lights": lights,
             "flashGuard": {"enabled": flashGuardEnabled, "held": flashGuard.held, "eyeline": eyelineFlash},
-            "stage": {"camera": cameraPosition}, "handbackFadeMs": handbackFadeMs, "fadeInMs": fadeInMs}
+            "stage": {"camera": cameraPosition}, "handbackFadeMs": handbackFadeMs, "fadeInMs": fadeInMs,
+            "sound": soundStatus()}
 
 
 def _commandJSON(cmd):
@@ -8426,8 +8694,8 @@ class NLPythonServer(BaseHTTPRequestHandler):
             return
 
         # ONLY ACCEPT REQUESTS TO SUPPORTED POST ENDPOINTS
-        if self.path not in ("/NeewerLux/batch", "/NeewerLux/animate", "/NeewerLux/sequence", "/NeewerLux/settings", "/NeewerLux/presets", "/NeewerLite-Python/batch", "/NeewerLite-Python/animate"):
-            self.send_error(404, "POST requests are supported at /NeewerLux/batch, /NeewerLux/animate, /NeewerLux/sequence, /NeewerLux/presets and /NeewerLux/settings")
+        if self.path not in ("/NeewerLux/batch", "/NeewerLux/animate", "/NeewerLux/sequence", "/NeewerLux/settings", "/NeewerLux/presets", "/NeewerLux/sound", "/NeewerLite-Python/batch", "/NeewerLite-Python/animate"):
+            self.send_error(404, "POST requests are supported at /NeewerLux/batch, /NeewerLux/animate, /NeewerLux/sequence, /NeewerLux/presets, /NeewerLux/sound and /NeewerLux/settings")
             return
 
         # READ AND PARSE THE JSON BODY
@@ -8616,6 +8884,13 @@ class NLPythonServer(BaseHTTPRequestHandler):
             else:
                 resultData = {"success": False, "error": "Unknown action: " + action}
 
+        elif self.path == "/NeewerLux/sound":
+            action = str(body.get("action", "status")).lower()
+            if action not in ("status", "list", "get", "devices", "validate"):  # read-only requests would flood the log
+                printDebugString("POST sound request from " + clientIP + ": " + action)
+            resultData = soundAction(action, body)
+            resultData["action"] = action
+
         elif self.path == "/NeewerLux/presets":
             action = str(body.get("action", "list")).lower()
             if action not in ("list", "get"):
@@ -8732,8 +9007,10 @@ def writeHTMLSections(self, theSection, errorMsg = ""):
         self.wfile.write(bytes("&nbsp;&nbsp;Create: <EM>{\"action\": \"create\", \"animation\": {\"name\": \"...\", \"loop\": true, \"keyframes\": [...]}}</EM><BR>\n", "utf-8"))
         self.wfile.write(bytes("<STRONG>sequence=</STRONG> - play|Name, pause, resume or stop a sequence<BR>\n", "utf-8"))
         self.wfile.write(bytes("&nbsp;&nbsp;&nbsp;&nbsp;Example: <EM>http://(server address)/NeewerLux/doAction?sequence=play|Example%20-%20Four%20Light%20Demo</EM><BR>\n", "utf-8"))
+        self.wfile.write(bytes("<STRONG>sound=</STRONG> - start|Mode, mode|Mode or stop a sound mode (lights following live audio)<BR>\n", "utf-8"))
         self.wfile.write(bytes("<STRONG>status_json</STRONG> - layers, sequence position, and each light's layer and approximate colour<BR>\n", "utf-8"))
         self.wfile.write(bytes("<STRONG>POST /NeewerLux/sequence</STRONG> - list, reload, play, pause, resume, stop, seek, set_position, status, validate, save, render<BR>\n", "utf-8"))
+        self.wfile.write(bytes("<STRONG>POST /NeewerLux/sound</STRONG> - start, stop, mode, set, device, devices, status, list, get, save, delete, validate, reload<BR>\n", "utf-8"))
         self.wfile.write(bytes("<STRONG>POST /NeewerLux/settings</STRONG> - get, set_light, set_global (light and show preferences)<BR>\n", "utf-8"))
     elif theSection == "quicklinks" or theSection == "quicklinks-timer":
         footerLinks = "Shortcut links: "
@@ -8828,7 +9105,7 @@ def loadPrefsFile(globalPrefsFile = ""):
            rememberLightsOnExit, acceptable_HTTP_IPs, customKeys, enableTabsOnLaunch, \
            whiteListedMACs, rememberPresetsOnExit, autoReconnectOnDisconnect, livePreview, hideConsoleOnLaunch, minimizeToTrayOnClose, httpAutoStart, httpPort, cctFallbackMode, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, \
            envMaxBri, envMinBri, seqFrameRate, effectMaxSeconds, simulatedLights, simulatedCCTOnly, flashGuardEnabled, \
-           cameraPosition, eyelineFlash, handbackFadeMs, fadeInMs, stageView, stageGeometry
+           cameraPosition, eyelineFlash, handbackFadeMs, fadeInMs, stageView, stageGeometry, soundMode, soundDevice
 
     if globalPrefsFile != "":
         printDebugString("Loading global preferences from file...")
@@ -8843,7 +9120,7 @@ def loadPrefsFile(globalPrefsFile = ""):
             "SC_Dec_1_Large", "SC_Inc_1_Large", "SC_Dec_2_Large", "SC_Inc_2_Large", "SC_Dec_3_Large", "SC_Inc_3_Large", \
             "enableTabsOnLaunch", "whiteListedMACs", "rememberPresetsOnExit", "autoReconnectOnDisconnect", "hideConsoleOnLaunch", "minimizeToTrayOnClose", "livePreview", "httpAutoStart", "httpPort", "cctFallbackMode", "enableLogTab", "logToFile", "logHeartbeat", "globalCCTMin", "globalCCTMax", \
             "envMaxBri", "envMinBri", "seqFrameRate", "effectMaxSeconds", "simulatedLights", "simulatedCCTOnly", "flashGuard", \
-            "cameraPosition", "eyelineFlash", "handbackFadeMs", "fadeInMs", "stageView", "stageGeometry"]
+            "cameraPosition", "eyelineFlash", "handbackFadeMs", "fadeInMs", "stageView", "stageGeometry", "soundMode", "soundDevice"]
 
         # KICK OUT ANY PARAMETERS THAT AREN'T IN THE "ACCEPTABLE ARGUMENTS" LIST ABOVE
         # THIS SECTION OF CODE IS *SLIGHTLY* DIFFERENT THAN THE CLI KICK OUT CODE
@@ -8890,6 +9167,8 @@ def loadPrefsFile(globalPrefsFile = ""):
     prefsParser.add_argument("--fadeInMs", default=0)
     prefsParser.add_argument("--stageView", default="plan")
     prefsParser.add_argument("--stageGeometry", default="")
+    prefsParser.add_argument("--soundMode", default="Pulse")
+    prefsParser.add_argument("--soundDevice", default="")
     prefsParser.add_argument("--seqFrameRate", default=20)
     prefsParser.add_argument("--effectMaxSeconds", default=30)
     prefsParser.add_argument("--simulatedLights", default=0)
@@ -8972,6 +9251,8 @@ def loadPrefsFile(globalPrefsFile = ""):
     fadeInMs = _intPref(mainPrefs.fadeInMs, 0, 0, 5000)
     stageView = mainPrefs.stageView if mainPrefs.stageView in ("plan", "height", "strip") else "plan"
     stageGeometry = str(mainPrefs.stageGeometry or "")
+    soundMode = str(mainPrefs.soundMode or "Pulse")
+    soundDevice = str(mainPrefs.soundDevice or "")
 
     if type(mainPrefs.acceptableIPs) is not list: # we have a string in the return, so we need to post-process it
         acceptable_HTTP_IPs = mainPrefs.acceptableIPs.replace(" ", "").split(";") # split the IP addresses into a list for acceptable IPs
@@ -9060,6 +9341,7 @@ if __name__ == '__main__':
             loadAllAnimations()
             loadLightAliases()
             loadAllSequences()
+            loadAllSoundModes()
             if simRigThisRun > 0 or simulatedCCTOnly:
                 addSimulatedLights(simRigThisRun, simulatedCCTOnly, simulateFaults)
             initShowEngine()
@@ -9233,6 +9515,7 @@ if __name__ == '__main__':
                 loadAllAnimations()
                 loadLightAliases()
                 loadAllSequences()
+                loadAllSoundModes()
                 if simRigThisRun > 0 or simulatedCCTOnly:
                     if addSimulatedLights(simRigThisRun, simulatedCCTOnly, simulateFaults):
                         mainWindow.updateLights()

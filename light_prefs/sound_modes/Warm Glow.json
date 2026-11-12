@@ -1,0 +1,24 @@
+{
+  "format": 1,
+  "name": "Warm Glow",
+  "description": "White only, for colour-temperature lights: warm and dim when it's quiet or bass-heavy, a little brighter and cooler when it's bright.",
+  "sensitivity": 1.0,
+  "floor": 25,
+  "ceiling": 60,
+  "smoothing": 0.7,
+  "palette": [
+    {
+      "temp": 2900
+    },
+    {
+      "temp": 4300
+    }
+  ],
+  "parts": [
+    {
+      "target": "@rim;@background;@practical",
+      "drive": "level",
+      "colour": "centroid"
+    }
+  ]
+}

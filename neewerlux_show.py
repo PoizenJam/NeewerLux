@@ -6,10 +6,10 @@ flags, worker wake-up, preset recall, status) so the same engine runs in the
 GUI, in --http mode and in the offline test harness.
 
 Layers, lowest to highest: base (0, manual and presets, owned by NeewerLux.py),
-show (1, sequences or a background animation), effect (2, queued triggered
-effects), override (3, the legacy one-animation-at-a-time slot). Each light is
-driven by the highest layer whose current frame includes it; covered layers
-keep their clocks running.
+sound (1, a sound mode following live audio, a bed under everything else), show (2,
+sequences or a background animation), effect (3, queued triggered effects), override
+(4, the legacy one-animation-at-a-time slot). Each light is driven by the highest
+layer whose current frame includes it; covered layers keep their clocks running.
 """
 
 import bisect
@@ -18,12 +18,13 @@ import threading
 import time
 
 LAYER_BASE = 0
-LAYER_SHOW = 1
-LAYER_EFFECT = 2
-LAYER_OVERRIDE = 3
-LAYER_BY_NAME = {"base": LAYER_BASE, "show": LAYER_SHOW, "effect": LAYER_EFFECT, "override": LAYER_OVERRIDE}
+LAYER_SOUND = 1
+LAYER_SHOW = 2
+LAYER_EFFECT = 3
+LAYER_OVERRIDE = 4
+LAYER_BY_NAME = {"base": LAYER_BASE, "sound": LAYER_SOUND, "show": LAYER_SHOW, "effect": LAYER_EFFECT, "override": LAYER_OVERRIDE}
 LAYER_NAMES = {v: k for k, v in LAYER_BY_NAME.items()}
-LAYER_FADE = 4  # a light fading to a newly recalled preset; reported as base, not a layer you can play on
+LAYER_FADE = 5  # a light fading to a newly recalled preset; reported as base, not a layer you can play on
 LAYER_NAMES[LAYER_FADE] = "base"
 
 SEQUENCE_FORMAT = 1
@@ -1011,6 +1012,299 @@ def parseSequence(data, clipExists, defaultFps=DEFAULT_SEQUENCE_FPS, resolveTarg
 # ============================================================================
 # HAND-BACK FADES
 # ============================================================================
+# ============================================================================
+# SOUND MODES
+# ============================================================================
+
+SOUND_MODE_FORMAT = 1
+SOUND_DRIVES = ("level", "low", "mid", "high", "beat")
+SOUND_FLASH_LIMIT = 2       # flashes a second a sound mode allows itself; the flash guard (3) is the backstop
+SOUND_CHASE_MAX_BPM = 150   # faster than this, chases step on every other beat
+SOUND_ATTACK_MS = 60        # how fast a light rises to a louder value
+SOUND_COLOUR_STEP_MS = 400  # how long a palette step (colour "beat") takes to blend
+
+
+class SoundMode:
+    __slots__ = ("name", "description", "sensitivity", "floor", "ceiling", "smoothing", "fps", "palette",
+                 "parts", "fadeInMs", "handbackMs", "raw")
+
+
+def _modeNum(data, key, default, lo, hi, errors, integer=False):
+    if key not in data:
+        return default
+    v = data[key]
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        errors.append("%s must be a number" % key)
+        return default
+    if not lo <= v <= hi:
+        errors.append("%s must be %s to %s" % (key, lo, hi))
+        return default
+    return int(round(v)) if integer else float(v)
+
+
+def parseSoundMode(data, defaultFps=DEFAULT_SEQUENCE_FPS, resolveTarget=None):
+    """Check a sound mode (the format is in docs/SOUND_MODES.md). Returns (SoundMode or None,
+    errors, warnings)."""
+    errors, warnings = [], []
+    if not isinstance(data, dict):
+        return None, ["a sound mode must be a JSON object"], []
+    if data.get("format", SOUND_MODE_FORMAT) != SOUND_MODE_FORMAT:
+        errors.append("format must be %d" % SOUND_MODE_FORMAT)
+    m = SoundMode()
+    m.raw = data
+    m.name = str(data.get("name", "")).strip()
+    if not m.name:
+        errors.append("a sound mode needs a name")
+    m.description = str(data.get("description", ""))
+    m.sensitivity = _modeNum(data, "sensitivity", 1.0, 0.1, 5.0, errors)
+    m.floor = _modeNum(data, "floor", 10, 0, 100, errors, integer=True)
+    m.ceiling = _modeNum(data, "ceiling", 75, 0, 100, errors, integer=True)
+    if m.floor > m.ceiling:
+        errors.append("floor can't be above ceiling")
+    m.smoothing = _modeNum(data, "smoothing", 0.5, 0.0, 1.0, errors)
+    m.fps = _modeNum(data, "fps", defaultFps, 1, MAX_FPS, errors, integer=True)
+    m.fadeInMs = _modeNum(data, "fade_in_ms", None, 0, 10000, errors, integer=True)
+    m.handbackMs = _modeNum(data, "handback_fade_ms", None, 0, 10000, errors, integer=True)
+
+    m.palette = []
+    palette = data.get("palette", [{"hue": 240, "sat": 100}])
+    if not isinstance(palette, list) or not palette:
+        errors.append("palette must be a list of colours")
+        palette = []
+    kinds = set()
+    for i, entry in enumerate(palette):
+        if not isinstance(entry, dict):
+            errors.append("palette[%d] must be an object" % i)
+            continue
+        if "temp" in entry:
+            pe = {"temp": _modeNum(entry, "temp", 5600, 2700, 10000, errors, integer=True)}
+            kinds.add("CCT")
+        else:
+            pe = {"hue": _modeNum(entry, "hue", 0, 0, 360, errors, integer=True) % 360,
+                  "sat": _modeNum(entry, "sat", 100, 0, 100, errors, integer=True)}
+            kinds.add("HSI")
+        m.palette.append(pe)
+    if len(kinds) > 1:
+        errors.append("palette colours must all be hue/sat or all temp (Kelvin), not a mix")
+
+    m.parts = []
+    parts = data.get("parts")
+    if not isinstance(parts, list) or not parts:
+        errors.append("parts must be a non-empty list")
+        parts = []
+    for i, part in enumerate(parts):
+        if not isinstance(part, dict):
+            errors.append("parts[%d] must be an object" % i)
+            continue
+        p = {"target": str(part.get("target", "")).strip(), "drive": str(part.get("drive", "level")).lower(),
+             "colour": part.get("colour", 0), "chase": bool(part.get("chase", False))}
+        if not p["target"]:
+            errors.append("parts[%d] needs a target" % i)
+        if p["drive"] not in SOUND_DRIVES:
+            errors.append("parts[%d].drive must be one of %s" % (i, ", ".join(SOUND_DRIVES)))
+        c = p["colour"]
+        if isinstance(c, bool) or not (isinstance(c, int) or c in ("centroid", "beat")):
+            errors.append("parts[%d].colour must be a palette index, \"centroid\" or \"beat\"" % i)
+        elif isinstance(c, int) and not 0 <= c < max(1, len(m.palette)):
+            errors.append("parts[%d].colour %d is not in the palette" % (i, c))
+        sub = []
+        p["floor"] = _modeNum(part, "floor", None, 0, 100, sub, integer=True)
+        p["ceiling"] = _modeNum(part, "ceiling", None, 0, 100, sub, integer=True)
+        errors += ["parts[%d].%s" % (i, e) for e in sub]
+        lo = m.floor if p["floor"] is None else p["floor"]
+        hi = m.ceiling if p["ceiling"] is None else p["ceiling"]
+        if lo > hi:
+            errors.append("parts[%d]: floor can't be above ceiling" % i)
+        if resolveTarget is not None and p["target"] and not resolveTarget(p["target"]):
+            warnings.append("parts[%d] target %s matches no light right now" % (i, p["target"]))
+        m.parts.append(p)
+    return (None if errors else m), errors, warnings
+
+
+def soundModeWithParams(mode, params, defaultFps=DEFAULT_SEQUENCE_FPS):
+    """The mode with some top-level values changed (sensitivity, floor, ceiling, smoothing,
+    palette, fps), checked like a saved mode. Returns (SoundMode or None, errors)."""
+    allowed = ("sensitivity", "floor", "ceiling", "smoothing", "palette", "fps")
+    if not isinstance(params, dict):
+        return None, ["params must be an object"]
+    bad = [k for k in params if k not in allowed]
+    if bad:
+        return None, ["can't change %s (only %s)" % (", ".join(bad), ", ".join(allowed))]
+    raw = dict(mode.raw)
+    raw.update(params)
+    m, errors, _ = parseSoundMode(raw, defaultFps)
+    return m, errors
+
+
+def _lerpPalette(palette, pos):
+    """A colour at pos (0 to 1) along the palette, blending neighbouring entries (hue the short
+    way round)."""
+    if len(palette) == 1:
+        return dict(palette[0])
+    x = max(0.0, min(1.0, pos)) * (len(palette) - 1)
+    i = min(int(x), len(palette) - 2)
+    return _blendEntry(palette[i], palette[i + 1], x - i)
+
+
+def _blendEntry(a, b, t):
+    if "temp" in a:
+        return {"temp": a["temp"] + (b["temp"] - a["temp"]) * t}
+    diff = (b["hue"] - a["hue"] + 540) % 360 - 180
+    return {"hue": (a["hue"] + diff * t) % 360, "sat": a["sat"] + (b["sat"] - a["sat"]) * t}
+
+
+def _soundClose(a, b):
+    """Changes too small to be worth a Bluetooth write."""
+    if a is None or b is None or a.get("mode") != b.get("mode") or abs(a["bri"] - b["bri"]) >= 2:
+        return False
+    if a["mode"] == "CCT":
+        return a["temp"] == b["temp"]
+    return abs((a["hue"] - b["hue"] + 540) % 360 - 180) < 3 and abs(a["sat"] - b["sat"]) < 3
+
+
+class SoundPlayer:
+    """A sound mode on the sound layer. features() returns the latest analysis (a dict from
+    neewerlux_audio.Analyzer) or None; frames never wait on audio. It never finishes."""
+    kind = "sound"
+    parallel = True
+    revert = True
+    maxMs = None
+
+    def __init__(self, mode, resolver, features):
+        self.resolver = resolver
+        self.features = features
+        self.startMs = 0.0
+        self.lastOut = {}
+        self.latest = None
+        self._lastMs = None
+        self._lastBeat = None
+        self._beats = 0
+        self._env = {}          # (part, light) -> 0..1
+        self._levelEnv = 0.0
+        self._centroid = {}     # part -> smoothed centroid
+        self._step = {}         # part -> chase step / palette step
+        self._stepAt = {}       # part -> ms when the palette step changed
+        self._beatEnv = {}      # part -> beat envelope
+        self._counters = {}     # light -> FlashCounter (SOUND_FLASH_LIMIT)
+        self._sent = {}         # light -> command last output
+        self.setMode(mode)
+
+    def setMode(self, mode):
+        self.mode = mode
+        self.name = mode.name
+        self.fadeInMs = mode.fadeInMs
+        self.fadeOutMs = mode.handbackMs
+        self.frameMs = 1000.0 / mode.fps
+        self.refreshMap()
+
+    def refreshMap(self):
+        self.partLights = [list(self.resolver(p["target"])) for p in self.mode.parts]
+
+    def start(self, nowMs):
+        self.startMs = nowMs
+
+    def nextChange(self, nowMs):
+        if nowMs < self.startMs:
+            return self.startMs
+        return self.startMs + (int((nowMs - self.startMs) // self.frameMs) + 1) * self.frameMs
+
+    def frame(self, nowMs):
+        mode = self.mode
+        f = self.features() or {}
+        self.latest = f or None
+        dt = min(200.0, nowMs - self._lastMs) if self._lastMs is not None else self.frameMs
+        self._lastMs = nowMs
+        release = 120.0 + mode.smoothing * 1500.0
+        up = 1.0 - math.exp(-dt / SOUND_ATTACK_MS)
+        down = 1.0 - math.exp(-dt / release)
+        level = min(1.0, f.get("level", 0.0) * mode.sensitivity)
+        self._levelEnv += (level - self._levelEnv) * (up if level > self._levelEnv else down)
+        beat = f.get("beat")
+        newBeat = beat is not None and self._lastBeat is not None and beat != self._lastBeat
+        self._lastBeat = beat
+        if newBeat:
+            self._beats += 1
+        stepBeat = newBeat and (f.get("bpm", 0) <= SOUND_CHASE_MAX_BPM or self._beats % 2 == 0)
+
+        out = {}
+        for pi, part in enumerate(mode.parts):
+            lights = self.partLights[pi]
+            if not lights:
+                continue
+            lo = mode.floor if part["floor"] is None else part["floor"]
+            hi = mode.ceiling if part["ceiling"] is None else part["ceiling"]
+            colour = part["colour"]
+            if stepBeat and (part["chase"] or colour == "beat"):
+                self._step[pi] = self._step.get(pi, 0) + 1
+                self._stepAt[pi] = nowMs
+            if part["drive"] == "beat":
+                be = 1.0 if newBeat else self._beatEnv.get(pi, 0.0) * (1.0 - down)
+                self._beatEnv[pi] = be
+                drive = be
+            else:
+                drive = min(1.0, f.get(part["drive"], 0.0) * mode.sensitivity)
+
+            if colour == "centroid":
+                c = self._centroid.get(pi, f.get("centroid", 0.0))
+                c += (f.get("centroid", c) - c) * (1.0 - math.exp(-dt / (300.0 + mode.smoothing * 3000.0)))
+                self._centroid[pi] = c
+                entry = _lerpPalette(mode.palette, c)
+            elif colour == "beat":
+                n = len(mode.palette)
+                k = self._step.get(pi, 0)
+                t = min(1.0, (nowMs - self._stepAt.get(pi, -1e9)) / SOUND_COLOUR_STEP_MS)
+                entry = _blendEntry(mode.palette[(k - 1) % n], mode.palette[k % n], t)
+            else:
+                entry = mode.palette[colour]
+
+            for li, idx in enumerate(lights):
+                if part["chase"]:
+                    on = li == self._step.get(pi, 0) % len(lights)
+                    target = (1.0 if on else 0.0) * (0.4 + 0.6 * self._levelEnv)
+                else:
+                    target = drive
+                key = (pi, idx)
+                env = self._env.get(key, 0.0)
+                env += (target - env) * (up if target > env else down)
+                self._env[key] = env
+                bri = int(round(lo + (hi - lo) * env))
+                if "temp" in entry:
+                    out[idx] = {"mode": "CCT", "temp": int(round(entry["temp"] / 100.0)), "bri": bri}
+                else:
+                    out[idx] = {"mode": "HSI", "hue": int(round(entry["hue"])) % 360, "sat": int(round(entry["sat"])), "bri": bri}
+
+        t = nowMs / 1000.0
+        for idx, cmd in out.items():
+            prev = self._sent.get(idx)
+            if _soundClose(prev, cmd):
+                out[idx] = prev
+                continue
+            counter = self._counters.get(idx)
+            if counter is None:
+                counter = self._counters[idx] = FlashCounter()
+            # judged as if it were white: a CCT-only light shows colours as white, which swings
+            # further in luminance than the colour does
+            red = (flashLevel(cmd) or (0.0, False))[1]
+            level = (cmd["bri"] / 100.0, red)
+            if prev is not None and counter.check(t, level, SOUND_FLASH_LIMIT, 1.0, paced=True):
+                out[idx] = prev
+                continue
+            counter.add(t, level)
+            self._sent[idx] = cmd
+        self.lastOut = out
+        return dict(out), False
+
+    def describe(self, nowMs):
+        f = self.latest or {}
+        return {"type": "sound", "name": self.name, "level": f.get("level", 0.0), "low": f.get("low", 0.0),
+                "mid": f.get("mid", 0.0), "high": f.get("high", 0.0), "centroid": f.get("centroid", 0.0),
+                "bpm": f.get("bpm", 0.0), "beat": f.get("beat", 0), "signal": bool(f) and not f.get("silent", True)}
+
+
+def _revertsOnPause(player):
+    return isinstance(player, SequencePlayer) and player.userPaused and player.seq.pausemode == "revert"
+
+
 HANDBACK_FPS = 20  # updates a second while a light fades back (keeps Bluetooth writes modest)
 
 
@@ -1065,7 +1359,7 @@ class ShowCompositor:
         self.hooks = hooks
         self.clock = clock
         self.lock = threading.RLock()
-        self.layers = {LAYER_SHOW: None, LAYER_EFFECT: None, LAYER_OVERRIDE: None}
+        self.layers = {LAYER_SOUND: None, LAYER_SHOW: None, LAYER_EFFECT: None, LAYER_OVERRIDE: None}
         self.effectQueue = []
         self.owner = {}       # idx -> layer driving it
         self.baseStates = {}  # idx -> bytes to restore when no layer drives it
@@ -1178,6 +1472,14 @@ class ShowCompositor:
             self._beginPlayer(layer, player, nowMs, old)
             return "playing"
         return self._command(run, now)
+
+    def playSound(self, player, now=None):
+        """Put a SoundPlayer on the sound layer, replacing the one there."""
+        return self.playAnimation(player, LAYER_SOUND, "replace", now)
+
+    def soundPlayer(self):
+        with self.lock:
+            return self.layers[LAYER_SOUND]
 
     def stopLayer(self, layer, clearQueue=False, now=None):
         def run(nowMs):
@@ -1304,7 +1606,7 @@ class ShowCompositor:
                     continue
                 to = list(OFF_BYTES) if to[0] == 0 else list(to)
                 fade = self.fades.get(idx)
-                driven = self.owner.get(idx, 0) in (LAYER_SHOW, LAYER_EFFECT, LAYER_OVERRIDE) and not (fade and fade[3] == 0)
+                driven = self.owner.get(idx, 0) in (LAYER_SOUND, LAYER_SHOW, LAYER_EFFECT, LAYER_OVERRIDE) and not (fade and fade[3] == 0)
                 if driven:
                     self.baseStates[idx] = to
                     done.append(idx)
@@ -1416,7 +1718,7 @@ class ShowCompositor:
                     seq.clock.resume(nowMs)
 
         frames = {}
-        for layer in (LAYER_SHOW, LAYER_EFFECT, LAYER_OVERRIDE):
+        for layer in (LAYER_SOUND, LAYER_SHOW, LAYER_EFFECT, LAYER_OVERRIDE):
             p = self.layers[layer]
             if p is None:
                 continue
@@ -1439,7 +1741,7 @@ class ShowCompositor:
         for idx in lights:
             win = 0
             if not self.hooks.isLocked(idx):
-                for layer in (LAYER_OVERRIDE, LAYER_EFFECT, LAYER_SHOW):
+                for layer in (LAYER_OVERRIDE, LAYER_EFFECT, LAYER_SHOW, LAYER_SOUND):
                     if layer in frames and idx in frames[layer][0]:
                         win = layer
                         break
@@ -1459,14 +1761,17 @@ class ShowCompositor:
                 # Fades belong to transitions between items, never to what happens inside one: a
                 # light an item picks up after it started, or drops while it keeps running, cuts
                 # (the item's own cues and fades decide how it looks).
-                taking = win > 0 and (win > was or player is not oldPlayer)
-                if taking:   # an animation or sequence starting: its fade in
+                # An item letting go (it ended, or a sequence reverted on pause) hands its lights
+                # back with its Fade back, to the base or to a lower layer that is still running.
+                handBack = oldPlayer is not None and win < was and (
+                    all(oldPlayer is not p for p in self.layers.values()) or _revertsOnPause(oldPlayer))
+                if handBack:
+                    dur = oldPlayer.fadeOutMs if getattr(oldPlayer, "fadeOutMs", None) is not None else globalBack
+                elif win > 0 and (win > was or player is not oldPlayer):   # an item starting: its fade in
                     starting = nowMs - getattr(player, "entryMs", -1e12) < 1.0
                     dur = (player.fadeInMs if player.fadeInMs is not None else globalIn) if starting else 0
-                else:        # one letting go: its hand-back fade, if it has ended
-                    ended = all(oldPlayer is not p for p in self.layers.values())
-                    dur = (oldPlayer.fadeOutMs if getattr(oldPlayer, "fadeOutMs", None) is not None
-                           else globalBack) if ended else 0
+                else:
+                    dur = 0
                 fromCmd = self.lastCmd.get(idx)
                 if fromCmd is None and prev == 0:
                     fromCmd = self.hooks.shownCommand(idx) if hasattr(self.hooks, "shownCommand") else None

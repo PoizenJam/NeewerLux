@@ -116,6 +116,8 @@ class Rig:
             nl.stopAnimation("effect", clearQueue=True)
             nl.stopAnimation("show")
             nl.showEngine.stopSequence()
+            if hasattr(nl, "stopSound"):
+                nl.stopSound()
         elif nl.animationRunning:
             nl.stopAnimation()
         time.sleep(0.4)
@@ -141,7 +143,7 @@ def _copyTree(src, dst):
     for name in os.listdir(src):
         if name.endswith(".py") or name.endswith(".toml"):
             shutil.copy2(os.path.join(src, name), dst)
-    for sub in ("animations", "sequences"):
+    for sub in ("animations", "sequences", "sound_modes"):
         s = os.path.join(src, "light_prefs", sub)
         if os.path.isdir(s):
             shutil.copytree(s, os.path.join(dst, "light_prefs", sub))
@@ -178,6 +180,8 @@ def boot(srcDir, verbose=False, roles=True, model="RGB660"):
     nl.loadLightAliases()
     if hasattr(nl, "loadAllSequences"):
         nl.loadAllSequences()
+        if hasattr(nl, "loadAllSoundModes"):
+            nl.loadAllSoundModes()
         nl.initShowEngine()
         if roles:
             for mac, name, prefs in RIG:

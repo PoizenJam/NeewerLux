@@ -144,7 +144,7 @@ a:hover { text-decoration: underline; }
 .pos-h { min-height:30px; width:80px; }
 .btn.unsaved { background:#c77d12; color:#fff; border-color:#c77d12; font-weight:bold; }
 .stage-detail { color:var(--muted); }
-.layer-base { border-color:#5a5a5a; } .layer-show { border-color:#468cff; } .layer-effect { border-color:#ffa028; } .layer-override { border-color:#eb4646; }
+.layer-base { border-color:#5a5a5a; } .layer-sound { border-color:#3cc8a0; } .layer-show { border-color:#468cff; } .layer-effect { border-color:#ffa028; } .layer-override { border-color:#eb4646; }
 .seq-progress { height:8px; background:var(--bg3); border-radius:4px; cursor:pointer; margin:8px 0 4px; }
 .seq-progress > div { height:100%; width:0; background:var(--accent); border-radius:4px; }
 .form-grid { display:grid; grid-template-columns: 170px 1fr; gap:6px 10px; align-items:center; font-size:13px; }
@@ -433,7 +433,7 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
             <div style="font-size:12px;color:var(--muted);margin-bottom:8px">View <select id="stageView" onchange="setStageView(this.value)"><option value="plan">Plan (from above)</option><option value="height">Height (facing the camera)</option><option value="strip">Strip (sweep order)</option></select>
             <span style="margin-left:8px">Plan: where each light stands, from your seat facing the camera; bars = height, arrow = where it points (none = at you).</span></div>
             <div class="stage-grid" id="stageGrid"><div style="color:var(--muted)">Loading...</div></div>
-            <div style="color:var(--muted);font-size:11px;margin-top:8px">Approximate colours. Outline: grey = manual/preset, blue = sequence, orange = effect, red = override animation.
+            <div style="color:var(--muted);font-size:11px;margin-top:8px">Approximate colours. Outline: grey = manual/preset, teal = sound mode, blue = sequence, orange = effect, red = override animation.
             Simulated lights show what they received; real lights show what was last sent to them.</div>
         </div>
     </div>
@@ -772,6 +772,13 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
                 <div class="api-code">POST /NeewerLux/sequence {"action":"render","name":"Example - Four Light Demo","format":"png"}</div>
                 <div class="api-desc">Live status of layers, the sequence and every light (with approximate colour)</div>
                 <div class="api-code">GET /NeewerLux/doAction?status_json</div>
+            </div>
+            <div class="api-section">
+                <h3>Sound modes</h3>
+                <div class="api-desc">Lights following live audio: start, switch, stop (GET)</div>
+                <div class="api-code">GET /NeewerLux/doAction?sound=start|Pulse</div>
+                <div class="api-desc">JSON API: start, stop, mode, set, device, devices, status (with live levels and tempo), list, get, save, delete, validate, reload</div>
+                <div class="api-code">POST /NeewerLux/sound {"action":"set","params":{"sensitivity":1.5}}</div>
             </div>
             <div class="api-section">
                 <h3>Editing</h3>

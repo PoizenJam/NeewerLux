@@ -340,7 +340,8 @@ def t_fadeInEverywhere(rig):
         w = [(t - t0, list(d)) for t, d in writesFor(rig, FILL, t0) if d[1] == 135]
         temps = [d[4] for _, d in w]
         check(len(temps) >= 6 and temps == sorted(temps, reverse=True) and temps[-1] == 32, "preset fades from 5600K to 3200K: " + str(temps))
-        check(0.45 <= w[-1][0] <= 0.75, "over about 0.6 s: %.0f ms" % (w[-1][0] * 1000))
+        # from the first step, not the request: a busy moment before the recall isn't the fade
+        check(0.4 <= w[-1][0] - w[0][0] <= 0.7, "over about 0.6 s: %.0f ms from the first step: %s" % ((w[-1][0] - w[0][0]) * 1000, [(round(t, 3), d[4]) for t, d in w]))
         # a preset without its own fade follows the global
         rig.post("/NeewerLux/presets", {"action": "save", "index": idx + 1, "fade_ms": None,
                                         "entries": [{"light": "*", "mode": "CCT", "temp": 5600, "bri": 20}]})
@@ -717,7 +718,8 @@ def t_guidSidecar(rig):
 
 def t_statusShape(rig):
     st = rig.getJSON("status_json")
-    check(set(st) == {"apiVersion", "layers", "sequence", "lights", "flashGuard", "stage", "handbackFadeMs", "fadeInMs"}, "status keys: " + str(sorted(st)))
+    check(set(st) == {"apiVersion", "layers", "sequence", "lights", "flashGuard", "stage", "handbackFadeMs", "fadeInMs", "sound"}, "status keys: " + str(sorted(st)))
+    check(set(st["layers"]) == {"sound", "show", "effect", "override", "effect_queue"}, "layers: " + str(sorted(st["layers"])))
     check([l["role"] for l in st["lights"]] == ["key", "fill", "rim", "background"], "roles in status")
     check(all(l["layer"] == "base" for l in st["lights"]), "idle lights are on base")
 
@@ -1353,6 +1355,231 @@ def _compositorRun(nl, start, endMs, fine):
     return writes, ticks
 
 
+def _virtualCompositor(show, handbackMs=500, fadeInMs=0):
+    base = list(harness.START_BYTES)
+
+    class Hooks:
+        def lightCount(self): return 1
+        def encode(self, idx, cmd): return tuple(sorted(cmd.items()))
+        def currentBytes(self, idx): return list(base)
+        def shownCommand(self, idx): return show.bytesToCommand(base)
+        def isLocked(self, idx): return False
+        def wake(self): pass
+        def globalRevert(self): return True
+        def recallPreset(self, n): pass
+        def onStatus(self, info): pass
+        def fadeInMs(self): return fadeInMs
+        def handbackMs(self): return handbackMs
+
+    vt = [0.0]
+    comp = show.ShowCompositor(Hooks(), clock=lambda: vt[0])
+
+    def run(until):
+        writes = []
+        while vt[0] < until:
+            vt[0] = round(vt[0] + 0.01, 3)
+            comp.tick(vt[0])
+            writes += [(vt[0], dict(b) if isinstance(b[0], tuple) else show.bytesToCommand(b))  # base bytes are raw
+                       for _, (b, _) in comp.takeMailbox().items()]
+        return writes
+    return comp, vt, run
+
+
+def t_handBackToRunningLayerFades(rig):
+    """1.4.0 fix: Fade back also applies when an item ends and a lower layer that is still
+    running takes its lights back (an effect ending over a sequence, a sequence ending over a
+    sound mode), and when a sequence reverts on pause. 1.3.3 cut in both cases."""
+    show = rig.nl.show
+    seq, errors, _ = show.parseSequence({"format": 1, "name": "bed", "duration_ms": 60000, "cues": [
+        {"at_ms": 0, "state": {"mode": "HSI", "hue": 200, "sat": 100, "bri": 60}}]}, lambda c: True)
+    comp, vt, run = _virtualCompositor(show)
+    comp.playSequence(show.SequencePlayer(seq, lambda t: [0], lambda n: None, lambda i: None), 0, now=0.0)
+    anim = {"name": "flash", "keyframes": [{"hold_ms": 1000, "fade_ms": 0, "lights": {"*": {"mode": "HSI", "hue": 30, "sat": 100, "bri": 90}}}]}
+    comp.playAnimation(show.AnimationPlayer("flash", show.AnimationTimeline(anim, stepped=True), lambda t: [0]),
+                       show.LAYER_EFFECT, now=0.5)
+    w = [x for x in run(3.0) if x[0] > 1.0]
+    hues = [c.get("hue") for _, c in w]
+    check(len(w) >= 8 and hues[-1] == 200 and any(30 < h < 200 for h in hues[:-1]),
+          "an effect ending over a sequence fades back to it: %s" % w[:4])
+    check(1.9 < w[-1][0] < 2.1, "over the 0.5 s Fade back: last step at %.2f s" % w[-1][0])
+
+    seqR, _, _ = show.parseSequence({"format": 1, "name": "p", "duration_ms": 60000, "pause_mode": "revert", "cues": [
+        {"at_ms": 0, "state": {"mode": "HSI", "hue": 200, "sat": 100, "bri": 60}}]}, lambda c: True)
+    comp, vt, run = _virtualCompositor(show)
+    comp.playSequence(show.SequencePlayer(seqR, lambda t: [0], lambda n: None, lambda i: None), 0, now=0.0)
+    run(1.0)
+    comp.pauseSequence(now=1.0)
+    w = run(2.5)
+    check(len(w) >= 8 and w[-1][1].get("mode") == "CCT", "a sequence reverting on pause fades back to the base: %s" % w[:3])
+
+
+# ----------------------------------------------------------------- 1.4.0: sound modes
+
+def _soundSignal(nl):
+    """Real-time stand-in for a sound card: a looping kick and hi-hat pattern at 124 BPM."""
+    np = nl.audio.np
+    sr = nl.audio.SAMPLE_RATE
+    p = 60.0 / 124
+    secs = 16 * p  # a whole number of bars, so the loop keeps time
+    x = np.zeros(int(sr * secs))
+    t = np.arange(int(0.15 * sr)) / sr
+    kick = 0.9 * np.sin(2 * np.pi * (50 + 80 * np.exp(-t * 30)) * t) * np.exp(-t * 12)
+    n = int(0.03 * sr)
+    hat = 0.25 * np.random.default_rng(3).uniform(-1, 1, n) * np.exp(-np.linspace(0, 6, n))
+    b = 0.0
+    while b < secs - p / 2:
+        x[int(b * sr):int(b * sr) + len(kick)] += kick
+        for k in range(4):
+            j = int((b + k * p / 4) * sr)
+            x[j:j + n] += hat[:len(x) - j] * (1.0 if k == 2 else 0.5)
+        b += p
+    nl.audioEngine.sourceFactory = lambda device: nl.audio.ArraySource(x, name="test signal")
+
+
+def _layers(rig):
+    return [l["layer"] for l in rig.getJSON("status_json")["lights"]]
+
+
+def _waitLayers(rig, want, timeout=4.0):
+    """Wait until each light's layer matches want (a list, None = don't care)."""
+    end = time.monotonic() + timeout
+    while True:
+        got = _layers(rig)
+        if all(w is None or w == g for w, g in zip(want, got)) or time.monotonic() > end:
+            return got
+        time.sleep(0.05)
+
+
+def _needsNumpy(rig):
+    if rig.nl.audio.np is None:
+        RESULTS.append("    skipped: numpy (optional audio group) isn't installed")
+        return True
+    return False
+
+
+def t_soundModeHTTP(rig):
+    """Start, switch, tune and stop a sound mode over HTTP: it drives only the lights its parts
+    aim at, on the sound layer, and reports live levels."""
+    nl = rig.nl
+    if _needsNumpy(rig):
+        return
+    _soundSignal(nl)
+    t0 = time.monotonic()
+    r = rig.post("/NeewerLux/sound", {"action": "start", "mode": "pulse"})
+    check(r["success"] and r["mode"] == "Pulse", r)
+    w = waitFor(rig, RIM, t0, lambda d: hueOf(d) == 265, 3.0)
+    check(any(hueOf(d) == 265 for d in w), "the rim takes Pulse's colour: %s" % w[-3:])
+    got = _waitLayers(rig, ["base", "base", "sound", "sound"])
+    check(got == ["base", "base", "sound", "sound"], "Pulse drives rim and background on the sound layer only: %s" % got)
+    end = time.monotonic() + 5
+    st = rig.post("/NeewerLux/sound", {"action": "status"})
+    while time.monotonic() < end and not (st["levels"] and st["levels"]["bpm"] > 0):
+        time.sleep(0.2)
+        st = rig.post("/NeewerLux/sound", {"action": "status"})
+    check(st["running"] and st["mode"] == "Pulse" and st["capturing"] and st["deviceName"] == "test signal", st)
+    check(abs(st["levels"]["bpm"] / 124 - 1) < 0.03, "status reports the tempo: %s" % st["levels"])
+    sj = rig.getJSON("status_json")
+    check(sj["sound"]["running"] and sj["layers"]["sound"]["name"] == "Pulse", "status_json shows the sound layer: %s" % sj["layers"])
+    time.sleep(max(0.0, t0 + 5.0 - time.monotonic()))
+    bris = [bri(d) for t, d in writesFor(rig, AMB, t0 + 3.0)]
+    check(bris and max(bris) - min(bris) >= 10, "the background moves with the music: %s" % bris[-12:])
+    r = rig.post("/NeewerLux/sound", {"action": "set", "params": {"ceiling": 40}})
+    check(r["success"] and r["params"]["ceiling"] == 40, r)
+    t1 = time.monotonic()
+    time.sleep(1.0)
+    check(all(bri(d) <= 40 for d in [d for t, d in writesFor(rig, AMB, t1 + 0.3)]), "the new ceiling applies at once")
+    rig.get("sound=mode|Bands", 0.2)
+    got = _waitLayers(rig, ["base", "sound", "sound", "sound"])
+    check(got == ["base", "sound", "sound", "sound"], "Bands adds the fill (highs): %s" % got)
+    r = rig.post("/NeewerLux/sound", {"action": "set", "params": {"parts": []}})
+    check(not r["success"], "only top-level values change while playing")
+    rig.post("/NeewerLux/sound", {"action": "stop"})
+    got = _waitLayers(rig, ["base"] * 4)
+    check(got == ["base"] * 4, "stop hands every light back: %s" % got)
+    st = rig.post("/NeewerLux/sound", {"action": "status"})
+    check(not st["running"] and not st["capturing"] and st["lastMode"] == "Bands", st)
+    check(nl.soundMode == "Bands" and "soundMode=Bands" in open(nl.globalPrefsFile, encoding="utf-8").read(), "the last mode is remembered")
+    rig.get("sound=start", 0.3)
+    check(rig.post("/NeewerLux/sound", {"action": "status"})["mode"] == "Bands", "sound=start plays the last mode")
+    rig.get("stop_layer=all", 0.3)
+    check(not rig.post("/NeewerLux/sound", {"action": "status"})["running"], "stop_layer=all stops sound too")
+    nl._rememberSound(mode="Pulse")
+
+
+def t_soundUnderShowAndEffects(rig):
+    """Sound is a bed: a sequence and an effect take the lights they drive, and give them back
+    to the sound mode when they end."""
+    nl = rig.nl
+    if _needsNumpy(rig):
+        return
+    _soundSignal(nl)
+    rig.post("/NeewerLux/sound", {"action": "start", "mode": "Pulse"})
+    check(_waitLayers(rig, [None, None, "sound", "sound"]) [2:] == ["sound", "sound"], "Pulse running")
+    rig.post("/NeewerLux/sequence", {"action": "play", "sequence": stepSequence("over", [120, 150], 600, target="@rim")})
+    got = _waitLayers(rig, ["base", "base", "show", "sound"])
+    check(got == ["base", "base", "show", "sound"], "the sequence takes the rim, the background keeps the sound: %s" % got)
+    got = _waitLayers(rig, ["base", "base", "sound", "sound"], 4.0)
+    check(got == ["base", "base", "sound", "sound"], "when it ends the rim goes back to the sound mode: %s" % got)
+    rig.get("animate=Heartbeat|1|10|100|true|0||effect|replace|@background", 0.2)
+    got = _waitLayers(rig, [None, None, "sound", "effect"])
+    check(got[3] == "effect", "an effect plays over the sound mode: %s" % got)
+    rig.get("stop_layer=effect", 0.2)
+    got = _waitLayers(rig, [None, None, "sound", "sound"])
+    check(got[3] == "sound", "and the sound mode carries on after it: %s" % got)
+    rig.post("/NeewerLux/sound", {"action": "stop"})
+
+
+def t_soundRespectsLimitsAndLocks(rig):
+    nl = rig.nl
+    if _needsNumpy(rig):
+        return
+    _soundSignal(nl)
+    rig.setShowPrefs(AMB, maxBri=30)
+    rig.setShowPrefs(RIM, locked=True)
+    try:
+        t0 = time.monotonic()
+        r = rig.post("/NeewerLux/sound", {"action": "start", "mode": "Pulse", "params": {"floor": 50, "ceiling": 100}})
+        check(r["success"], r)
+        w = waitFor(rig, AMB, t0, lambda d: d[1] == 134, 3.0)
+        time.sleep(1.5)
+        bris = [bri(d) for t, d in writesFor(rig, AMB, t0) if d[1] == 134]
+        check(bris and max(bris) <= 30, "the background's 30%% limit holds: %s" % bris[-8:])
+        check(not [d for t, d in writesFor(rig, RIM, t0)], "a Locked light gets nothing from the sound mode")
+    finally:
+        rig.post("/NeewerLux/sound", {"action": "stop"})
+
+
+def t_soundUnavailable(rig):
+    """Without the audio packages the feature says why and nothing else changes."""
+    nl = rig.nl
+    real = nl.audio.available
+    nl.audio.available = lambda: (False, "Sound features need numpy")
+    try:
+        r = rig.post("/NeewerLux/sound", {"action": "start", "mode": "Pulse"})
+        check(not r["success"] and "numpy" in r["errors"][0], r)
+        st = rig.getJSON("status_json")["sound"]
+        check(st["available"] is False and "numpy" in st["reason"] and not st["running"], st)
+        check(rig.post("/NeewerLux/sound", {"action": "list"})["success"], "the mode files still list")
+    finally:
+        nl.audio.available = real
+
+
+def t_soundModeFilesHTTP(rig):
+    nl = rig.nl
+    mode = {"format": 1, "name": "Test Glow", "palette": [{"temp": 3000}], "parts": [{"target": "@background", "drive": "level"}]}
+    r = rig.post("/NeewerLux/sound", {"action": "validate", "mode": dict(mode, floor=90, ceiling=10)})
+    check(not r["success"] and r["errors"], r)
+    check(rig.post("/NeewerLux/sound", {"action": "save", "mode": mode})["success"], "save")
+    check(not rig.post("/NeewerLux/sound", {"action": "save", "mode": mode})["success"], "saving over needs overwrite")
+    renamed = dict(mode, name="Test Glow 2")
+    check(rig.post("/NeewerLux/sound", {"action": "save", "mode": renamed, "original": "Test Glow"})["success"], "rename")
+    names = [m["name"] for m in rig.post("/NeewerLux/sound", {"action": "list"})["modes"]]
+    check("Test Glow 2" in names and "Test Glow" not in names, names)
+    check(rig.post("/NeewerLux/sound", {"action": "get", "name": "test glow 2"})["mode"]["palette"] == [{"temp": 3000}], "get")
+    check(rig.post("/NeewerLux/sound", {"action": "delete", "name": "Test Glow 2"})["success"], "delete")
+    check(not os.path.exists(os.path.join(nl.soundModesDir, "Test Glow 2.json")), "the file is gone")
+
+
 def t_compositorWakesOnlyWhenDue(rig):
     """Ticking only when a light's output can change sends exactly what ticking every
     millisecond sends (same commands, each within the 1 ms the fine ticker can lag), for
@@ -1403,7 +1630,8 @@ TESTS = [t_maxBrightnessHTTP, t_maxBrightnessAnimationAndSequence, t_minBrightne
          t_flashGuardLimitsOutput, t_flashGuardRedFlashes, t_shippedContentUnderFlashLimit,
          t_positionTargetsAndSweep, t_animationModeValidation, t_exactAnimationTiming, t_handbackFade, t_blendCommands, t_fadeInEverywhere,
          t_fadesOnlyBetweenItems,
-         t_addSimulatedRig, t_compositorWakesOnlyWhenDue]
+         t_addSimulatedRig, t_compositorWakesOnlyWhenDue, t_handBackToRunningLayerFades,
+         t_soundModeHTTP, t_soundUnderShowAndEffects, t_soundRespectsLimitsAndLocks, t_soundUnavailable, t_soundModeFilesHTTP]
 
 
 def main():

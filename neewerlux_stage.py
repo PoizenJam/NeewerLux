@@ -18,7 +18,7 @@ except ImportError:
                                    QScrollArea, QPushButton, QFileDialog, QComboBox)
 
 # Outline colour per layer, so it's visible at a glance what is driving each light
-LAYER_COLOURS = {"base": QColor(90, 90, 90), "show": QColor(70, 140, 255),
+LAYER_COLOURS = {"base": QColor(90, 90, 90), "sound": QColor(60, 200, 160), "show": QColor(70, 140, 255),
                  "effect": QColor(255, 160, 40), "override": QColor(235, 70, 70)}
 
 
@@ -401,7 +401,7 @@ class StageWindow(QWidget):
         self.view = StageView(self)
         lay.addWidget(self.view, 1)
         row = QHBoxLayout()
-        legend = QLabel("Outline: grey = manual/preset, blue = sequence, orange = effect, red = override animation")
+        legend = QLabel("Outline: grey = manual/preset, teal = sound mode, blue = sequence, orange = effect, red = override animation")
         legend.setStyleSheet("color: #999;")
         legend.setWordWrap(True)
         row.addWidget(legend, 1)

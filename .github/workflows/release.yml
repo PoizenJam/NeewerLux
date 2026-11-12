@@ -32,10 +32,10 @@ jobs:
       # uncommitted dependency resolution. (--frozen would only skip updating the
       # lock, which silently installs stale contents instead of failing.)
       - name: Install dependencies
-        run: uv sync --locked --group build
+        run: uv sync --locked --group build --group audio
 
       - name: Build EXE with PyInstaller
-        run: uv run --locked --group build pyinstaller NeewerLux.spec
+        run: uv run --locked --group build --group audio pyinstaller NeewerLux.spec
 
       - name: Copy light_prefs into dist
         run: |
@@ -74,6 +74,7 @@ jobs:
             neewerlux_webui.py \
             neewerlux_anim_editor.py \
             neewerlux_show.py \
+            neewerlux_audio.py \
             neewerlux_sim.py \
             neewerlux_stage.py \
             neewerlux_timeline.py \

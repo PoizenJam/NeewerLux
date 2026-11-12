@@ -1,0 +1,42 @@
+{
+  "format": 1,
+  "name": "Bands",
+  "description": "Lows on the background, mids on the rim, highs on the fill (kept pale and gentle, since it lights your face).",
+  "sensitivity": 1.0,
+  "floor": 10,
+  "ceiling": 75,
+  "smoothing": 0.4,
+  "palette": [
+    {
+      "hue": 270,
+      "sat": 90
+    },
+    {
+      "hue": 200,
+      "sat": 90
+    },
+    {
+      "hue": 45,
+      "sat": 25
+    }
+  ],
+  "parts": [
+    {
+      "target": "@background",
+      "drive": "low",
+      "colour": 0
+    },
+    {
+      "target": "@rim",
+      "drive": "mid",
+      "colour": 1
+    },
+    {
+      "target": "@fill",
+      "drive": "high",
+      "colour": 2,
+      "floor": 30,
+      "ceiling": 50
+    }
+  ]
+}

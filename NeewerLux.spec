@@ -11,15 +11,26 @@ block_cipher = None
 # Collect all bleak subpackages/data (WinRT backends, etc.)
 bleak_datas, bleak_binaries, bleak_hiddenimports = collect_all('bleak')
 
+# The optional audio group (sound modes, song import): soundcard reads its cffi headers and
+# soundfile loads libsndfile at run time, so both are collected whole when installed.
+import importlib.util
+audio_datas, audio_binaries, audio_hiddenimports = [], [], []
+for _pkg in ('soundcard', 'soundfile'):  # numpy has its own PyInstaller hook
+    if importlib.util.find_spec(_pkg) is not None:
+        _d, _b, _h = collect_all(_pkg)
+        audio_datas += _d
+        audio_binaries += _b
+        audio_hiddenimports += _h
+
 a = Analysis(
     ['NeewerLux.py'],
     pathex=[],
-    binaries=bleak_binaries,
+    binaries=bleak_binaries + audio_binaries,
     datas=[
         ('com.github.poizenjam.NeewerLux.ico', '.'),
         ('com.github.poizenjam.NeewerLux.png', '.'),
         ('light_models.toml', '.'),
-    ] + bleak_datas,
+    ] + bleak_datas + audio_datas,
     hiddenimports=[
         'bleak',
         'bleak.backends.winrt',
@@ -28,6 +39,7 @@ a = Analysis(
         'neewerlux_webui',
         'neewerlux_anim_editor',
         'neewerlux_show',
+        'neewerlux_audio',
         'neewerlux_sim',
         'neewerlux_stage',
         'neewerlux_timeline',
@@ -36,7 +48,7 @@ a = Analysis(
         'PySide6.QtCore',
         'PySide6.QtGui',
         'PySide6.QtSvg',
-    ] + bleak_hiddenimports,
+    ] + bleak_hiddenimports + audio_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

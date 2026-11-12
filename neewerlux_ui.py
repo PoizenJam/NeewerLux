@@ -1298,14 +1298,16 @@ copied between installations.</p>
 <tr><td><b>stop_animate</b></td><td>Stop the running animation</td></tr>
 <tr><td><b>list / list_json</b></td><td>List lights, presets, and animations</td></tr>
 <tr><td><b>animate=Name|...|revert|layer|queue|target</b></td><td>Optional layer (override, effect, show), queue mode (queue, replace) and target such as <code>@rim</code></td></tr>
-<tr><td><b>stop_layer=effect</b></td><td>Stop a layer (<code>effect_all</code> also clears the effect queue)</td></tr>
+<tr><td><b>stop_layer=effect</b></td><td>Stop a layer (<code>effect_all</code> also clears the effect queue; also <code>show</code>, <code>sound</code>, <code>all</code>)</td></tr>
+<tr><td><b>sound=start|Pulse</b></td><td>Start a sound mode (lights following live audio); also <code>mode|Name</code>, <code>stop</code></td></tr>
 <tr><td><b>sequence=play|Name</b></td><td>Play a sequence; also <code>pause</code>, <code>resume</code>, <code>stop</code></td></tr>
 <tr><td><b>status_json</b></td><td>Layers, sequence position, and each light's layer and approximate colour</td></tr>
 </table>
 <p>POST to <code>/NeewerLux/batch</code> for multi-light JSON commands, to
 <code>/NeewerLux/animate</code> for JSON animation control, to <code>/NeewerLux/sequence</code>
 for sequences (list, reload, play, pause, resume, stop, seek, set_position, status, validate,
-save, get, delete, render), to <code>/NeewerLux/presets</code> to edit presets, or to
+save, get, delete, render), to <code>/NeewerLux/sound</code> for sound modes (start, stop,
+mode, set, device, status and the mode files), to <code>/NeewerLux/presets</code> to edit presets, or to
 <code>/NeewerLux/settings</code> for light and show preferences (get, set_light, set_global). The web dashboard has the same Sequences, Stage and Settings panels
 as this window. The full contract, including the structured light state in <code>list_json</code>,
 is in <code>docs/HTTP_API.md</code>.</p>

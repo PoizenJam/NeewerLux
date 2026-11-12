@@ -34,6 +34,9 @@ Changelog = "https://github.com/poizenjam/NeewerLux/blob/main/CHANGELOG.md"
 gui = ["PySide6>=6.7,<7"]
 # Used by the release workflow to build the Windows executable.
 build = ["pyinstaller>=6.10"]
+# Sound modes (live capture and analysis) and song import. Optional: without them
+# NeewerLux hides those features. "uv sync --group audio" adds them.
+audio = ["numpy>=1.26", "soundcard>=0.4.4", "soundfile>=0.12.1"]
 
 [tool.uv]
 # NeewerLux is a flat-layout script application, not an installable package.
