@@ -880,9 +880,11 @@ class Ui_MainWindow(object):
         self.seqNewButton.setToolTip("Open the timeline editor on a new sequence, blank or from a starter")
         self.seqEditButton = QPushButton("Edit")
         self.seqEditButton.setToolTip("Open the selected sequence in the timeline editor")
+        self.seqFromSongButton = QPushButton("From song...")
+        self.seqFromSongButton.setToolTip("Analyse a song file (tempo, beats, sections) and draft a sequence for it")
         self.seqDuplicateButton = QPushButton("Duplicate")
         self.seqDeleteButton = QPushButton("Delete")
-        for b in [self.seqNewButton, self.seqEditButton, self.seqDuplicateButton, self.seqDeleteButton]:
+        for b in [self.seqNewButton, self.seqFromSongButton, self.seqEditButton, self.seqDuplicateButton, self.seqDeleteButton]:
             seqEditRow.addWidget(b)
         seqLeft.addLayout(seqEditRow)
         self.seqStatusLabel = QLabel("No sequence playing")

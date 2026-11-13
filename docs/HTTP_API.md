@@ -183,7 +183,7 @@ Per light:
 
 ## POST endpoints
 
-All take a JSON body (`Content-Type: application/json`) and answer `200` with JSON; failures are `"success": false` with `error` or `errors`. A malformed body gets `400`. Bodies are limited to 64 KB, except `/NeewerLux/sequence` (256 KB).
+All take a JSON body (`Content-Type: application/json`) and answer `200` with JSON; failures are `"success": false` with `error` or `errors`. A malformed body gets `400`. Bodies are limited to 64 KB, except `/NeewerLux/sequence` (256 KB) and `/NeewerLux/song`, which takes a song file instead (200 MB).
 
 ### POST /NeewerLux/batch
 
@@ -243,8 +243,14 @@ Response:
 | `{"action": "editor", "targets": ["@rim", "1;2"]}` | What a timeline editor needs: `lights` in sweep order (`index`, `id`, `name`, `role`, `side`, `depth`, `height`, `simulated`), `targets` (the light IDs each given target drives now), `choices` (target suggestions with labels), `animations` and `presets` (count) |
 | `{"action": "render", "name": "...", "step_ms": 50, "start_ms": 0, "end_ms": 60000}` | What each light would do, without playing: per-light colour changes and the cue list |
 | `{"action": "render", "name": "...", "format": "png", "width": 1600}` | The same as an image strip (`image/png`). Needs the desktop window; without it the reply is an error and the JSON render still works. |
+| `{"action": "analyze", "path": "C:\\Music\\Song.mp3"}` | Analyse a song file on the NeewerLux computer (WAV, FLAC, MP3, OGG, AIFF; needs the audio extras): `duration_ms`, `bpm`, `offset_ms` (first beat), `confidence` (the share of the song whose own tempo agrees; `null` when `bpm` was given), `beats` and `bars` (ms; bars start on each bar's first beat), `energy` (0 to 1 every `energy_step_ms`, 250), `waveform` (1200 peaks, 0 to 1), `sections` (`start_ms`, `end_ms`, `energy`, `level` 1 to 3, a suggested `label`) and `song` (the file name). Optional `"bpm"` and `"offset_ms"` replace the estimates. Assumes a steady tempo. |
+| `{"action": "draft", "analysis": {...}, "style": "Concert", "name": "My Song"}` | A first-draft sequence from an analysis (the `analyze` reply, or `"path"` to a song file instead): `{"sequence", "flashes", "warnings"}`, not saved unless `"save": true` (and `"overwrite": true` to replace one). Styles: `Subtle`, `Concert`, `Neon` (see SEQUENCE_FORMAT.md). Optional `"bpm"` and `"offset_ms"` (a bar's first beat) correct the tempo, moving sections to the nearest bar; `"artist"` and `"song"` are copied in. |
 
 The sequence format, targets, render output and timing rules are in [SEQUENCE_FORMAT.md](SEQUENCE_FORMAT.md).
+
+### POST /NeewerLux/song
+
+The song file itself as the body (any `Content-Type`, up to 200 MB), for clients that don't share a disk with NeewerLux (the web dashboard uses it): `POST /NeewerLux/song?name=My%20Song.mp3`. `name` gives the format by its extension and the `song` name; optional `bpm` and `offset_ms` as in `analyze`. The reply is the same as the sequence `analyze` action. The file is analysed from a temporary copy that is removed afterwards; nothing is kept.
 
 ### POST /NeewerLux/sound
 
@@ -299,7 +305,7 @@ Every value in a request is checked before any is applied; a request with an inv
 
 ## Changes by API version
 
-NeewerLux 1.4.0 adds, within version 2 (nothing changes for existing clients): the `sound` layer, `POST /NeewerLux/sound`, `sound=` requests, `stop_layer=sound` (and `all` includes it) and `sound` in `status_json` (with `assignments`: which lights follow which mode), sound on some lights only (`lights`, `sound=start|Mode|lights`, `sound=stop|lights`), saved palettes, colour `cycle` and `cycle_s`, and `sound` on preset entries.
+NeewerLux 1.4.0 adds, within version 2 (nothing changes for existing clients): the `sound` layer, `POST /NeewerLux/sound`, `sound=` requests, `stop_layer=sound` (and `all` includes it) and `sound` in `status_json` (with `assignments`: which lights follow which mode), sound on some lights only (`lights`, `sound=start|Mode|lights`, `sound=stop|lights`), saved palettes, colour `cycle` and `cycle_s`, `sound` on preset entries, song analysis and drafts (sequence `analyze` and `draft`, `POST /NeewerLux/song`) and the sequence `sections` field drawn by the editors.
 
 **2** (NeewerLux 1.3.3): `apiVersion` and `version` fields; structured per-light state and `sequences` in `list_json`; JSON batch `temp` accepts Kelvin; light commands are coalesced per light instead of answered with "Server is busy"; POST batch stops an override animation like GET commands do; editing over HTTP: `/NeewerLux/presets`, animation `get`/`save`/`duplicate`/`delete`/`reload`, sequence `get`/`delete`/`editor` and renaming on save. Also part of this version, from 1.3.1 and 1.3.2: layers, sequences, `status_json`, `stop_layer`, `/NeewerLux/sequence` and `/NeewerLux/settings`.
 

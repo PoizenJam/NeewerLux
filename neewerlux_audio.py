@@ -11,6 +11,9 @@ and loud material both use the whole 0 to 1 range; true silence reads as 0.
 
 AudioEngine runs capture and analysis on a thread of its own and keeps only the latest
 features; the show engine reads them each frame and never waits on audio.
+
+analyzeSong works on a whole song file at once (soundfile decodes it): tempo, beat grid,
+bars, an energy curve, a waveform for drawing, and sections, for drafting sequences.
 """
 
 import math
@@ -324,6 +327,295 @@ class Analyzer:
 # ============================================================================
 # CAPTURE
 # ============================================================================
+
+# ------------------------------------------------------------------ song files
+
+SONG_EXTENSIONS = (".wav", ".flac", ".mp3", ".ogg", ".aiff", ".aif")
+SONG_HOP_S = 0.01          # analysis frame step for whole songs
+SONG_ENERGY_STEP_MS = 250
+SONG_WAVEFORM_POINTS = 1200
+SECTION_MIN_BARS = 4       # sections are at least this many bars long
+SECTION_MAX_BARS = 32      # longer stretches are split where they change most
+SECTION_NOVELTY_BARS = 4   # bars compared on each side of a possible section boundary
+
+
+def songAvailable():
+    """(True, "") when song files can be analysed, else (False, the reason)."""
+    ok, why = available()
+    if not ok:
+        return ok, why
+    try:
+        import soundfile  # noqa: F401
+    except Exception as e:
+        return False, "Song import needs the soundfile package (install the audio extras: uv sync --group audio; " + \
+            (type(e).__name__ + ": " + str(e)).strip() + ")"
+    return True, ""
+
+
+def loadSong(path):
+    """Decode a song file (WAV, FLAC, MP3, OGG, AIFF) to (mono float samples, sample rate)."""
+    import soundfile
+    data, sr = soundfile.read(path, dtype="float32", always_2d=True)
+    return data.mean(axis=1).astype(np.float64), int(sr)
+
+
+def _songFrames(x, sr):
+    """Per-frame level, band levels, centroid, low-band onset and onset flux for a whole signal,
+    computed in chunks (a long song as one FFT matrix would need gigabytes)."""
+    hop = max(1, int(round(sr * SONG_HOP_S)))
+    n = max(1, (len(x) - FFT_SIZE) // hop + 1) if len(x) >= FFT_SIZE else 1
+    pad = np.concatenate([x, np.zeros(FFT_SIZE + hop)])
+    window = np.hanning(FFT_SIZE)
+    scale = 1.0 / (np.mean(window ** 2) * FFT_SIZE ** 2) * 2.0
+    freqs = np.fft.rfftfreq(FFT_SIZE, 1.0 / sr)
+    masks = {k: (freqs >= lo) & (freqs < hi) for k, (lo, hi) in BANDS.items()}
+    cmask = (freqs >= 40.0) & (freqs <= 12000.0)
+    edges = np.geomspace(40.0, 11000.0, 25)
+    bandIdx = np.clip(np.searchsorted(edges, freqs) - 1, -1, 23)
+    out = {k: np.zeros(n) for k in ("rms", "low", "mid", "high", "centroid", "flux", "lowflux")}
+    prev = None
+    chunk = 2048
+    for start in range(0, n, chunk):
+        m = min(chunk, n - start)
+        idx = (start + np.arange(m))[:, None] * hop + np.arange(FFT_SIZE)[None, :]
+        frames = pad[idx]
+        out["rms"][start:start + m] = np.sqrt(np.mean(frames[:, :hop] ** 2, axis=1))  # this frame's own samples
+        power = np.abs(np.fft.rfft(frames * window, axis=1)) ** 2 * scale
+        for k, mask in masks.items():
+            out[k][start:start + m] = np.sqrt(np.sum(power[:, mask], axis=1))
+        cp = power[:, cmask]
+        tot = np.sum(cp, axis=1)
+        cent = np.sum(cp * freqs[cmask][None, :], axis=1) / np.maximum(tot, 1e-20)
+        out["centroid"][start:start + m] = np.log2(np.maximum(cent, 40.0) / 40.0) / np.log2(12000.0 / 40.0)
+        bands = np.zeros((m, 24))
+        valid = bandIdx >= 0
+        for b in range(24):
+            sel = valid & (bandIdx == b)
+            if np.any(sel):
+                bands[:, b] = np.sum(power[:, sel], axis=1)
+        logMag = np.log1p(1e4 * bands)
+        if prev is None:
+            prev = logMag[:1]
+        diff = np.diff(np.vstack([prev, logMag]), axis=0)
+        out["flux"][start:start + m] = np.sum(np.maximum(0.0, diff), axis=1)
+        out["lowflux"][start:start + m] = np.sum(np.maximum(0.0, diff[:, :6]), axis=1)  # 40 to about 150 Hz: kicks
+        prev = logMag[-1:]
+    quiet = 20.0 * np.log10(np.maximum(out["rms"], 1e-12)) < SILENCE_DB
+    out["flux"][quiet] = 0.0
+    out["lowflux"][quiet] = 0.0
+    return out, sr / hop
+
+
+def _tempoScores(env, fps):
+    """Tempo scores (the live analyzer's scoring) over 8 s windows of the whole song. Returns
+    (bpms in 0.25 BPM steps, summed scores, each window's best bpm)."""
+    bpms = np.arange(BPM_MIN, BPM_MAX + 0.001, 0.25)
+    total = np.zeros(len(bpms))
+    winners = []
+    w, step = int(8.0 * fps), int(2.0 * fps)
+    starts = range(0, max(1, len(env) - w + 1), step) if len(env) > w else [0]
+    prior = np.exp(-0.5 * (np.log2(bpms / BPM_PRIOR) / 0.8) ** 2)
+    for s in starts:
+        x = np.convolve(env[s:s + w], (0.25, 0.5, 0.25), mode="same")
+        x = x - np.mean(x)
+        if not np.any(x):
+            continue
+        n = len(x)
+        spec = np.fft.rfft(x, 2 * n)
+        ac = np.fft.irfft(spec.real ** 2 + spec.imag ** 2)[:n]
+        if ac[0] <= 0:
+            continue
+        ac = ac / ac[0]
+        def at(lags):
+            i = lags.astype(int)
+            f = lags - i
+            ok = (i >= 1) & (i + 1 < n)
+            i = np.clip(i, 0, n - 2)
+            return np.where(ok, ac[i] * (1 - f) + ac[i + 1] * f, 0.0)
+        lag = 60.0 * fps / bpms
+        score = at(lag) + 0.5 * at(2 * lag)
+        score -= np.where(2 * bpms <= BPM_MAX, 0.35 * np.maximum(0.0, at(lag / 2)), 0.0)
+        score = np.maximum(0.0, score) * prior
+        total += score
+        if np.any(score > 0):
+            winners.append(float(bpms[int(np.argmax(score))]))
+    return bpms, total, winners
+
+
+def _combScore(env, fps, bpm):
+    """Best (score, phase in frames) of a beat comb at bpm over the whole onset envelope."""
+    p = 60.0 * fps / bpm
+    n = len(env)
+    k = np.arange(int(n // p) + 1)
+    best, bestPhase = -1.0, 0.0
+    for phase in np.arange(0.0, p, 1.0):
+        pos = phase + k * p
+        pos = pos[pos < n - 1]
+        i = pos.astype(int)
+        f = pos - i
+        s = float(np.sum(env[i] * (1 - f) + env[i + 1] * f))
+        if s > best:
+            best, bestPhase = s, phase
+    return best, bestPhase
+
+
+def analyzeSong(samples, sampleRate, bpm=None, offsetMs=None):
+    """Analyse a whole mono song. Assumes a steady tempo (most produced music has one).
+
+    bpm and offsetMs, when given, are used instead of the estimates (offsetMs: when the first
+    beat falls). Returns {"duration_ms", "bpm", "offset_ms", "confidence", "beats" (ms),
+    "bars" (ms of each bar's first beat), "energy" (0 to 1 every SONG_ENERGY_STEP_MS),
+    "energy_step_ms", "waveform" (peak 0 to 1 at SONG_WAVEFORM_POINTS points), "sections"
+    ([{"start_ms", "end_ms", "energy" 0 to 1, "level" 1 to 3, "label"}])}."""
+    x = np.asarray(samples, dtype=np.float64).reshape(-1)
+    sr = float(sampleRate)
+    durationMs = int(round(len(x) * 1000.0 / sr))
+    feats, fps = _songFrames(x, sr)
+    # an onset shows in the frame whose window is centred on it, half a window after the
+    # frame's start time
+    lagMs = FFT_SIZE / 2.0 / sr * 1000.0
+    env = feats["flux"]
+    env = env / (np.max(env) or 1.0)
+
+    if bpm:
+        bpm = float(bpm)
+        confidence = None
+    else:
+        bpms, scores, winners = _tempoScores(env, fps)
+        coarse = float(bpms[int(np.argmax(scores))]) if np.any(scores > 0) else BPM_PRIOR
+        # refine: the tempo whose beat comb lines up best over the whole song (a 0.25 BPM error
+        # drifts a beat in a few minutes)
+        cands = np.arange(coarse - 0.5, coarse + 0.5001, 0.02)
+        combs = [_combScore(env, fps, c)[0] for c in cands]
+        bpm = float(cands[int(np.argmax(combs))])
+        # how much of the song agrees: the share of 8 s windows whose own best tempo is this one
+        confidence = round(sum(1 for w in winners if abs(w / bpm - 1.0) < 0.02) / len(winners), 3) if winners else 0.0
+    periodMs = 60000.0 / bpm
+    if offsetMs is None:
+        phase = _combScore(env, fps, bpm)[1]
+        offsetMs = (phase / fps) * 1000.0 + lagMs
+    offsetMs = float(offsetMs) % periodMs
+    beats = [int(round(offsetMs + k * periodMs)) for k in range(int((durationMs - offsetMs) // periodMs) + 1)]
+
+    # bars start on the beat (of each four) with the most kick-drum onsets
+    low = feats["lowflux"]
+    def onsetAt(ms):
+        i = int(round((ms - lagMs) * fps / 1000.0))
+        lo, hi = max(0, i - 2), min(len(low), i + 3)
+        return float(np.max(low[lo:hi])) if hi > lo else 0.0
+    beatOnsets = [onsetAt(b) for b in beats]
+    barPhase = max(range(4), key=lambda ph: sum(beatOnsets[ph::4])) if len(beats) >= 8 else 0
+    bars = beats[barPhase::4]
+
+    step = SONG_ENERGY_STEP_MS
+    perStep = max(1, int(round(step * fps / 1000.0)))
+    rms = feats["rms"]
+    nSteps = int(math.ceil(len(rms) / perStep))
+    stepRms = np.array([np.sqrt(np.mean(rms[i * perStep:(i + 1) * perStep] ** 2)) for i in range(nSteps)])
+    stepDb = 20.0 * np.log10(np.maximum(stepRms, 1e-12))
+    loud = np.percentile(stepDb, 95) if len(stepDb) else 0.0
+    energy = np.clip(1.0 + (stepDb - loud) / NORM_RANGE_DB, 0.0, 1.0)
+
+    blocks = max(1, len(x) // SONG_WAVEFORM_POINTS)
+    usable = x[:blocks * SONG_WAVEFORM_POINTS] if len(x) >= SONG_WAVEFORM_POINTS else np.pad(x, (0, SONG_WAVEFORM_POINTS - len(x)))
+    peaks = np.max(np.abs(usable.reshape(SONG_WAVEFORM_POINTS, -1)), axis=1)
+    waveform = peaks / (np.max(peaks) or 1.0)
+
+    sections = _sections(feats, fps, bars, durationMs, energy, step)
+    return {"duration_ms": durationMs, "bpm": round(bpm, 2), "offset_ms": int(round(offsetMs)), "confidence": confidence,
+            "beats": beats, "bars": bars, "energy": [round(float(v), 3) for v in energy], "energy_step_ms": step,
+            "waveform": [round(float(v), 3) for v in waveform], "sections": sections}
+
+
+def _sections(feats, fps, bars, durationMs, energy, energyStep):
+    """Split the song where its sound changes, on bar lines: per bar, loudness, bass, treble,
+    brightness and busyness; a boundary where the bars before and after differ most."""
+    edges = [0] + [b for b in bars if b > 0] + [durationMs]
+    edges = sorted(set(edges))
+    if len(edges) < 3:
+        return [_section(0, durationMs, energy, energyStep)]
+    rows = []
+    for a, b in zip(edges[:-1], edges[1:]):
+        i, j = int(a * fps / 1000.0), max(int(a * fps / 1000.0) + 1, int(b * fps / 1000.0))
+        seg = {k: feats[k][i:j] for k in ("rms", "low", "high", "centroid", "flux")}
+        rows.append([20.0 * math.log10(max(float(np.sqrt(np.mean(seg["rms"] ** 2))), 1e-9)),
+                     20.0 * math.log10(max(float(np.mean(seg["low"])), 1e-9)),
+                     20.0 * math.log10(max(float(np.mean(seg["high"])), 1e-9)),
+                     float(np.mean(seg["centroid"])) * 30.0,
+                     float(np.mean(seg["flux"])) * 30.0 / (float(np.max(feats["flux"])) or 1.0)])
+    f = np.array(rows)
+    f = (f - np.mean(f, axis=0)) / (np.std(f, axis=0) + 1e-9)
+    nb = len(f)
+    w = SECTION_NOVELTY_BARS
+    novelty = np.zeros(nb)
+    for i in range(1, nb):
+        a, b = f[max(0, i - w):i], f[i:min(nb, i + w)]
+        if len(a) and len(b):
+            novelty[i] = float(np.linalg.norm(np.mean(a, axis=0) - np.mean(b, axis=0)))
+    # phrases are usually 4 or 8 bars long: favour boundaries on those, counting from the first
+    # bar (row 0 is the stretch before it when the first beat isn't at 0)
+    first = 1 if edges[1] in bars and edges[0] not in bars else 0
+    weighted = novelty * np.array([1.3 if (i - first) % 8 == 0 else 1.15 if (i - first) % 4 == 0 else 1.0 for i in range(nb)])
+    threshold = float(np.mean(novelty[1:]) + 0.25 * np.std(novelty[1:])) if nb > 2 else 1e9
+    picked = []
+    for i in np.argsort(-weighted):
+        i = int(i)
+        if i < SECTION_MIN_BARS or nb - i < SECTION_MIN_BARS or weighted[i] < threshold:
+            continue
+        if all(abs(i - p) >= SECTION_MIN_BARS for p in picked):
+            picked.append(i)
+    # a long stretch that changes little is still split, where it changes most (a draft needs
+    # somewhere to move)
+    while True:
+        bounds = [0] + sorted(picked) + [nb]
+        longest = max(zip(bounds[:-1], bounds[1:]), key=lambda ab: ab[1] - ab[0])
+        a, b = longest
+        if b - a <= SECTION_MAX_BARS:
+            break
+        inside = [i for i in range(a + SECTION_MIN_BARS, b - SECTION_MIN_BARS + 1)]
+        picked.append(max(inside, key=lambda i: weighted[i]))
+    cuts = [0] + sorted(edges[i] for i in picked) + [durationMs]
+    secs = [_section(a, b, energy, energyStep) for a, b in zip(cuts[:-1], cuts[1:])]
+    # intensity: loudness and busyness (onsets) together, so a loud pad without drums still
+    # reads as a quiet passage
+    busy = []
+    for sec in secs:
+        i, j = int(sec["start_ms"] * fps / 1000.0), max(int(sec["start_ms"] * fps / 1000.0) + 1, int(sec["end_ms"] * fps / 1000.0))
+        busy.append(float(np.mean(feats["flux"][i:j])))
+    def rel(vals):
+        lo, hi = min(vals), max(vals)
+        return [(v - lo) / (hi - lo) if hi > lo else 0.5 for v in vals]
+    for sec, e, b in zip(secs, rel([sec["energy"] for sec in secs]), rel(busy)):
+        intensity = 0.5 * e + 0.5 * b
+        sec["level"] = 1 if intensity < 0.34 else 3 if intensity > 0.66 else 2
+    _labelSections(secs)
+    return secs
+
+
+def _section(a, b, energy, energyStep):
+    i, j = int(a // energyStep), max(int(a // energyStep) + 1, int(b // energyStep))
+    vals = energy[i:j]
+    return {"start_ms": int(a), "end_ms": int(b), "energy": round(float(np.mean(vals)) if len(vals) else 0.0, 3)}
+
+
+def _labelSections(secs):
+    """Suggested names from the energy levels; only a starting point for a person to rename."""
+    for k, s in enumerate(secs):
+        nxt = secs[k + 1]["level"] if k + 1 < len(secs) else None
+        prv = secs[k - 1]["level"] if k > 0 else None
+        if k == 0 and len(secs) > 1 and s["level"] < 3:
+            s["label"] = "Intro"
+        elif k == len(secs) - 1 and len(secs) > 1 and s["level"] < 3:
+            s["label"] = "Outro"
+        elif s["level"] == 3:
+            s["label"] = "Chorus"
+        elif nxt == 3 and s["level"] == 2:
+            s["label"] = "Build"
+        elif s["level"] == 1 and prv == 3:
+            s["label"] = "Break"
+        else:
+            s["label"] = "Verse"
+
 
 def _initComOnThisThread():
     # WASAPI is COM: each thread that uses it must initialise COM first

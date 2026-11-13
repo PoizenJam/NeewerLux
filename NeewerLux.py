@@ -1501,9 +1501,9 @@ try: # try to load the GUI
             items = self.seqList.selectedItems()
             return items[0].data(Qt.UserRole) if items else None
 
-        def seqOpenEditor(self, name=None, template=None):
-            """Open the timeline editor on a saved sequence, or on a new one (blank, or a copy
-            of a starter sequence when template names one)."""
+        def seqOpenEditor(self, name=None, template=None, sequence=None):
+            """Open the timeline editor on a saved sequence, or on a new one (blank, a copy of a
+            starter sequence when template names one, or the unsaved sequence given)."""
             from neewerlux_timeline import SequenceEditor, newSequence
             if name is not None:
                 for ed in list(self._seqEditors):
@@ -1513,13 +1513,18 @@ try: # try to load the GUI
                         return ed
             if name is None:
                 base = "New Sequence"
-                if template and template in savedSequences:
+                if sequence is not None:
+                    base = sequence.get("name") or "Draft"
+                elif template and template in savedSequences:
                     base = template.replace("Starter - ", "", 1)
                 n, newName = 2, base
                 while resolveSequenceName(newName) is not None:
                     newName = base + " " + str(n)
                     n += 1
-                if template and template in savedSequences:
+                if sequence is not None:
+                    seq = copy.deepcopy(sequence)
+                    seq["name"] = newName
+                elif template and template in savedSequences:
                     seq = copy.deepcopy(savedSequences[template])
                     seq["name"] = newName
                 else:
@@ -1530,9 +1535,24 @@ try: # try to load the GUI
                 if seq is None:
                     return None
             ed = SequenceEditor(SequenceEditorHost(), seq, original, self)
+            if sequence is not None:
+                ed.dirty = True  # a draft isn't saved until you save it
+                ed._updateTitle()
             self._seqEditors = [e for e in self._seqEditors if e.isVisible()] + [ed]
             ed.show()
             return ed
+
+        def seqFromSong(self):
+            """From song...: analyse a song file and open a drafted sequence in the editor."""
+            from neewerlux_timeline import SongDraftDialog
+            ok, why = audio.songAvailable()
+            if not ok:
+                QMessageBox.information(self, "From song", why)
+                return None
+            dlg = SongDraftDialog(SongDraftHost(), self)
+            self._songDialog = dlg
+            dlg.show()
+            return dlg
 
         def seqNew(self, *args, template=None):
             """+New: a blank sequence or a copy of one of the starter sequences."""
@@ -2488,6 +2508,7 @@ try: # try to load the GUI
             self.seqRenderButton.clicked.connect(self.seqRender)
             self.seqList.itemDoubleClicked.connect(lambda item: self.seqPlay())
             self.seqNewButton.clicked.connect(self.seqNew)
+            self.seqFromSongButton.clicked.connect(self.seqFromSong)
             self.seqList.itemSelectionChanged.connect(self.seqShowInfo)
             self.flashGuardCheck.toggled.connect(self._flashGuardToggled)
             self.seqEditButton.clicked.connect(self.seqEdit)
@@ -7688,6 +7709,74 @@ def saveSequenceFromEditor(seqData, original=None, overwrite=False):
     return result
 
 
+SONG_UPLOAD_MAX = 200 * 1024 * 1024  # an uncompressed 15-minute song is about 160 MB
+
+
+def analyzeSongFile(path, bpm=None, offsetMs=None):
+    """Analyse a song file (neewerlux_audio.analyzeSong). Returns the analysis with success,
+    or success False and errors."""
+    ok, why = audio.songAvailable()
+    if not ok:
+        return {"success": False, "errors": [why]}
+    path = str(path or "")
+    if not path.lower().endswith(audio.SONG_EXTENSIONS):
+        return {"success": False, "errors": ["a song file must be one of " + ", ".join(audio.SONG_EXTENSIONS)]}
+    if not os.path.isfile(path):
+        return {"success": False, "errors": ["no file at " + repr(path)]}
+    try:
+        samples, sr = audio.loadSong(path)
+    except Exception as e:  # libsndfile's errors for unreadable or unsupported files
+        return {"success": False, "errors": ["couldn't read " + os.path.basename(path) + ": " + str(e)]}
+    if len(samples) < sr * 5:
+        return {"success": False, "errors": ["the song is shorter than 5 seconds"]}
+    result = audio.analyzeSong(samples, sr, bpm=bpm or None, offsetMs=offsetMs)
+    result.update({"success": True, "errors": [], "song": os.path.splitext(os.path.basename(path))[0]})
+    return result
+
+
+def analyzeSongBytes(data, filename, bpm=None, offsetMs=None):
+    """Analyse an uploaded song (the web dashboard sends the file itself)."""
+    ext = os.path.splitext(str(filename or ""))[1].lower()
+    if ext not in audio.SONG_EXTENSIONS:
+        return {"success": False, "errors": ["a song file must be one of " + ", ".join(audio.SONG_EXTENSIONS)]}
+    handle, path = tempfile.mkstemp(suffix=ext)
+    try:
+        with os.fdopen(handle, "wb") as f:
+            f.write(data)
+        result = analyzeSongFile(path, bpm, offsetMs)
+    finally:
+        os.remove(path)
+    if result["success"]:
+        result["song"] = os.path.splitext(os.path.basename(str(filename)))[0]
+    return result
+
+
+def draftFromSong(body):
+    """POST sequence "draft": a sequence drafted from an analysis (or a song file path), checked
+    and rendered for its flash rate; saved when "save" is true."""
+    analysis = body.get("analysis")
+    if not isinstance(analysis, dict):
+        if not body.get("path"):
+            return {"success": False, "errors": ["send \"analysis\" (from analyze) or a song file \"path\""]}
+        analysis = analyzeSongFile(body["path"])
+        if not analysis["success"]:
+            return analysis
+    name = str(body.get("name") or analysis.get("song") or "Draft").strip()
+    seq, errors = show.draftSequence(analysis, body.get("style", "Concert"), name, body.get("bpm"), body.get("offset_ms"))
+    if seq is None:
+        return {"success": False, "errors": errors}
+    for key in ("artist", "song"):
+        if body.get(key):
+            seq[key] = str(body[key])
+    rendered = renderSequence(seq)
+    result = {"success": rendered["success"], "sequence": seq, "errors": rendered.get("errors", []),
+              "warnings": rendered.get("warnings", []), "flashes": rendered.get("flashes")}
+    if result["success"] and body.get("save"):
+        saved = saveSequenceFromEditor(seq, None, bool(body.get("overwrite", False)))
+        result.update(success=saved["success"], errors=saved["errors"], saved=saved["success"])
+    return result
+
+
 def buildSequence(data):
     """Validate a sequence dict. Returns (parsed or None, errors, warnings)."""
     return show.parseSequence(data, lambda n: resolveAnimationName(n) is not None,
@@ -7731,6 +7820,19 @@ def startSequence(nameOrData, startMs=0, fadeIn=None, fadeOut=None):
     showEngine.playSequence(player, startMs)
     printDebugString("Sequence '" + seq.name + "' playing from " + str(startMs) + " ms (" + str(len(seq.cues)) + " cues, " + str(seq.duration) + " ms, " + str(seq.fps) + " fps)")
     return {"success": True, "sequence": seq.name, "errors": [], "warnings": seqWarnings}
+
+
+class SongDraftHost:
+    """What the From song dialog needs (neewerlux_timeline.SongDraftDialog)."""
+
+    def analyze(self, path, bpm=None, offsetMs=None):
+        return analyzeSongFile(path, bpm, offsetMs)
+
+    def draft(self, analysis, style, name, bpm=None, offsetMs=None):
+        return draftFromSong({"analysis": analysis, "style": style, "name": name, "bpm": bpm, "offset_ms": offsetMs})
+
+    def openDraft(self, sequence):
+        return mainWindow.seqOpenEditor(sequence=sequence)
 
 
 class SequenceEditorHost:
@@ -9394,9 +9496,13 @@ class NLPythonServer(BaseHTTPRequestHandler):
             self.send_error(403, "Forbidden - IP " + clientIP + " is not in the list of accepted addresses")
             return
 
+        if self.path.split("?", 1)[0] == "/NeewerLux/song":
+            self._songUpload(clientIP)
+            return
+
         # ONLY ACCEPT REQUESTS TO SUPPORTED POST ENDPOINTS
         if self.path not in ("/NeewerLux/batch", "/NeewerLux/animate", "/NeewerLux/sequence", "/NeewerLux/settings", "/NeewerLux/presets", "/NeewerLux/sound", "/NeewerLite-Python/batch", "/NeewerLite-Python/animate"):
-            self.send_error(404, "POST requests are supported at /NeewerLux/batch, /NeewerLux/animate, /NeewerLux/sequence, /NeewerLux/presets, /NeewerLux/sound and /NeewerLux/settings")
+            self.send_error(404, "POST requests are supported at /NeewerLux/batch, /NeewerLux/animate, /NeewerLux/sequence, /NeewerLux/presets, /NeewerLux/sound, /NeewerLux/song and /NeewerLux/settings")
             return
 
         # READ AND PARSE THE JSON BODY
@@ -9550,6 +9656,11 @@ class NLPythonServer(BaseHTTPRequestHandler):
                         self.end_headers()
                         self.wfile.write(pngBytes)
                         return
+            elif action == "analyze":
+                resultData = analyzeSongFile(body.get("path"), body.get("bpm"), body.get("offset_ms"))
+            elif action == "draft":
+                resultData = draftFromSong(body)
+                resultData["action"] = "draft"
             elif action == "validate":
                 seq, errors, seqWarnings = buildSequence(body.get("sequence"))
                 resultData = {"success": seq is not None, "action": action, "errors": errors, "warnings": seqWarnings}
@@ -9613,7 +9724,9 @@ class NLPythonServer(BaseHTTPRequestHandler):
                 resultData = {"success": False, "errors": ["Unknown action: " + action]}
             resultData["action"] = action
 
-        # SEND JSON RESPONSE
+        self._sendJSON(resultData)
+
+    def _sendJSON(self, resultData):
         responseBody = json.dumps(resultData).encode("utf-8")
         self.send_response(200)
         self._send_cors_headers()
@@ -9621,6 +9734,28 @@ class NLPythonServer(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(responseBody)))
         self.end_headers()
         self.wfile.write(responseBody)
+
+    def _songUpload(self, clientIP):
+        """POST /NeewerLux/song?name=Track.mp3[&bpm=..&offset_ms=..] with the file as the body:
+        its analysis (as the sequence "analyze" action)."""
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+        contentLength = int(self.headers.get("Content-Length", 0))
+        if contentLength > SONG_UPLOAD_MAX:
+            self.send_error(413, "Song file too large (max " + str(SONG_UPLOAD_MAX // (1024 * 1024)) + " MB)")
+            return
+        if contentLength == 0:
+            self.send_error(400, "Empty request body")
+            return
+        data = self.rfile.read(contentLength)
+        name = query.get("name", ["song"])[0]
+        printDebugString("Song upload from " + clientIP + ": " + name + " (" + str(contentLength // 1024) + " KB)")
+        try:
+            bpm = float(query["bpm"][0]) if "bpm" in query else None
+            offset = float(query["offset_ms"][0]) if "offset_ms" in query else None
+        except ValueError:
+            self._sendJSON({"success": False, "errors": ["bpm and offset_ms must be numbers"]})
+            return
+        self._sendJSON(analyzeSongBytes(data, name, bpm, offset))
 
 def writeHTMLSections(self, theSection, errorMsg = ""):
     if theSection == "httpheaders":

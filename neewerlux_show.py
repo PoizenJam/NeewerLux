@@ -1016,6 +1016,120 @@ def parseSequence(data, clipExists, defaultFps=DEFAULT_SEQUENCE_FPS, resolveTarg
 # SOUND MODES
 # ============================================================================
 
+# ---------------------------------------------------------------- song drafts
+
+DRAFT_STYLES = ("Subtle", "Concert", "Neon")
+DRAFT_GROUPS = ("fill", "rim", "background")
+DRAFT_TARGETS = {"fill": "@fill", "rim": "@rim", "background": "@background;@practical"}
+DRAFT_PULSE_MIN_S = 0.5     # rim pulses at most twice a second (a pulse is one flash)
+# Colours keep away from saturated red (hues within 20 of 0), which counts as flashing when it
+# changes. Brightness per group for section levels 1, 2 and 3.
+_DRAFT = {
+    "subtle": {"palette": [(35, 45), (205, 40), (275, 35), (150, 35), (55, 40)],
+               "bri": {"fill": (15, 20, 25), "rim": (25, 33, 42), "background": (20, 27, 34)},
+               "fillSat": 0.5, "pulse": False, "swap": False},
+    "concert": {"palette": [(35, 90), (215, 85), (300, 80), (265, 85), (50, 90)],
+                "bri": {"fill": (20, 26, 32), "rim": (35, 55, 72), "background": (30, 45, 62)},
+                "fillSat": 0.4, "pulse": True, "swap": False},
+    "neon": {"palette": [(190, 95), (285, 90), (320, 90), (160, 90), (240, 95)],
+             "bri": {"fill": (15, 22, 28), "rim": (40, 58, 75), "background": (35, 52, 70)},
+             "fillSat": 0.6, "pulse": True, "swap": True},
+}
+
+
+def songGrid(durationMs, bpm, offsetMs):
+    """Beats (ms) from offsetMs every beat to the end, and bars: every fourth beat from the first."""
+    period = 60000.0 / float(bpm)
+    offsetMs = float(offsetMs) % period
+    beats = [int(round(offsetMs + k * period)) for k in range(int((durationMs - offsetMs) // period) + 1)]
+    return beats, beats[::4]
+
+
+def draftSequence(analysis, style="Concert", name=None, bpm=None, offsetMs=None):
+    """A first-draft sequence for a song from neewerlux_audio.analyzeSong's result: a look per
+    section (colours from the style's palette, brightness from the section's level), and in
+    Concert and Neon, rim pulses on the beat in the loudest sections (Neon also swaps the rim
+    and background colours each bar). It drives the fill, rim, background and practical
+    lights, never the key. bpm and offsetMs (a bar's first beat) replace the analysed tempo,
+    moving the sections to the nearest bar line. Returns (sequence, errors)."""
+    key = str(style or "").strip().lower()
+    if key not in _DRAFT:
+        return None, ["style must be one of " + ", ".join(DRAFT_STYLES)]
+    look = _DRAFT[key]
+    try:
+        durationMs = int(analysis["duration_ms"])
+        sections = list(analysis["sections"])
+        tempo = float(bpm if bpm else analysis["bpm"])
+    except (KeyError, TypeError, ValueError) as e:
+        return None, ["analysis is missing " + str(e)]
+    if not 30 <= tempo <= 300 or durationMs <= 0 or not sections:
+        return None, ["analysis needs a duration, sections and a tempo of 30 to 300 BPM"]
+    period = 60000.0 / tempo
+    if bpm or offsetMs is not None:
+        beats, bars = songGrid(durationMs, tempo, analysis.get("offset_ms", 0) if offsetMs is None else offsetMs)
+        snapped = sorted({0} | {min(bars, key=lambda b: abs(b - s["start_ms"])) for s in sections[1:]})
+        sections = [dict(s, start_ms=a, end_ms=b) for s, a, b in zip(sections, snapped, snapped[1:] + [durationMs]) if b > a]
+    else:
+        beats = list(analysis.get("beats") or songGrid(durationMs, tempo, analysis.get("offset_ms", 0))[0])
+        bars = list(analysis.get("bars") or beats[::4])
+    pulseEvery = next(n for n in (1, 2, 4, 8) if n * period >= DRAFT_PULSE_MIN_S * 1000)
+
+    cues = []
+    def state(at, group, colour, bri, fade, label=None, duration=None):
+        hue, sat = colour
+        if group == "fill":
+            sat = int(round(sat * look["fillSat"]))
+        cue = {"at_ms": int(max(0, at)), "target": DRAFT_TARGETS[group],
+               "state": {"mode": "HSI", "hue": int(hue), "sat": int(sat), "bri": int(bri), "fade_ms": int(max(0, fade))}}
+        if duration:
+            cue["duration_ms"] = int(duration)
+        if label:
+            cue["label"] = label
+        cues.append(cue)
+
+    pal = look["palette"]
+    for i, sec in enumerate(sections):
+        a, b = int(sec["start_ms"]), int(sec["end_ms"])
+        level = max(1, min(3, int(sec.get("level", 2))))
+        colours = {"rim": pal[i % len(pal)], "background": pal[(i + 1) % len(pal)], "fill": pal[(i + 2) % len(pal)]}
+        bri = {g: look["bri"][g][level - 1] for g in DRAFT_GROUPS}
+        if i == 0:
+            at, fade = 0, 2000
+        elif key == "subtle":
+            fade = int(min(4 * period, (a - int(sections[i - 1]["start_ms"])) / 2))
+            at = a - fade  # arrive on the section's first beat
+        else:
+            at, fade = a, int(period / 2)
+        for n, g in enumerate(DRAFT_GROUPS):
+            state(at, g, colours[g], bri[g], fade, label=(sec.get("label") or "Section") if n == 0 else None)
+        sectionBars = [t for t in bars if a <= t < b]
+        if look["swap"] and level >= 2:
+            # the rim and background trade colours every bar (every other bar when not at full energy)
+            step = 1 if level == 3 else 2
+            for k, t in enumerate(sectionBars[step::step], start=1):
+                flip = k % 2 == 1
+                state(t, "rim", colours["background"] if flip else colours["rim"], bri["rim"], int(period / 4))
+                state(t, "background", colours["rim"] if flip else colours["background"], bri["background"], int(period / 4))
+        if look["pulse"] and level == 3 and sectionBars:
+            first = beats.index(sectionBars[0]) if sectionBars[0] in beats else 0
+            for t in beats[first::pulseEvery]:
+                if not a <= t < b:
+                    continue
+                # the rim's colour at that moment (it may be mid-swap)
+                barNo = sum(1 for x in sectionBars if x <= t) - 1
+                flip = look["swap"] and (barNo % 2 == 1)
+                colour = colours["background"] if flip else colours["rim"]
+                state(t, "rim", colour, min(100, bri["rim"] + 25), 0, duration=int(period * 0.35))
+
+    seq = {"format": 1, "name": name or "Draft", "duration_ms": durationMs, "end": "revert",
+           "description": "Drafted from the song (" + DRAFT_STYLES[list(_DRAFT).index(key)] + " style, " + ("%g" % round(tempo, 2)) + " BPM)",
+           "tempo": {"bpm": round(tempo, 2), "offset_ms": int(round(bars[0] if bars else 0))},
+           "sections": [{"start_ms": int(s["start_ms"]), "end_ms": int(s["end_ms"]), "label": s.get("label", ""),
+                         "level": int(s.get("level", 2))} for s in sections],
+           "cues": sorted(cues, key=lambda c: c["at_ms"])}
+    return seq, []
+
+
 SOUND_MODE_FORMAT = 1
 SOUND_DRIVES = ("level", "low", "mid", "high", "beat")
 SOUND_COLOURS = ("centroid", "beat", "cycle")  # besides a palette index

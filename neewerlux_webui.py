@@ -663,6 +663,7 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
             </div>
             <div class="btn-row" style="margin-top:6px">
                 <button class="btn small" onclick="tlNewMenu(event)" title="Open the timeline editor on a new sequence, blank or from a starter">+ New</button>
+                <button class="btn small" onclick="songOpen()" title="Analyse a song file (tempo, beats, sections) and draft a sequence for it">From song</button>
                 <button class="btn small" onclick="tlOpenSelected()" title="Open the selected sequence in the timeline editor">Edit</button>
                 <button class="btn small" onclick="seqDuplicate()">Duplicate</button>
                 <button class="btn small" onclick="seqDelete()">Delete</button>
@@ -824,6 +825,10 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
                 <div class="api-code">POST /NeewerLux/sequence {"action":"play","name":"Example - Four Light Demo"}</div>
                 <div class="api-code">POST /NeewerLux/sequence {"action":"seek","ms":12000}</div>
                 <div class="api-code">POST /NeewerLux/sequence {"action":"render","name":"Example - Four Light Demo","format":"png"}</div>
+                <div class="api-desc">Draft from a song: analyse a file (or upload it), then draft a sequence from the analysis</div>
+                <div class="api-code">POST /NeewerLux/sequence {"action":"analyze","path":"C:\\Music\\Song.mp3"}</div>
+                <div class="api-code">POST /NeewerLux/song?name=Song.mp3 (the file as the body)</div>
+                <div class="api-code">POST /NeewerLux/sequence {"action":"draft","analysis":{...},"style":"Concert","name":"Song","save":true}</div>
                 <div class="api-desc">Live status of layers, the sequence and every light (with approximate colour)</div>
                 <div class="api-code">GET /NeewerLux/doAction?status_json</div>
             </div>
@@ -936,6 +941,26 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
     </div>
 </div>
 
+<!-- DRAFT FROM A SONG -->
+<div class="modal-bg" id="songModal">
+    <div class="modal" style="width:min(920px, 95vw)">
+        <h3 style="margin-top:0;color:var(--accent)">Draft a sequence from a song</h3>
+        <div class="toolbar">Song <input type="file" id="songFile" accept=".wav,.flac,.mp3,.ogg,.aiff,.aif" onchange="songUpload(this.files[0])" title="WAV, FLAC, MP3, OGG or AIFF"></div>
+        <canvas id="songCanvas" style="width:100%;height:170px;display:block;background:#1a1a1e;border-radius:4px"></canvas>
+        <div id="songInfo" class="tl-hint">Choose a song file to analyse.</div>
+        <div class="toolbar">
+            Tempo <input type="number" id="songBpm" min="30" max="300" step="0.01" style="width:90px" oninput="songDraw()"> BPM
+            <button class="btn small" onclick="songScale(0.5)" title="The analysis counted twice as many beats as there are">x 1/2</button>
+            <button class="btn small" onclick="songScale(2)" title="The analysis counted half the beats">x 2</button>
+            First bar at <input type="number" id="songOffset" min="0" step="10" style="width:90px" oninput="songDraw()" title="When a bar's first beat falls; sections move to the nearest bar line"> ms
+        </div>
+        <div class="toolbar">Style <select id="songStyle" onchange="songStyleNote()"><option>Subtle</option><option selected>Concert</option><option>Neon</option></select> <span id="songStyleNote" style="color:var(--muted);font-size:12px"></span></div>
+        <div class="toolbar">Name <input type="text" id="songName" style="flex:1"></div>
+        <div class="tl-hint">The draft drives the fill, rim, background and practical lights, never the key, and stays under the flash limit. It opens unsaved in the timeline editor for you to change and save.</div>
+        <div class="toolbar"><span style="flex:1"></span><button class="btn primary" id="songDraftBtn" disabled onclick="songDraft()">Create draft</button><button class="btn" onclick="songClose()">Close</button></div>
+    </div>
+</div>
+
 <!-- SEQUENCE TIMELINE EDITOR -->
 <div class="modal-bg" id="tlModal">
     <div class="modal full">
@@ -944,6 +969,7 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
             Length <input type="number" id="tlDuration" min="1" step="0.5" style="width:80px" onchange="tlDurationEdited()"> s
             Tempo <input type="number" id="tlBpm" min="0" max="300" step="0.5" style="width:70px" title="BPM, 0 = off. Beat lines and beat snapping." onchange="tlTempoEdited()">
             Beat 1 at <input type="number" id="tlBeatOffset" min="0" step="10" style="width:80px" onchange="tlTempoEdited()"> ms
+            <button class="btn small" onclick="tlChangeTempo()" title="Set a new tempo and move and stretch the cues so they stay on the same beats">Change tempo</button>
             Snap <select id="tlSnap"></select>
             <button class="btn small" onclick="tlZoom(0.8)">Zoom -</button><button class="btn small" onclick="tlZoom(1.25)">Zoom +</button><button class="btn small" onclick="tlFit()">Fit</button>
             <span style="flex:1"></span>
@@ -2273,9 +2299,15 @@ function tlNewMenu(ev) {
     const starters = seqNames.filter(n => n.startsWith('Starter - ')).sort();
     showMenu(ev, [{label: 'Blank sequence', fn: () => tlOpen(null)}].concat(starters.map(n => ({label: 'From ' + n, fn: () => tlOpen(null, n)}))));
 }
-async function tlOpen(name, template) {
+async function tlOpen(name, template, given) {
     let seq, original = null;
-    if (!name && template) {
+    if (given) {
+        const names = seqNames.map(n => n.toLowerCase()), base = given.name || 'Draft';
+        let nm = base, n = 2;
+        while (names.includes(nm.toLowerCase())) nm = base + ' ' + (n++);
+        seq = JSON.parse(JSON.stringify(given));
+        seq.name = nm;
+    } else if (!name && template) {
         const g = await seqPost({action: 'get', name: template});
         if (!g.success) { logMsg('Can\'t open: ' + errText(g), 'err'); return; }
         const names = seqNames.map(n => n.toLowerCase()), base = template.replace(/^Starter - /, '');
@@ -2309,6 +2341,8 @@ async function tlOpen(name, template) {
     document.getElementById('tlSend').checked = false;
     document.getElementById('tlSettings').style.display = 'none';
     document.getElementById('tlModal').classList.add('open');
+    if (given) tl.dirty = true;  // a draft isn't saved until you save it
+    tlUpdateTime();
     await tlRefreshInfo();
     tlFit();
     tlRerender();
@@ -2340,7 +2374,8 @@ function tlMetrics() {
     const ctx = cv.getContext('2d');
     ctx.font = '13px sans-serif';
     const labelW = Math.min(220, Math.max(110, ...tl.tracks.map(t => ctx.measureText(t.label).width + 18), 80));
-    return {rowH: 36, rulerH: 24, labelW: labelW, W: cv.clientWidth};
+    const secH = (tl.seq.sections || []).length ? 18 : 0;  // the song sections row above the ruler
+    return {rowH: 36, rulerH: 24 + secH, secH: secH, labelW: labelW, W: cv.clientWidth};
 }
 function tlResizeCanvas() {
     const cv = document.getElementById('tlCanvas');
@@ -2377,7 +2412,7 @@ function tlDraw() {
     const ctx = cv.getContext('2d');
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const m = tlMetrics(), W = cv.clientWidth, H = cv.height / dpr;
-    const {rowH, rulerH, labelW} = m;
+    const {rowH, rulerH, labelW, secH} = m;
     const seq = tl.seq, dur = +seq.duration_ms || 0;
     ctx.fillStyle = '#1a1a1e'; ctx.fillRect(0, 0, W, H);
     ctx.font = '12px sans-serif'; ctx.textBaseline = 'middle';
@@ -2389,7 +2424,7 @@ function tlDraw() {
         if (x < labelW) continue;
         ctx.fillStyle = '#303038'; ctx.fillRect(x, rulerH, 1, H - rulerH);
         ctx.fillStyle = '#aaaab4'; ctx.fillRect(x, rulerH - 6, 1, 6);
-        ctx.fillText(tick >= 1000 ? tlFmt(t) : (t / 1000).toFixed(2) + 's', x + 3, rulerH / 2);
+        ctx.fillText(tick >= 1000 ? tlFmt(t) : (t / 1000).toFixed(2) + 's', x + 3, secH + (rulerH - secH) / 2);
     }
     const bpm = +document.getElementById('tlBpm').value || 0;
     if (bpm > 0) {
@@ -2404,6 +2439,15 @@ function tlDraw() {
             }
         }
     }
+    (seq.sections || []).forEach(sec => {
+        const a = +sec.start_ms || 0, b = sec.end_ms != null ? +sec.end_ms : dur;
+        const xa = Math.max(labelW, tlX(a)), xb = Math.min(W, tlX(b));
+        if (xb <= xa) return;
+        const colour = TL_SECTION_COLOURS[sec.level] || TL_SECTION_COLOURS[2];
+        ctx.fillStyle = colour; ctx.fillRect(xa, 1, xb - xa - 1, secH - 2);
+        if (tlX(a) >= labelW) { ctx.fillStyle = colour; for (let yy = rulerH; yy < H; yy += 6) ctx.fillRect(tlX(a), yy, 1, 3); }
+        if (xb - xa > 30) { ctx.save(); ctx.beginPath(); ctx.rect(xa, 0, xb - xa - 4, secH); ctx.clip(); ctx.fillStyle = '#f0f0f5'; ctx.fillText(sec.label || '', xa + 4, secH / 2); ctx.restore(); }
+    });
     const xEnd = tlX(dur);
     if (xEnd < W) { ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(Math.max(labelW, xEnd), rulerH, W - Math.max(labelW, xEnd), H - rulerH); }
     const changesById = (tl.render && tl.render.changes) || {};
@@ -2465,7 +2509,8 @@ function tlDraw() {
         ctx.font = '12px sans-serif';
     });
     ctx.fillStyle = '#22222a'; ctx.fillRect(0, 0, labelW, rulerH);
-    ctx.fillStyle = '#9696a0'; ctx.fillText(tlFmt(dur, true), 8, rulerH / 2);
+    ctx.fillStyle = '#9696a0'; ctx.fillText(tlFmt(dur, true), 8, secH + (rulerH - secH) / 2);
+    if (secH) ctx.fillText('Sections', 8, secH / 2);
     const xp = tlX(tl.playhead);
     if (xp >= labelW && xp <= W) {
         ctx.fillStyle = '#ff5050'; ctx.fillRect(xp - 1, 0, 2, H);
@@ -2499,6 +2544,9 @@ function tlRedo() { if (!tl || !tl.redo.length) return; tl.undo.push([JSON.strin
 function tlAfterReplace() {
     document.getElementById('tlName').value = tl.seq.name || '';
     document.getElementById('tlDuration').value = (+tl.seq.duration_ms || 1000) / 1000;
+    document.getElementById('tlBpm').value = (tl.seq.tempo || {}).bpm || 0;
+    document.getElementById('tlBeatOffset').value = (tl.seq.tempo || {}).offset_ms || 0;
+    tlUpdateTime();
     tlChanged();
     tlProps();
 }
@@ -2805,6 +2853,131 @@ function tlDurationEdited() {
     tlPushUndo();
     tl.seq.duration_ms = ms;
     tlChanged();
+}
+const TL_SECTION_COLOURS = {1: '#466ea0', 2: '#96783c', 3: '#be4678'};  // by energy level, as on the desktop
+
+// ---- draft from a song
+const SONG_STYLE_NOTES = {Subtle: 'Gentle colour changes between sections, arriving on their first beat. No pulses.',
+    Concert: 'A strong look per section; the rim pulses on the beat in the loudest sections.',
+    Neon: 'Saturated colours; in loud sections the rim and background swap colours each bar and the rim pulses on the beat.'};
+let songAnalysis = null;
+function songOpen() {
+    songAnalysis = null;
+    document.getElementById('songFile').value = '';
+    document.getElementById('songInfo').textContent = 'Choose a song file to analyse.';
+    document.getElementById('songDraftBtn').disabled = true;
+    document.getElementById('songName').value = '';
+    songStyleNote();
+    document.getElementById('songModal').classList.add('open');
+    songDraw();
+}
+function songClose() { document.getElementById('songModal').classList.remove('open'); }
+function songStyleNote() { document.getElementById('songStyleNote').textContent = SONG_STYLE_NOTES[document.getElementById('songStyle').value] || ''; }
+async function songUpload(file) {
+    if (!file) return;
+    document.getElementById('songInfo').textContent = 'Analysing ' + file.name + '...';
+    document.getElementById('songDraftBtn').disabled = true;
+    let d;
+    try {
+        const r = await fetch('/NeewerLux/song?name=' + encodeURIComponent(file.name), {method: 'POST', headers: {'Content-Type': 'application/octet-stream'}, body: file});
+        d = r.ok ? await r.json() : {success: false, errors: ['HTTP ' + r.status + ' ' + r.statusText]};
+    } catch (e) { d = {success: false, errors: [String(e)]}; }
+    songSetAnalysis(d);
+}
+function songSetAnalysis(d) {
+    if (!d.success) { songAnalysis = null; document.getElementById('songInfo').textContent = 'Couldn\'t analyse it: ' + errText(d); songDraw(); return; }
+    songAnalysis = d;
+    document.getElementById('songBpm').value = d.bpm;
+    document.getElementById('songOffset').value = (d.bars && d.bars.length) ? d.bars[0] : d.offset_ms;
+    if (!document.getElementById('songName').value.trim()) document.getElementById('songName').value = d.song || '';
+    const conf = d.confidence == null ? '' : ' (' + Math.round(d.confidence * 100) + '% of the song agrees)';
+    document.getElementById('songInfo').textContent = tlFmt(d.duration_ms) + ' long, ' + d.bpm + ' BPM' + conf + ', ' + d.sections.length +
+        ' sections. If the beat ticks don\'t match the song, correct the tempo (x 1/2 or x 2 for the commonest mistake) and when the first bar falls.';
+    document.getElementById('songDraftBtn').disabled = false;
+    songDraw();
+}
+function songScale(f) { const el = document.getElementById('songBpm'); el.value = Math.round(+el.value * f * 100) / 100; songDraw(); }
+function songDraw() {
+    const cv = document.getElementById('songCanvas'), dpr = window.devicePixelRatio || 1;
+    const W = cv.clientWidth || 800, H = cv.clientHeight || 170;
+    cv.width = W * dpr; cv.height = H * dpr;
+    const ctx = cv.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = '#1a1a1e'; ctx.fillRect(0, 0, W, H);
+    ctx.font = '12px sans-serif'; ctx.textBaseline = 'middle';
+    const a = songAnalysis;
+    if (!a) { ctx.fillStyle = '#9696a0'; ctx.textAlign = 'center'; ctx.fillText('Choose a song file to analyse', W / 2, H / 2); ctx.textAlign = 'left'; return; }
+    const dur = Math.max(1, a.duration_ms), x = ms => ms * W / dur, band = 16;
+    a.sections.forEach(sec => {
+        ctx.fillStyle = TL_SECTION_COLOURS[sec.level] || TL_SECTION_COLOURS[2];
+        ctx.fillRect(x(sec.start_ms), 0, x(sec.end_ms) - x(sec.start_ms) - 1, band);
+        ctx.fillStyle = '#f0f0f5'; ctx.fillText(sec.label || '', x(sec.start_ms) + 3, band / 2);
+    });
+    const top = band + 4, mid = top + (H - top) / 2, half = (H - top - 4) / 2;
+    ctx.fillStyle = '#5a5a69';
+    a.waveform.forEach((v, i) => ctx.fillRect(i * W / a.waveform.length, mid - v * half, Math.max(1, W / a.waveform.length), 2 * v * half));
+    const step = a.energy_step_ms || 250;
+    ctx.strokeStyle = '#e6b446'; ctx.lineWidth = 1.5; ctx.beginPath();
+    a.energy.forEach((v, i) => { const px = x(i * step), py = H - 4 - v * (H - top - 8); if (i) ctx.lineTo(px, py); else ctx.moveTo(px, py); });
+    ctx.stroke();
+    const bpm = +document.getElementById('songBpm').value || 0, off = +document.getElementById('songOffset').value || 0;
+    if (bpm > 0) {
+        const p = 60000 / bpm;
+        let k = -Math.floor(off / p);
+        for (let t = off + k * p; t <= dur; t += p, k++) {
+            if (t < 0) continue;
+            const bar = ((k % 4) + 4) % 4 === 0;
+            if (!bar && p * W / dur < 4) continue;
+            ctx.fillStyle = bar ? '#8c6ec8' : '#463c5f';
+            ctx.fillRect(x(t), top, 1, bar ? 10 : 5);
+        }
+    }
+}
+async function songDraft() {
+    const a = songAnalysis;
+    if (!a) return;
+    const bpm = +document.getElementById('songBpm').value, off = +document.getElementById('songOffset').value;
+    const first = (a.bars && a.bars.length) ? a.bars[0] : a.offset_ms;
+    const changed = Math.abs(bpm - a.bpm) > 0.005 || off !== first;
+    const {waveform, energy, ...lean} = a;  // the draft needs the beats and sections, not the drawing data
+    const body = {action: 'draft', analysis: lean, style: document.getElementById('songStyle').value,
+                  name: document.getElementById('songName').value.trim() || a.song || 'Draft'};
+    if (changed) { body.bpm = bpm; body.offset_ms = off; }
+    const d = await seqPost(body);
+    if (!d.success) { document.getElementById('songInfo').textContent = 'Couldn\'t draft it: ' + errText(d); return; }
+    songClose();
+    tlOpen(null, null, d.sequence);
+}
+function tlRescaleTempo(seq, newBpm) {
+    // the cues stay on the same beats: times move and stretch about the first beat, loops follow
+    seq = JSON.parse(JSON.stringify(seq));
+    const tempo = seq.tempo || {}, old = +tempo.bpm || 0, off = +tempo.offset_ms || 0;
+    if (old <= 0 || newBpm <= 0) { seq.tempo = {bpm: Math.round(newBpm * 100) / 100, offset_ms: off}; return seq; }
+    const r = old / newBpm, at = t => Math.max(0, Math.round(off + (+t - off) * r)), span = d => Math.max(0, Math.round(+d * r));
+    (seq.cues || []).forEach(c => {
+        c.at_ms = at(c.at_ms || 0);
+        if (c.duration_ms) c.duration_ms = Math.max(1, span(c.duration_ms));
+        if (c.state && c.state.fade_ms) c.state.fade_ms = span(c.state.fade_ms);
+        if (c.clip && typeof c.clip === 'object' && c.clip.fit === 'loop') c.clip.speed = Math.round(Math.max(0.05, Math.min(20, (+c.clip.speed || 1) / r)) * 1000) / 1000;
+    });
+    (seq.sections || []).forEach(sec => { if (sec.start_ms != null) sec.start_ms = at(sec.start_ms); if (sec.end_ms != null) sec.end_ms = at(sec.end_ms); });
+    seq.duration_ms = Math.max(1, at(seq.duration_ms || 1));
+    seq.tempo = {bpm: Math.round(newBpm * 100) / 100, offset_ms: Math.round(off)};
+    return seq;
+}
+function tlChangeTempo() {
+    const old = +document.getElementById('tlBpm').value || 0;
+    const v = prompt('New tempo (BPM)', old > 0 ? old : 120);
+    const bpm = +v;
+    if (!v || !(bpm >= 30 && bpm <= 300)) return false;
+    const move = old > 0 && confirm('Move and stretch the cues so they stay on the same beats?\n(Cancel changes only the tempo.)');
+    tlPushUndo();
+    if (move) tl.seq = tlRescaleTempo(tl.seq, bpm);
+    else tl.seq.tempo = {bpm: Math.round(bpm * 100) / 100, offset_ms: +document.getElementById('tlBeatOffset').value || 0};
+    tl.sel = [];
+    tlAfterReplace();
+    tlStatus('Tempo now ' + tl.seq.tempo.bpm + ' BPM' + (move ? ', cues moved to stay on their beats.' : '.'), 'ok');
+    return true;
 }
 function tlTempoEdited() {
     const bpm = +document.getElementById('tlBpm').value || 0;

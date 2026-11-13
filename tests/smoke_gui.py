@@ -370,7 +370,13 @@ def main():
     for w in app.topLevelWidgets():
         if isinstance(w, SequenceEditor):
             native.extend(nativeSpins(w))
+            native.extend(nativeSpins(w._tempoDialog()))
             w.close()
+    from neewerlux_timeline import SongDraftDialog
+    assert win.seqFromSongButton.text() == "From song..."
+    songDialog = SongDraftDialog(nl.SongDraftHost(), win)
+    native.extend(nativeSpins(songDialog))
+    songDialog.close()
     assert not native, "spin boxes with Qt arrows or no room for text (use SpinBoxWithButtons or hideSpinArrows): %r" % native
     sb = SpinBoxWithButtons(minVal=0, maxVal=1000)
     sb.setSingleStep(100); sb.setSpecialValueText("Global")

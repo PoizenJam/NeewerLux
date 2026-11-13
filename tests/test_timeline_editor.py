@@ -273,11 +273,96 @@ def main():
         RESULTS.append(("INFO", "screenshot", os.path.join(rig.workdir, "editor_after.png")))
         ed.close()
 
+    def changeTempo():
+        seq = {"format": 1, "name": "Tempo Test", "duration_ms": 20500, "tempo": {"bpm": 120, "offset_ms": 500},
+               "sections": [{"start_ms": 500, "end_ms": 4500, "label": "A", "level": 1}],
+               "cues": [{"at_ms": 0, "target": "*", "state": {"mode": "CCT", "temp": 45, "bri": 50}},
+                        {"at_ms": 2500, "duration_ms": 1000, "target": "1", "state": {"mode": "HSI", "hue": 200, "sat": 90, "bri": 60, "fade_ms": 500}},
+                        {"at_ms": 4500, "duration_ms": 2000, "target": "2", "clip": {"name": "Color Chase", "fit": "loop", "speed": 1.0}}]}
+        out = tl.rescaleTempo(seq, 60)
+        c = out["cues"]
+        check(c[1]["at_ms"] == 4500 and c[1]["duration_ms"] == 2000 and c[1]["state"]["fade_ms"] == 1000, "beat 4 at 120 is beat 4 at 60: %s" % c[1])
+        check(c[0]["at_ms"] == 0 and c[2]["at_ms"] == 8500 and c[2]["clip"]["speed"] == 0.5, "before the first beat clamps at 0; loops slow down: %s" % c[2])
+        check(out["duration_ms"] == 40500 and out["sections"][0] == {"start_ms": 500, "end_ms": 8500, "label": "A", "level": 1}, "length and sections")
+        check(out["tempo"] == {"bpm": 60, "offset_ms": 500} and seq["cues"][1]["at_ms"] == 2500, "a copy, with the new tempo")
+        check(tl.rescaleTempo({"cues": [], "duration_ms": 1000}, 100)["tempo"] == {"bpm": 100, "offset_ms": 0}, "no tempo yet: just set it")
+
+        ed = win.seqOpenEditor(sequence=seq)
+        pump(200)
+        check(ed.dirty and ed.originalName is None, "an unsaved sequence opens dirty")
+        def answer():
+            dlg = ed._changeTempoDialog
+            dlg.tempoSpin.setValue(90)
+            dlg.accept()
+        nl.QTimer.singleShot(150, answer)
+        check(ed.changeTempo(), "the dialog applies")
+        check(ed.bpmSpin.value() == 90 and ed.seq["cues"][1]["at_ms"] == int(round(500 + 2000 * 120 / 90)), "cues follow the new tempo: %s" % ed.seq["cues"][1]["at_ms"])
+        ed.undo()
+        check(ed.bpmSpin.value() == 120 and ed.seq["cues"][1]["at_ms"] == 2500 and ed.durationSpin.value() == 20.5, "undo puts the tempo and cues back")
+        ed.applyTempo(140, False)
+        check(ed.seq["tempo"] == {"bpm": 140, "offset_ms": 500} and ed.seq["cues"][1]["at_ms"] == 2500, "tempo only, cues stay")
+        ed.view.update()
+        pump(100)
+        ed.grab().save(os.path.join(rig.workdir, "editor_sections.png"))
+        RESULTS.append(("INFO", "screenshot", os.path.join(rig.workdir, "editor_sections.png")))
+        ed.dirty = False
+        ed.close()
+
+    def fromSong():
+        try:
+            import numpy as np
+            import soundfile
+        except ImportError:
+            RESULTS.append(("INFO", "from song", "skipped: needs numpy and soundfile"))
+            return
+        sr, bpm, secs = 22050, 128.0, 40.0
+        t = np.arange(int(secs * sr)) / sr
+        x = 0.05 * np.sin(2 * np.pi * 220 * t)
+        kt = np.arange(int(0.1 * sr)) / sr
+        kick = np.sin(2 * np.pi * (50 + 80 * np.exp(-kt * 30)) * kt) * np.exp(-kt * 25)
+        for k in range(int((secs - 0.5) * bpm / 60)):
+            at = int((0.2 + k * 60 / bpm) * sr)
+            x[at:at + len(kick)] += kick * (1.0 if k % 4 == 0 else 0.6) * (0.9 if k * 60 / bpm > secs / 2 else 0.35)
+        path = os.path.join(rig.workdir, "Test Song.wav")
+        soundfile.write(path, x * 0.5, sr)
+        dlg = win.seqFromSong()
+        dlg.analyze(path)
+        end = time.monotonic() + 15
+        while not dlg.draftButton.isEnabled() and time.monotonic() < end:
+            pump(50)
+        check(dlg.draftButton.isEnabled() and abs(dlg.bpmSpin.value() - 128) < 0.3, "analysed: %s" % dlg.infoLabel.text())
+        check(dlg.nameEdit.text() == "Test Song" and dlg.view.analysis is not None, "named after the song, drawn")
+        dlg.grab().save(os.path.join(rig.workdir, "song_dialog.png"))
+        RESULTS.append(("INFO", "screenshot", os.path.join(rig.workdir, "song_dialog.png")))
+        dlg.halfButton.click()
+        half = dlg.bpmSpin.value()
+        check(abs(half - 64) < 0.2 and dlg.view.bpm == half, "x 1/2 halves the tempo and redraws the grid: %s" % half)
+        dlg.styleCombo.setCurrentText("Neon")
+        ed = dlg.createDraft()
+        pump(200)
+        check(ed is not None and ed.seq["tempo"]["bpm"] == round(half, 2) and ed.seq["sections"] and ed.dirty, "the draft opens unsaved in the editor")
+        check(ed.seq["name"] == "Test Song" and "Neon" in ed.seq["description"], ed.seq.get("description"))
+        check(not any("key" in c["target"] for c in ed.seq["cues"]), "never the key")
+        ed.grab().save(os.path.join(rig.workdir, "editor_draft.png"))
+        RESULTS.append(("INFO", "screenshot", os.path.join(rig.workdir, "editor_draft.png")))
+        ed.dirty = False
+        ed.close()
+        bad = os.path.join(rig.workdir, "bad.mp3")
+        with open(bad, "wb") as f:
+            f.write(b"not audio")
+        dlg.analyze(bad)
+        end = time.monotonic() + 10
+        while dlg.pollTimer.isActive() and time.monotonic() < end:
+            pump(50)
+        check(not dlg.draftButton.isEnabled() and dlg.infoLabel.text().startswith("Couldn't analyse it"), dlg.infoLabel.text())
+        dlg.close()
+
     for name, fn in [("model helpers", modelHelpers), ("opens on a saved sequence", opens), ("double-click adds a cue", doubleClickAdds),
                      ("drag moves a cue", dragMoves), ("undo and redo", undoRedo), ("properties panel", propertiesEdit),
                      ("drag a clip's end", resizeEnd), ("copy, paste, delete", copyPasteDelete), ("stage preview", renderAndPreview),
                      ("save and rename", saveAndRename), ("screen-only preview", playPreviewOnly), ("send to lights", playToLights),
-                     ("panel New/Duplicate/Delete", panelButtons), ("unmatched cues track", unmatchedTrack)]:
+                     ("panel New/Duplicate/Delete", panelButtons), ("unmatched cues track", unmatchedTrack),
+                     ("change tempo", changeTempo), ("draft from a song", fromSong)]:
         step(name, fn)
     failed = 0
     for status, name, msg in RESULTS:

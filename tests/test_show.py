@@ -11,6 +11,7 @@ import random
 import sys
 import time
 import traceback
+import urllib.request
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")  # the render strip test creates a Qt app
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -1773,6 +1774,111 @@ def t_presetSounds(rig):
     check(6 not in nl.presetSounds, "a snapshot without sound clears it")
 
 
+def _songAnalysis(show, bpm, durationMs=96000, offsetMs=250):
+    """An analysis result like neewerlux_audio.analyzeSong's, for drafting without audio."""
+    beats, bars = show.songGrid(durationMs, bpm, offsetMs)
+    cuts = [0] + bars[2::8] + [durationMs]
+    levels = [1, 2, 3, 1, 3, 2, 3, 1, 2, 3, 1, 3, 2, 3, 2, 1] * 4
+    sections = [{"start_ms": a, "end_ms": b, "energy": 0.3 * levels[i], "level": levels[i], "label": "S%d" % i}
+                for i, (a, b) in enumerate(zip(cuts[:-1], cuts[1:]))]
+    return {"duration_ms": durationMs, "bpm": bpm, "offset_ms": offsetMs, "beats": beats, "bars": bars, "sections": sections}
+
+
+def t_songDrafts(rig):
+    """1.4.0: drafts from a song analysis validate, never drive the key, keep every light under
+    the flash limit (before the guard) at any tempo, and carry the tempo and sections."""
+    nl = rig.nl
+    show = nl.show
+    for bpm in (60, 90, 120, 128, 150, 174, 200):
+        a = _songAnalysis(show, bpm)
+        for style in show.DRAFT_STYLES:
+            seq, errors = show.draftSequence(a, style, "Draft %s %d" % (style, bpm))
+            check(not errors, str(errors))
+            built, errs, _ = nl.buildSequence(seq)
+            check(built is not None, "%s at %d BPM validates: %s" % (style, bpm, errs))
+            check(not any("key" in c["target"] for c in seq["cues"]), "never the key")
+            check({c["target"] for c in seq["cues"]} == set(show.DRAFT_TARGETS.values()), "every group has cues")
+            r = nl.renderSequence(seq, 25)
+            fl = r["flashes"]
+            check(fl["worst"] <= 2.5 and fl["worstRed"] <= 2.5, "%s at %d BPM: %s flashes a second at worst (red %s)" % (style, bpm, fl["worst"], fl["worstRed"]))
+            check(seq["tempo"] == {"bpm": bpm, "offset_ms": a["bars"][0]} and len(seq["sections"]) == len(a["sections"]), "tempo and sections")
+    a = _songAnalysis(show, 128)
+    concert = show.draftSequence(a, "concert")[0]
+    neon = show.draftSequence(a, "Neon")[0]
+    subtle = show.draftSequence(a, "Subtle")[0]
+    check(len(subtle["cues"]) == 3 * len(a["sections"]), "Subtle: one look per section")
+    pulses = [c for c in concert["cues"] if c.get("duration_ms")]
+    loud = [s for s in a["sections"] if s["level"] == 3]
+    check(pulses and all(any(s["start_ms"] <= c["at_ms"] < s["end_ms"] for s in loud) for c in pulses), "pulses only in the loudest sections")
+    check(all(c["at_ms"] in a["beats"] for c in pulses), "on the beat")
+    check(len([c for c in neon["cues"] if not c.get("duration_ms")]) > len(concert["cues"]) - len(pulses), "Neon swaps colours")
+    # a corrected tempo: sections move to the nearest bar of the new grid
+    moved, _ = show.draftSequence(a, "Subtle", bpm=64, offsetMs=500)
+    grid = show.songGrid(a["duration_ms"], 64, 500)[1]
+    check(all(s["start_ms"] in grid or s["start_ms"] == 0 for s in moved["sections"]) and moved["tempo"] == {"bpm": 64, "offset_ms": 500},
+          "sections snap to the new bars: %s" % [s["start_ms"] for s in moved["sections"]])
+    check(show.draftSequence(a, "Disco")[1] == ["style must be one of Subtle, Concert, Neon"], "unknown style")
+    check(show.draftSequence({"duration_ms": 1000}, "Neon")[1], "an incomplete analysis is an error")
+
+
+def _songFile(path, bpm=128.0, seconds=40.0, sr=22050):
+    """A WAV with kicks on the beat (accented each bar) and a louder half."""
+    import numpy as np
+    import soundfile
+    t = np.arange(int(seconds * sr)) / sr
+    x = 0.05 * np.sin(2 * np.pi * 220 * t)
+    kt = np.arange(int(0.1 * sr)) / sr
+    kick = np.sin(2 * np.pi * (50 + 80 * np.exp(-kt * 30)) * kt) * np.exp(-kt * 25)
+    beat = 60.0 / bpm
+    k = 0
+    while k * beat + 0.2 < seconds - 0.2:
+        at = int((0.2 + k * beat) * sr)
+        amp = (1.0 if k % 4 == 0 else 0.6) * (0.9 if 0.2 + k * beat > seconds / 2 else 0.35)
+        x[at:at + len(kick)] += kick[:len(x[at:at + len(kick)])] * amp
+        k += 1
+    soundfile.write(path, x * 0.5, sr)
+
+
+def t_songHTTP(rig):
+    """1.4.0: analyze a song file by path or upload it, draft a sequence from the analysis (or a
+    path), optionally saving it."""
+    import tempfile
+    nl = rig.nl
+    try:
+        import soundfile  # noqa: F401
+        import numpy  # noqa: F401
+    except ImportError:
+        print("  (skipped: needs numpy and soundfile)")
+        return
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "My Song.wav")
+        _songFile(path)
+        a = rig.post("/NeewerLux/sequence", {"action": "analyze", "path": path})
+        check(a["success"] and abs(a["bpm"] - 128) < 0.3 and a["song"] == "My Song" and a["sections"], "analyze by path: %s" % {k: a.get(k) for k in ("success", "bpm", "errors")})
+        bad = rig.post("/NeewerLux/sequence", {"action": "analyze", "path": os.path.join(d, "nothing.mp3")})
+        check(not bad["success"] and "no file" in bad["errors"][0], str(bad))
+        bad = rig.post("/NeewerLux/sequence", {"action": "analyze", "path": path[:-4] + ".txt"})
+        check(not bad["success"] and "must be one of" in bad["errors"][0], str(bad))
+        with open(path, "rb") as f:
+            data = f.read()
+        req = urllib.request.Request("http://127.0.0.1:%d/NeewerLux/song?name=Uploaded%%20Song.wav&bpm=64" % rig.port, data=data,
+                                     headers={"Content-Type": "application/octet-stream"}, method="POST")
+        up = json.loads(urllib.request.urlopen(req, timeout=30).read().decode("utf-8"))
+        check(up["success"] and up["song"] == "Uploaded Song" and up["bpm"] == 64, "upload with a given tempo: %s" % {k: up.get(k) for k in ("success", "bpm", "song", "errors")})
+        check(not [f for f in os.listdir(tempfile.gettempdir()) if f.endswith(".wav") and os.path.getsize(os.path.join(tempfile.gettempdir(), f)) == len(data)],
+              "the upload's temporary file is removed")
+
+        dr = rig.post("/NeewerLux/sequence", {"action": "draft", "analysis": a, "style": "Neon", "name": "Drafted"})
+        check(dr["success"] and dr["sequence"]["name"] == "Drafted" and dr["flashes"]["worst"] <= 3 and "Drafted" not in nl.savedSequences,
+              "draft from an analysis, not saved: %s" % {k: dr.get(k) for k in ("success", "errors", "flashes")})
+        dr = rig.post("/NeewerLux/sequence", {"action": "draft", "path": path, "style": "subtle", "save": True, "artist": "PoizenJam"})
+        check(dr["success"] and dr.get("saved") and nl.savedSequences.get("My Song", {}).get("artist") == "PoizenJam", "draft from a path, saved under the song's name: %s" % dr.get("errors"))
+        again = rig.post("/NeewerLux/sequence", {"action": "draft", "path": path, "save": True})
+        check(not again["success"] and "exists" in again["errors"][0], "saving over needs overwrite: %s" % again["errors"])
+        check(not rig.post("/NeewerLux/sequence", {"action": "draft", "analysis": a, "style": "Disco"})["success"], "unknown style")
+        rig.post("/NeewerLux/sequence", {"action": "delete", "name": "My Song"})
+
+
 def t_paletteLibrary(rig):
     """1.4.0: saved palettes over HTTP (list, save, delete) and by name in start and set."""
     nl = rig.nl
@@ -1858,7 +1964,7 @@ TESTS = [t_maxBrightnessHTTP, t_maxBrightnessAnimationAndSequence, t_minBrightne
          t_addSimulatedRig, t_compositorWakesOnlyWhenDue, t_handBackToRunningLayerFades,
          t_soundModeHTTP, t_soundUnderShowAndEffects, t_soundRespectsLimitsAndLocks, t_soundUnavailable, t_soundModeFilesHTTP,
          t_offWinsDuringShows, t_manualWriteReleasesSound, t_presetFadeTakesLightsFromSound, t_soundOnSomeLights,
-         t_presetSounds, t_paletteLibrary]
+         t_presetSounds, t_paletteLibrary, t_songDrafts, t_songHTTP]
 
 
 def main():

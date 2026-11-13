@@ -7,6 +7,7 @@ Run: python tests/test_webui.py
 """
 
 import json
+import math
 import os
 import sys
 import time
@@ -528,12 +529,70 @@ def main():
         spin(600)
         check("Web Timeline (copy)" not in nl.savedSequences, "delete")
 
+    def songDraft():
+        try:
+            import numpy as np
+            import soundfile
+        except ImportError:
+            results.append(("INFO", "draft from a song", "skipped: needs numpy and soundfile"))
+            return
+        import base64
+        import io
+        sr, bpm, secs = 11025, 128.0, 24.0
+        t = np.arange(int(secs * sr)) / sr
+        x = 0.05 * np.sin(2 * np.pi * 220 * t)
+        kt = np.arange(int(0.1 * sr)) / sr
+        kick = np.sin(2 * np.pi * (50 + 80 * np.exp(-kt * 30)) * kt) * np.exp(-kt * 25)
+        for k in range(int((secs - 0.5) * bpm / 60)):
+            at = int((0.2 + k * 60 / bpm) * sr)
+            x[at:at + len(kick)] += kick * (1.0 if k % 4 == 0 else 0.6) * (0.9 if k * 60 / bpm > secs / 2 else 0.35)
+        buf = io.BytesIO()
+        soundfile.write(buf, x * 0.5, sr, format="WAV", subtype="PCM_16")
+        b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+        js(page, "songOpen()")
+        js(page, "songUpload(new File([Uint8Array.from(atob('%s'), c => c.charCodeAt(0))], 'Web Song.wav'))" % b64, timeout=20000)
+        waitFor(page, "!!songAnalysis && !document.getElementById('songDraftBtn').disabled", "the song analysed", timeout=20)
+        got = json.loads(js(page, "JSON.stringify({bpm: +document.getElementById('songBpm').value, name: document.getElementById('songName').value, secs: songAnalysis.sections.length})"))
+        check(abs(got["bpm"] - 128) < 0.3 and got["name"] == "Web Song" and got["secs"] >= 1, "analysis in the dialog: %s" % got)
+        spin(200)
+        view.grab().save(os.path.join(rig.workdir, "webui_song.png"))
+        js(page, "songScale(0.5); document.getElementById('songStyle').value = 'Neon'; songStyleNote(); songDraft()")
+        waitFor(page, "!!(tl && tl.render && tl.original === null && (tl.seq.sections || []).length && document.getElementById('tlModal').classList.contains('open'))", "the draft in the editor", timeout=15)
+        seq = json.loads(js(page, "JSON.stringify(tl.seq)"))
+        check(abs(seq["tempo"]["bpm"] - got["bpm"] / 2) < 0.02 and seq["name"] == "Web Song" and "Neon" in seq["description"], "the draft: %s" % {k: seq.get(k) for k in ("tempo", "name", "description")})
+        check(not any("key" in c["target"] for c in seq["cues"]) and js(page, "tl.dirty") and js(page, "tlMetrics().secH") == 18, "never the key; unsaved; sections row")
+        check(js(page, "document.getElementById('tlTime').textContent") == "0:00.000 / " + js(page, "tlFmt(tl.seq.duration_ms, true)"), "the time shows this sequence")
+        check(js(page, "document.getElementById('songModal').classList.contains('open')") is False, "the song dialog closes")
+        spin(200)
+        view.grab().save(os.path.join(rig.workdir, "webui_draft.png"))
+        # Change tempo: move and stretch the cues
+        old = seq["tempo"]["bpm"]
+        page.runJavaScript("window.prompt = () => '%s'; window.confirm = () => true" % (old * 2))
+        js(page, "tlChangeTempo()")
+        after = json.loads(js(page, "JSON.stringify(tl.seq)"))
+        off = seq["tempo"]["offset_ms"]
+        jsRound = lambda v: int(math.floor(v + 0.5))  # JavaScript's Math.round
+        expect = [max(0, jsRound(off + (c["at_ms"] - off) * 0.5)) for c in seq["cues"]]
+        check(after["tempo"]["bpm"] == round(old * 2, 2) and [c["at_ms"] for c in after["cues"]] == expect, "cues stay on their beats")
+        check(abs(after["duration_ms"] - jsRound(off + (seq["duration_ms"] - off) * 0.5)) <= 1 and js(page, "+document.getElementById('tlBpm').value") == round(old * 2, 2), "length and tempo box")
+        js(page, "tlUndo()")
+        check(js(page, "+document.getElementById('tlBpm').value") == old and js(page, "tl.seq.cues[1].at_ms") == seq["cues"][1]["at_ms"], "undo")
+        page.runJavaScript("window.confirm = () => false; window.prompt = () => '140'")
+        js(page, "tlChangeTempo()")
+        check(js(page, "tl.seq.tempo.bpm") == 140 and js(page, "tl.seq.cues[1].at_ms") == seq["cues"][1]["at_ms"], "Cancel changes only the tempo")
+        page.runJavaScript("window.confirm = () => true")
+        js(page, "tl.dirty = false; tlClose()")
+        js(page, "songOpen()")
+        js(page, "songUpload(new File([new Uint8Array([1, 2, 3])], 'bad.mp3'))", timeout=10000)
+        waitFor(page, "document.getElementById('songInfo').textContent.indexOf(\"Couldn't analyse it\") === 0", "a bad file is reported")
+        js(page, "songClose()")
+
     for name, fn in [("stage tiles and swatches", stage), ("sequence list", sequenceList),
                      ("play, pause, resume, seek, stop", playPauseSeekStop), ("render", render),
                      ("reload", reload), ("light preferences", lightPrefs), ("global preferences", globalPrefs), ("flash guard setting", flashGuardSetting),
                      ("network settings stay desktop-only", securityPrefsRefused), ("preset editor and menu", presetEditor),
                      ("animation editor, import, duplicate, delete", animationEditor), ("timeline editor", timelineEditor),
-                     ("sound panel", soundPanel)]:
+                     ("sound panel", soundPanel), ("draft from a song", songDraft)]:
         step(name, fn)
     if page.errors:
         results.append(("FAIL", "no JavaScript errors", "; ".join(page.errors[:5])))

@@ -25,18 +25,19 @@ try:
     from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel, QLineEdit,
                                    QComboBox, QSpinBox, QDoubleSpinBox, QPushButton, QCheckBox, QScrollBar,
                                    QSplitter, QStackedWidget, QMessageBox, QMenu, QDialog, QDialogButtonBox,
-                                   QInputDialog, QSizePolicy, QFrame, QTextEdit)
+                                   QInputDialog, QSizePolicy, QFrame, QTextEdit, QFileDialog)
 except ImportError:
     from PySide2.QtCore import Qt, QTimer, QRectF, QPointF, QSize
     from PySide2.QtGui import QColor, QPainter, QPen, QFont, QFontMetrics, QKeySequence, QPolygonF, QBrush
     from PySide2.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel, QLineEdit,
                                    QComboBox, QSpinBox, QDoubleSpinBox, QPushButton, QCheckBox, QScrollBar,
                                    QSplitter, QStackedWidget, QMessageBox, QMenu, QDialog, QDialogButtonBox,
-                                   QInputDialog, QSizePolicy, QFrame, QTextEdit, QShortcut)
+                                   QInputDialog, QSizePolicy, QFrame, QTextEdit, QShortcut, QFileDialog)
 
 SNAP_CHOICES = [("No snap", 0), ("10 ms", 10), ("50 ms", 50), ("100 ms", 100), ("250 ms", 250),
                 ("500 ms", 500), ("1 s", 1000), ("Beat", -1), ("Half beat", -2), ("Bar (4 beats)", -4)]
 UNDO_LIMIT = 200
+SECTION_COLOURS = {1: QColor(70, 110, 160), 2: QColor(150, 120, 60), 3: QColor(190, 70, 120)}  # by energy level
 
 
 # ============================================================================
@@ -51,6 +52,40 @@ def newSequence(name="New Sequence"):
 
 def cueKind(cue):
     return "clip" if "clip" in cue else "state"
+
+
+def rescaleTempo(seq, newBpm):
+    """Change a sequence's tempo so its cues stay on the same beats: every time (cue starts,
+    lengths, fades, sections, the sequence length) moves and stretches about the first beat,
+    and looping clips speed up or slow down to match. Returns the edited copy."""
+    seq = copy.deepcopy(seq)
+    tempo = seq.get("tempo") or {}
+    old = float(tempo.get("bpm") or 0)
+    if old <= 0 or newBpm <= 0:
+        seq["tempo"] = {"bpm": round(float(newBpm), 2), "offset_ms": int(tempo.get("offset_ms", 0) or 0)}
+        return seq
+    r = old / float(newBpm)
+    off = float(tempo.get("offset_ms", 0) or 0)
+    at = lambda t: max(0, int(round(off + (float(t) - off) * r)))
+    span = lambda d: max(0, int(round(float(d) * r)))
+    for cue in seq.get("cues", []):
+        cue["at_ms"] = at(cue.get("at_ms", 0))
+        if cue.get("duration_ms"):
+            cue["duration_ms"] = max(1, span(cue["duration_ms"]))
+        state = cue.get("state")
+        if isinstance(state, dict) and state.get("fade_ms"):
+            state["fade_ms"] = span(state["fade_ms"])
+        clip = cue.get("clip")
+        if isinstance(clip, dict) and clip.get("fit") == "loop":
+            clip["speed"] = round(max(0.05, min(20.0, float(clip.get("speed", 1)) / r)), 3)
+    for sec in seq.get("sections") or []:
+        if isinstance(sec, dict):
+            for key in ("start_ms", "end_ms"):
+                if key in sec:
+                    sec[key] = at(sec[key])
+    seq["duration_ms"] = max(1, at(seq.get("duration_ms", 1)))
+    seq["tempo"] = {"bpm": round(float(newBpm), 2), "offset_ms": int(round(off))}
+    return seq
 
 
 def clipName(cue):
@@ -171,9 +206,13 @@ class TimelineView(QWidget):
     def metrics(self):
         fm = QFontMetrics(self.font())
         rowH = max(30, int(fm.height() * 2.3))
-        rulerH = max(22, fm.height() + 8)
+        rulerH = max(22, fm.height() + 8) + self.sectionsH(fm)
         labelW = min(220, max(110, max([fm.horizontalAdvance(t["label"]) if hasattr(fm, "horizontalAdvance") else fm.width(t["label"]) for t in self.editor.tracks] + [80]) + 18))
         return fm, rowH, rulerH, labelW
+
+    def sectionsH(self, fm):
+        """Height of the song sections row above the time ruler (none without sections)."""
+        return fm.height() + 4 if self.editor.seq.get("sections") else 0
 
     def sizeHint(self):
         fm, rowH, rulerH, labelW = self.metrics()
@@ -253,6 +292,7 @@ class TimelineView(QWidget):
 
         # grid: beats if a tempo is set, else time ticks
         t0, t1 = self.offsetMs, self.offsetMs + self.visibleMs()
+        secH = self.sectionsH(fm)
         tickMs = next((s for s in (100, 250, 500, 1000, 2000, 5000, 10000, 15000, 30000, 60000, 120000)
                        if s * self.pxPerSec / 1000.0 >= fm.height() * 4), 300000)
         p.setFont(self.font())
@@ -264,7 +304,7 @@ class TimelineView(QWidget):
                 p.drawLine(QPointF(x, rulerH), QPointF(x, H))
                 p.setPen(QColor(170, 170, 180))
                 p.drawLine(QPointF(x, rulerH - 6), QPointF(x, rulerH))
-                p.drawText(QRectF(x + 3, 0, fm.height() * 5, rulerH - 4), Qt.AlignLeft | Qt.AlignVCenter,
+                p.drawText(QRectF(x + 3, secH, fm.height() * 5, rulerH - secH - 4), Qt.AlignLeft | Qt.AlignVCenter,
                            fmtTime(t, precise=False) if tickMs >= 1000 else ("%.2fs" % (t / 1000.0)))
             t += tickMs
         bpm = ed.bpm()
@@ -281,6 +321,23 @@ class TimelineView(QWidget):
                         p.drawLine(QPointF(x, rulerH), QPointF(x, H))
                     k += 1
                     bt += beat
+
+        # song sections (from a song draft): a row above the ruler, coloured by energy level
+        for sec in seq.get("sections") or []:
+            if not isinstance(sec, dict):
+                continue
+            a, b = int(sec.get("start_ms", 0)), int(sec.get("end_ms", duration))
+            xa, xb = max(labelW, self.xFor(a)), min(W, self.xFor(b))
+            if xb <= xa:
+                continue
+            colour = SECTION_COLOURS.get(int(sec.get("level", 2)), SECTION_COLOURS[2])
+            p.fillRect(QRectF(xa, 1, xb - xa - 1, secH - 2), colour)
+            if self.xFor(a) >= labelW:
+                p.setPen(QPen(colour, 1, Qt.DashLine))
+                p.drawLine(QPointF(self.xFor(a), rulerH), QPointF(self.xFor(a), H))
+            if xb - xa > fm.height() * 2:
+                p.setPen(QColor(240, 240, 245))
+                p.drawText(QRectF(xa + 4, 0, xb - xa - 8, secH), Qt.AlignLeft | Qt.AlignVCenter, str(sec.get("label", "")))
 
         # past the end of the sequence
         xEnd = self.xFor(duration)
@@ -376,7 +433,9 @@ class TimelineView(QWidget):
         # ruler background and label corner
         p.fillRect(QRectF(0, 0, labelW, rulerH), QColor(34, 34, 40))
         p.setPen(QColor(150, 150, 160))
-        p.drawText(QRectF(8, 0, labelW - 12, rulerH), Qt.AlignLeft | Qt.AlignVCenter, fmtTime(duration, True))
+        if secH:
+            p.drawText(QRectF(8, 0, labelW - 12, secH), Qt.AlignLeft | Qt.AlignVCenter, "Sections")
+        p.drawText(QRectF(8, secH, labelW - 12, rulerH - secH), Qt.AlignLeft | Qt.AlignVCenter, fmtTime(duration, True))
         # playhead
         xp = self.xFor(ed.playhead)
         if labelW <= xp <= W:
@@ -621,6 +680,239 @@ class SequenceSettingsDialog(QDialog):
 
 
 # ============================================================================
+# DRAFT FROM A SONG
+# ============================================================================
+
+STYLE_NOTES = {"Subtle": "Gentle colour changes between sections, arriving on their first beat. No pulses.",
+               "Concert": "A strong look per section; the rim pulses on the beat in the loudest sections.",
+               "Neon": "Saturated colours; in loud sections the rim and background swap colours each bar and the rim pulses on the beat."}
+
+
+class SongView(QWidget):
+    """The song at a glance: waveform, energy curve, section bands (by level) and the beat grid."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.analysis = None
+        self.bpm, self.offsetMs = 0.0, 0
+        self.setMinimumHeight(150)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+    def setAnalysis(self, analysis, bpm=None, offsetMs=None):
+        self.analysis = analysis
+        if analysis is not None:
+            self.bpm = float(bpm if bpm else analysis["bpm"])
+            self.offsetMs = int(analysis["bars"][0] if offsetMs is None and analysis.get("bars") else (offsetMs or 0))
+        self.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        W, H = self.width(), self.height()
+        p.fillRect(self.rect(), QColor(26, 26, 30))
+        a = self.analysis
+        if not a:
+            p.setPen(QColor(150, 150, 160))
+            p.drawText(self.rect(), Qt.AlignCenter, "Choose a song file to analyse")
+            return
+        dur = max(1, a["duration_ms"])
+        xFor = lambda ms: ms * W / dur
+        bandH = 16
+        for sec in a["sections"]:
+            colour = SECTION_COLOURS.get(sec.get("level", 2), SECTION_COLOURS[2])
+            xa, xb = xFor(sec["start_ms"]), xFor(sec["end_ms"])
+            p.fillRect(QRectF(xa, 0, xb - xa - 1, bandH), colour)
+            p.setPen(QColor(240, 240, 245))
+            p.drawText(QRectF(xa + 3, 0, max(0, xb - xa - 6), bandH), Qt.AlignLeft | Qt.AlignVCenter, sec.get("label", ""))
+        top, mid = bandH + 4, bandH + 4 + (H - bandH - 4) / 2
+        half = (H - bandH - 8) / 2
+        wave = a["waveform"]
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(90, 90, 105))
+        for i, v in enumerate(wave):
+            x = i * W / len(wave)
+            p.drawRect(QRectF(x, mid - v * half, max(1.0, W / len(wave)), 2 * v * half))
+        energy, step = a["energy"], a.get("energy_step_ms", 250)
+        if energy:
+            pts = QPolygonF([QPointF(xFor(i * step), H - 4 - v * (H - top - 8)) for i, v in enumerate(energy)])
+            p.setPen(QPen(QColor(230, 180, 70), 1.5))
+            p.setBrush(Qt.NoBrush)
+            p.drawPolyline(pts)
+        if self.bpm > 0:
+            period = 60000.0 / self.bpm
+            k = -int(self.offsetMs // period)
+            t = self.offsetMs + k * period
+            while t <= dur:
+                if t >= 0:
+                    bar = (k % 4) == 0
+                    p.setPen(QPen(QColor(140, 110, 200) if bar else QColor(70, 60, 95), 1))
+                    if bar or period * W / dur >= 4:
+                        p.drawLine(QPointF(xFor(t), top), QPointF(xFor(t), top + (10 if bar else 5)))
+                k += 1
+                t += period
+
+
+class SongDraftDialog(QDialog):
+    """Draft a sequence from a song file: analyse it (tempo, beats, sections), adjust the tempo
+    if the analysis is off, pick a style and open the draft in the timeline editor.
+    host provides analyze(path, bpm, offsetMs) -> analysis dict (success, errors),
+    draft(analysis, style, name, bpm, offsetMs) -> {"success", "sequence", "errors", "flashes"}
+    and openDraft(sequence)."""
+
+    def __init__(self, host, parent=None):
+        super().__init__(parent)
+        self.host = host
+        self.analysis = None
+        self._job = None
+        self.setWindowTitle("Draft a sequence from a song")
+        self.resize(900, 520)
+        lay = QVBoxLayout(self)
+        fileRow = QHBoxLayout()
+        self.fileLabel = QLabel("No song chosen")
+        self.fileLabel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.chooseButton = QPushButton("Choose song...")
+        self.chooseButton.setToolTip("WAV, FLAC, MP3, OGG or AIFF")
+        fileRow.addWidget(QLabel("Song:"))
+        fileRow.addWidget(self.fileLabel, 1)
+        fileRow.addWidget(self.chooseButton)
+        lay.addLayout(fileRow)
+        self.view = SongView(self)
+        lay.addWidget(self.view, 1)
+        self.infoLabel = QLabel("")
+        self.infoLabel.setWordWrap(True)
+        lay.addWidget(self.infoLabel)
+        tempoRow = QHBoxLayout()
+        tempoRow.addWidget(QLabel("Tempo:"))
+        self.bpmSpin = DoubleSpinBoxWithButtons()
+        self.bpmSpin.setRange(30, 300)
+        self.bpmSpin.setDecimals(2)
+        self.bpmSpin.setSuffix(" BPM")
+        tempoRow.addWidget(self.bpmSpin)
+        self.halfButton = QPushButton("x 1/2")
+        self.doubleButton = QPushButton("x 2")
+        self.halfButton.setToolTip("The analysis counted twice as many beats as there are")
+        self.doubleButton.setToolTip("The analysis counted half the beats")
+        tempoRow.addWidget(self.halfButton)
+        tempoRow.addWidget(self.doubleButton)
+        tempoRow.addWidget(QLabel("First bar at:"))
+        self.offsetSpin = SpinBoxWithButtons()
+        self.offsetSpin.setRange(0, 600000)
+        self.offsetSpin.setSuffix(" ms")
+        self.offsetSpin.setToolTip("When a bar's first beat falls; sections move to the nearest bar line")
+        tempoRow.addWidget(self.offsetSpin)
+        tempoRow.addStretch(1)
+        lay.addLayout(tempoRow)
+        styleRow = QHBoxLayout()
+        styleRow.addWidget(QLabel("Style:"))
+        self.styleCombo = QComboBox()
+        self.styleCombo.addItems(list(show.DRAFT_STYLES))
+        self.styleCombo.setCurrentText("Concert")
+        styleRow.addWidget(self.styleCombo)
+        self.styleNote = QLabel(STYLE_NOTES["Concert"])
+        self.styleNote.setWordWrap(True)
+        styleRow.addWidget(self.styleNote, 1)
+        lay.addLayout(styleRow)
+        nameRow = QHBoxLayout()
+        nameRow.addWidget(QLabel("Name:"))
+        self.nameEdit = QLineEdit()
+        nameRow.addWidget(self.nameEdit, 1)
+        lay.addLayout(nameRow)
+        note = QLabel("The draft drives the fill, rim, background and practical lights, never the key, and stays under the "
+                      "flash limit. It opens unsaved in the timeline editor for you to change and save.")
+        note.setWordWrap(True)
+        note.setStyleSheet("color: #888;")
+        lay.addWidget(note)
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        self.draftButton = QPushButton("Create draft")
+        self.draftButton.setEnabled(False)
+        closeButton = QPushButton("Close")
+        buttons.addWidget(self.draftButton)
+        buttons.addWidget(closeButton)
+        lay.addLayout(buttons)
+
+        self.chooseButton.clicked.connect(self.choose)
+        self.halfButton.clicked.connect(lambda: self.bpmSpin.setValue(self.bpmSpin.value() / 2))
+        self.doubleButton.clicked.connect(lambda: self.bpmSpin.setValue(self.bpmSpin.value() * 2))
+        self.bpmSpin.valueChanged.connect(self._gridEdited)
+        self.offsetSpin.valueChanged.connect(self._gridEdited)
+        self.styleCombo.currentTextChanged.connect(lambda t: self.styleNote.setText(STYLE_NOTES.get(t, "")))
+        self.draftButton.clicked.connect(self.createDraft)
+        closeButton.clicked.connect(self.reject)
+        self.pollTimer = QTimer(self)
+        self.pollTimer.timeout.connect(self._poll)
+
+    def choose(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Choose a song", "", "Songs (*.wav *.flac *.mp3 *.ogg *.aiff *.aif)")
+        if path:
+            self.analyze(path)
+
+    def analyze(self, path):
+        """Analyse on a thread of its own (a few seconds for a long song); the window stays live."""
+        import threading
+        import os
+        self.fileLabel.setText(path)
+        self.infoLabel.setText("Analysing " + os.path.basename(path) + "...")
+        self.draftButton.setEnabled(False)
+        self.chooseButton.setEnabled(False)
+        box = {}
+        def run():
+            box["result"] = self.host.analyze(path, None, None)
+        self._job = (threading.Thread(target=run, daemon=True), box)
+        self._job[0].start()
+        self.pollTimer.start(100)
+
+    def _poll(self):
+        thread, box = self._job
+        if thread.is_alive():
+            return
+        self.pollTimer.stop()
+        self.chooseButton.setEnabled(True)
+        self.setAnalysis(box.get("result") or {"success": False, "errors": ["analysis failed"]})
+
+    def setAnalysis(self, result):
+        if not result.get("success"):
+            self.analysis = None
+            self.view.setAnalysis(None)
+            self.infoLabel.setText("Couldn't analyse it: " + "; ".join(result.get("errors", [])))
+            return
+        self.analysis = result
+        for spin, value in ((self.bpmSpin, result["bpm"]), (self.offsetSpin, result["bars"][0] if result.get("bars") else result["offset_ms"])):
+            spin.blockSignals(True)
+            spin.setValue(value)
+            spin.blockSignals(False)
+        self.view.setAnalysis(result)
+        if not self.nameEdit.text().strip():
+            self.nameEdit.setText(result.get("song", ""))
+        conf = result.get("confidence")
+        self.infoLabel.setText("%s long, %g BPM%s, %d sections. If the beat ticks don't match the song, correct the tempo "
+                               "(x 1/2 or x 2 for the commonest mistake) and when the first bar falls." % (
+                                   fmtTime(result["duration_ms"]), result["bpm"],
+                                   "" if conf is None else " (%d%% of the song agrees)" % round(conf * 100), len(result["sections"])))
+        self.draftButton.setEnabled(True)
+
+    def _gridEdited(self, *args):
+        if self.analysis is not None:
+            self.view.setAnalysis(self.analysis, self.bpmSpin.value(), self.offsetSpin.value())
+
+    def _gridChanged(self):
+        a = self.analysis
+        first = a["bars"][0] if a.get("bars") else a["offset_ms"]
+        return abs(self.bpmSpin.value() - a["bpm"]) > 0.005 or self.offsetSpin.value() != first
+
+    def createDraft(self):
+        if self.analysis is None:
+            return None
+        changed = self._gridChanged()
+        result = self.host.draft(self.analysis, self.styleCombo.currentText(), self.nameEdit.text().strip() or self.analysis.get("song") or "Draft",
+                                 self.bpmSpin.value() if changed else None, self.offsetSpin.value() if changed else None)
+        if not result.get("success"):
+            self.infoLabel.setText("Couldn't draft it: " + "; ".join(result.get("errors", [])))
+            return None
+        return self.host.openDraft(result["sequence"])
+
+
+# ============================================================================
 # THE EDITOR WINDOW
 # ============================================================================
 
@@ -703,6 +995,10 @@ class SequenceEditor(QWidget):
             self.offsetSpin.setValue(int(tempo.get("offset_ms", 0) or 0))
         self.offsetSpin.valueChanged.connect(self._tempoEdited)
         top.addWidget(self.offsetSpin)
+        self.changeTempoButton = QPushButton("Change tempo...")
+        self.changeTempoButton.setToolTip("Set a new tempo and move and stretch the cues so they stay on the same beats")
+        self.changeTempoButton.clicked.connect(self.changeTempo)
+        top.addWidget(self.changeTempoButton)
         top.addWidget(QLabel("Snap"))
         self.snapCombo = QComboBox()
         for label, value in SNAP_CHOICES:
@@ -1111,9 +1407,12 @@ class SequenceEditor(QWidget):
 
     def _afterReplace(self):
         self.nameEdit.setText(self.seq.get("name", ""))
-        self.durationSpin.blockSignals(True)
-        self.durationSpin.setValue(int(self.seq.get("duration_ms") or 1000) / 1000.0)
-        self.durationSpin.blockSignals(False)
+        tempo = self.seq.get("tempo") if isinstance(self.seq.get("tempo"), dict) else {}
+        for spin, value in ((self.durationSpin, int(self.seq.get("duration_ms") or 1000) / 1000.0),
+                            (self.bpmSpin, float(tempo.get("bpm", 0) or 0)), (self.offsetSpin, int(tempo.get("offset_ms", 0) or 0))):
+            spin.blockSignals(True)
+            spin.setValue(value)
+            spin.blockSignals(False)
         self.changed()
         self._loadProperties()
 
@@ -1272,6 +1571,56 @@ class SequenceEditor(QWidget):
         self.dirty = True
         self._updateTitle()
         self.view.update()
+
+    def changeTempo(self):
+        """Change tempo...: a new BPM, optionally moving and stretching every cue so it stays
+        on the same beat (one undoable edit)."""
+        dlg = self._tempoDialog()
+        self._changeTempoDialog = dlg  # tests drive it
+        if dlg.exec() != QDialog.Accepted:
+            return False
+        return self.applyTempo(dlg.tempoSpin.value(), dlg.moveCheck.isChecked())
+
+    def _tempoDialog(self):
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Change tempo")
+        form = QFormLayout(dlg)
+        old = self.bpm()
+        spin = DoubleSpinBoxWithButtons()
+        spin.setRange(30, 300)
+        spin.setDecimals(2)
+        spin.setSuffix(" BPM")
+        spin.setValue(old if old > 0 else 120)
+        form.addRow("New tempo", spin)
+        move = QCheckBox("Move and stretch the cues so they stay on the same beats")
+        move.setChecked(old > 0)
+        move.setEnabled(old > 0)
+        move.setToolTip("Cue starts, lengths, fades, sections and the length scale by " +
+                        ("the old tempo over the new one, about the first beat" if old > 0 else "(needs a tempo set first)"))
+        form.addRow(move)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        form.addRow(buttons)
+        dlg.tempoSpin, dlg.moveCheck = spin, move
+        return dlg
+
+    def applyTempo(self, bpm, moveCues):
+        self.pushUndo()
+        if moveCues:
+            self.seq = rescaleTempo(self.seq, bpm)
+        else:
+            self.seq["tempo"] = {"bpm": round(float(bpm), 2), "offset_ms": self.beatOffset()}
+        for spin, value in ((self.bpmSpin, self.seq["tempo"]["bpm"]), (self.offsetSpin, self.seq["tempo"]["offset_ms"]),
+                            (self.durationSpin, int(self.seq.get("duration_ms") or 0) / 1000.0)):
+            spin.blockSignals(True)
+            spin.setValue(value)
+            spin.blockSignals(False)
+        self.selection = []
+        self.changed()
+        self.view.syncScrollBar()
+        self._setStatus("Tempo now %g BPM%s." % (self.seq["tempo"]["bpm"], ", cues moved to stay on their beats" if moveCues else ""), "ok")
+        return True
 
     def _updateTitle(self):
         name = self.seq.get("name") or "Untitled"

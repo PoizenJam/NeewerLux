@@ -34,7 +34,8 @@ rejected with an error message naming the cue and field.
 | `on_interrupt` | no | `"continue"` or `"pause"` | While an effect or override animation is playing: `continue` (default) keeps the sequence clock running underneath, so lights rejoin in sync with the song; `pause` stops the clock until the interruption ends. |
 | `description`, `artist`, `song`, `notes` | no | string | Shown in lists or ignored. |
 | `tempo` | no | `{"bpm": number, "offset_ms": integer}` | Written by the timeline editor so it can draw beat lines and snap cues to beats (`offset_ms` is when the first beat falls). Playback ignores it: cue times are always plain milliseconds. |
-| `palette`, `sections` | no | any | Reserved for later versions (palette slots, song sections). Accepted and ignored now. Don't rely on them doing anything. |
+| `sections` | no | list of `{"start_ms", "end_ms", "label", "level"}` | Song sections (from a song draft, or written by hand). The timeline editors draw them above the ruler, coloured by `level` (1 quiet, 2 medium, 3 loud), and Change tempo moves them with the cues. Playback ignores them. |
+| `palette` | no | any | Reserved for a later version (palette slots). Accepted and ignored now. |
 
 ## Cues
 
@@ -266,6 +267,26 @@ rear left background). It ships as `light_prefs/sequences/Example - Four Light D
 }
 ```
 
+## Drafting from a song
+
+**From song...** on the Sequences tab (desktop) or **From song** on the dashboard's Sequences card analyses a song file and drafts a sequence for it; over HTTP it's the `analyze` and `draft` actions (and `POST /NeewerLux/song` for uploads), see [HTTP_API.md](HTTP_API.md). It needs the audio extras (numpy and soundfile) and reads WAV, FLAC, MP3, OGG and AIFF.
+
+The analysis finds the length, the tempo and where the first beat falls (assuming a steady tempo, as most produced music has), the beat grid and bars, a loudness curve and sections: places where the sound changes (loudness, bass, treble, brightness, busyness), on bar lines, favouring 4- and 8-bar phrases, at least 4 and at most 32 bars long. Each section gets a level from how loud and busy it is (1 quiet, 2 medium, 3 loud) and a suggested name (Intro, Verse, Build, Chorus, Break, Outro), only a starting point. If the beat ticks drawn over the waveform don't match the song, correct the tempo (x 1/2 and x 2 fix the commonest mistake, counting double or half the beats) and when the first bar falls; the sections move to the nearest bar line.
+
+The draft uses state cues on `@fill`, `@rim` and `@background;@practical`, never `@key`, sets `tempo` (offset on the first bar) and `sections`, and labels each section's first cue. Every section gets a look: colours from the style's palette (a different pair each section) and brightness from its level. The styles:
+
+| Style | What it does |
+|---|---|
+| Subtle | Soft colours; each section's look fades in over up to a bar, arriving on its first beat. No pulses. |
+| Concert | Saturated warm and cool colours, changing on the section's first beat; in level 3 sections the rim pulses brighter on the beat (every other beat above 120 BPM, so at most 2 a second). |
+| Neon | Neon colours; in level 3 sections the rim and background swap colours each bar (every other bar at level 2) and the rim pulses as in Concert. |
+
+Drafts keep away from saturated red and stay under the flash limit at any tempo (tests check every style from 60 to 200 BPM). The draft opens unsaved in the timeline editor.
+
+## Changing the tempo
+
+**Change tempo...** in the timeline editor (Change tempo on the web) sets a new BPM and, when the sequence already has one, can move and stretch the cues so they stay on the same beats: every cue start, length and fade, the sections and the sequence length scale by the old tempo over the new one, measured from the first beat, and looping clips speed up or slow down by the same amount. It's one edit (undo puts it back) and only changes the file: playback still runs in real time.
+
 ## Controlling sequences
 
 GET (Stream Deck, Streamer.bot "Fetch URL"; arguments are lowercased, names match
@@ -296,6 +317,8 @@ POST `/NeewerLux/sequence` (body up to 256 KB):
 {"action": "save", "sequence": {...}, "overwrite": false}
 {"action": "render", "name": "...", "step_ms": 50, "start_ms": 0, "end_ms": 60000}
 {"action": "render", "sequence": {...}, "format": "png", "width": 1600}
+{"action": "analyze", "path": "C:\\Music\\Song.mp3"}                     tempo, beats, bars, energy, sections
+{"action": "draft", "analysis": {...}, "style": "Concert", "name": "Song"}  a drafted sequence, saved with "save": true
 ```
 
 ### Render

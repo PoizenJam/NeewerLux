@@ -464,10 +464,93 @@ def t_silenceMeansFloor():
             check(got == floors, "%s, %s: 10 s after the sound stops %s, floors %s" % (name, kind, got, floors))
 
 
+def _syntheticSong(sr=44100, bpm=126.0, offset=0.3, plan=(("intro", 8), ("verse", 16), ("chorus", 16), ("break", 8), ("chorus", 16), ("outro", 8))):
+    """A song with a known tempo, first beat and sections: kicks (accented on each bar's first
+    beat), bass, hats and a pad at different levels per section."""
+    rng = np.random.default_rng(7)
+    beat = 60.0 / bpm
+    total = offset + sum(b for _, b in plan) * 4 * beat + 1.0
+    t = np.arange(int(total * sr)) / sr
+    x = np.zeros(len(t))
+    kickLen = int(0.12 * sr)
+    kt = np.arange(kickLen) / sr
+    kick = np.sin(2 * np.pi * (50 + 80 * np.exp(-kt * 30)) * kt) * np.exp(-kt * 25)
+    hatLen = int(0.03 * sr)
+    hat = rng.standard_normal(hatLen) * np.exp(-np.arange(hatLen) / sr * 150)
+    look = {"intro": (0.0, 0.0, 0.0, 0.05), "verse": (0.5, 0.15, 0.0, 0.05), "chorus": (0.9, 0.25, 0.25, 0.08),
+            "break": (0.0, 0.0, 0.0, 0.12), "outro": (0.15, 0.0, 0.0, 0.03)}
+    bounds, pos = [], offset
+    for name, bars in plan:
+        kickAmp, bassAmp, hatAmp, padAmp = look[name]
+        start, end = pos, pos + bars * 4 * beat
+        bounds.append(start)
+        seg = (t >= start) & (t < end)
+        x[seg] += padAmp * (np.sin(2 * np.pi * 220 * t[seg]) + np.sin(2 * np.pi * 277 * t[seg]))
+        x[seg] += bassAmp * np.sin(2 * np.pi * 55 * t[seg])
+        for k in range(bars * 4):
+            at = int((start + k * beat) * sr)
+            if kickAmp:
+                x[at:at + kickLen] += kick[:len(x[at:at + kickLen])] * kickAmp * (1.0 if k % 4 == 0 else 0.6)
+            if hatAmp:
+                h = int((start + (k + 0.5) * beat) * sr)
+                x[h:h + hatLen] += hat[:len(x[h:h + hatLen])] * hatAmp
+        pos = end
+    return x * 0.5, sr, [int(round(b * 1000)) for b in bounds[1:]]
+
+
+def t_songAnalysis():
+    """A whole song: tempo and first beat, bars on the accented beat, sections at the changes
+    with sensible levels, energy and waveform shapes; given tempo and offset are used."""
+    x, sr, bounds = _syntheticSong()
+    a = au.analyzeSong(x, sr)
+    check(abs(a["bpm"] - 126.0) < 0.15, "tempo %s" % a["bpm"])
+    period = 60000.0 / 126.0
+    off = (a["offset_ms"] - 300.0 + period / 2) % period - period / 2
+    check(abs(off) < 15, "first beat %s ms (300 expected)" % a["offset_ms"])
+    check(a["confidence"] >= 0.8, "confidence %s" % a["confidence"])
+    check(abs(a["duration_ms"] - len(x) * 1000 / sr) <= 1 and a["beats"][1] - a["beats"][0] in (476, 477), "beats every %d ms" % (a["beats"][1] - a["beats"][0]))
+    barOff = (a["bars"][0] - 300.0) % (4 * period)
+    check(min(barOff, 4 * period - barOff) < 20, "bars start on the accented beat: %s" % a["bars"][:3])
+    starts = [s["start_ms"] for s in a["sections"][1:]]
+    for b in bounds:
+        check(any(abs(s - b) <= period * 4 + 5 for s in starts), "a section starts near %d ms: %s" % (b, starts))
+    check(len(starts) <= len(bounds) + 2, "not many more sections than changes: %s" % starts)
+    def levelAt(ms):
+        return next(s["level"] for s in a["sections"] if s["start_ms"] <= ms < s["end_ms"])
+    chorus, quiet = bounds[1] + 8 * 4 * period, bounds[2] + 4 * 4 * period  # middle of the first chorus, of the break
+    check(levelAt(chorus) == 3 and levelAt(quiet) <= 2 and levelAt(1000) == 1,
+          "levels: chorus %d, drumless break %d, intro %d" % (levelAt(chorus), levelAt(quiet), levelAt(1000)))
+    check(a["sections"][0]["label"] == "Intro" and a["sections"][-1]["label"] == "Outro", str([s["label"] for s in a["sections"]]))
+    check(all(0 <= v <= 1 for v in a["energy"]) and len(a["energy"]) == math.ceil(a["duration_ms"] / 250) or
+          abs(len(a["energy"]) - a["duration_ms"] / 250) <= 1, "energy every 250 ms")
+    check(len(a["waveform"]) == au.SONG_WAVEFORM_POINTS and max(a["waveform"]) == 1.0, "waveform")
+    fixed = au.analyzeSong(x, sr, bpm=63, offsetMs=1234)
+    check(fixed["bpm"] == 63 and fixed["offset_ms"] == 1234 % round(60000 / 63) and fixed["confidence"] is None, "given tempo and offset are kept: %s %s" % (fixed["bpm"], fixed["offset_ms"]))
+
+
+def t_songFiles():
+    """Song files decode (WAV, FLAC and MP3 where libsndfile can write it for the test)."""
+    import tempfile
+    import soundfile
+    x, sr, _ = _syntheticSong(plan=(("chorus", 8),))
+    with tempfile.TemporaryDirectory() as d:
+        for ext, fmt in ((".wav", "WAV"), (".flac", "FLAC"), (".mp3", "MP3")):
+            path = os.path.join(d, "song" + ext)
+            try:
+                soundfile.write(path, np.column_stack([x, x]), sr, format=fmt)
+            except Exception:
+                check(ext == ".mp3", "writing %s" % ext)
+                continue
+            y, ysr = au.loadSong(path)
+            check(ysr == sr and abs(len(y) - len(x)) < sr, "%s decodes" % ext)
+            check(abs(au.analyzeSong(y, ysr)["bpm"] - 126.0) < 0.3, "%s analyses" % ext)
+    check(au.songAvailable() == (True, ""), "song import available here")
+
+
 TESTS = [t_tempoOfClickTracks, t_tempoOfDrumPattern, t_tempoChange, t_bandsAndCentroid, t_silenceAndGaps,
          t_levelIsRelative, t_shippedModesValid, t_shippedModesUnderFlashLimit, t_modesMoveWithTheMusic,
          t_modesAimAtRoles, t_beatChase, t_warmGlowIsWhiteOnly, t_silenceSettlesAtTheFloor, t_modeValidation,
-         t_docExamplesValidate, t_colourCycle, t_voices, t_retryNow, t_silenceMeansFloor]
+         t_docExamplesValidate, t_colourCycle, t_voices, t_retryNow, t_silenceMeansFloor, t_songAnalysis, t_songFiles]
 
 
 def main():

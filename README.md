@@ -108,9 +108,13 @@ The format is documented in full in [docs/SEQUENCE_FORMAT.md](docs/SEQUENCE_FORM
 
 Five starter sequences ship alongside the example: an intro build, an outro wind-down, a raid welcome, a ten-second countdown and a song skeleton laid out in sections at 120 BPM. They aim at roles (`@key`, `@fill`, `@rim`, `@background`, `@practical`), so they work on any rig with roles set, and **+New** offers them as starting points.
 
+**From song...** on the Sequences tab analyses a song file (WAV, FLAC, MP3, OGG or AIFF): its tempo, beats, bars, loudness and sections, drawn over its waveform. Correct the tempo if the beat ticks don't line up (x 1/2 and x 2 fix the commonest mistake), pick a style (Subtle, Concert or Neon) and it drafts a sequence: a look per section, and in the louder styles the rim pulsing on the beat, never touching the key light and always under the flash limit. The draft opens unsaved in the timeline editor to finish by hand. The dashboard does the same with an upload, and over HTTP it's the `analyze` and `draft` actions.
+
 **+New** or **Edit** on the Sequences tab opens the timeline editor: one track per light, in sweep order, with each cue drawn on the tracks of the lights it drives (a cue aimed at several lights shows on each, with a dashed outline, and moves as one). A thin band under each track shows what that light will really do, with its limits and the CCT-only conversion applied.
 
 Double-click a track to add a cue there (it starts from the colour the light already has). Drag a cue to move it, its right edge to change its length, and the notch at its top to change its fade; Ctrl or Shift selects several. Snap to a time grid or, with a tempo set, to beats, half beats or bars. The panel on the right edits the selected cue: start, which lights, colour or clip, fade, length and label. Undo and redo, copy and paste at the playhead, and duplicate all have the usual shortcuts, and Space plays.
+
+With a tempo set, **Change tempo...** sets a new one and can move and stretch every cue so it stays on its beat. Song sections, when a sequence has them, show as a coloured row above the ruler.
 
 Play previews the edit on screen, in a Stage view under the timeline, without touching the lights. Tick **Send to lights** to play it through the real lights from the playhead; edits made while it plays are sent within a moment. Check validates the sequence, Save writes it (saving under a new name renames it), and Settings holds the frame rate, what happens at the end, while paused and during effects, and the artist, song and description. Cues whose lights aren't connected show on a "No matching light" track so they don't vanish. The web dashboard has the same editor.
 
