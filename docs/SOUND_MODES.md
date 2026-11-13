@@ -58,7 +58,7 @@ Every 21 ms or so NeewerLux measures:
 | `description` | no | text | Shown as a tooltip. |
 | `sensitivity` | no | 0.1 to 5 (1) | Multiplies the analysis values before they're used: above 1 reacts more, below 1 less. |
 | `range_db` | no | 6 to 30 (18) | How far under the loudest recent moment counts as 0, in dB: the smaller, the further the lights swing for the same music. 30 uses the analysis as it is. |
-| `floor` | no | 0 to 100 (10) | Brightness, percent, when the driving value is 0 (silence settles here). |
+| `floor` | no | 0 to 100 (10) | Brightness, percent, when the driving value is 0. When the sound stops, every light settles exactly here (a chase's lit light too), easing down at the `smoothing` speed. |
 | `ceiling` | no | 0 to 100 (75) | Brightness at full. Not below `floor`. |
 | `smoothing` | no | 0 to 1 (0.5) | How slowly lights fall back and colours drift: 0 is quick (about 0.1 s), 1 is slow (about 1.6 s). Rises are always quick (60 ms). |
 | `fps` | no | 1 to 30 | Updates a second. Default: the Sequence frame rate in Global Preferences (20). |
@@ -74,7 +74,7 @@ Each part:
 | `target` | yes | light target | Which lights, as anywhere else: `@rim`, `@background.left`, `@back.high`, `1;3`, `@all`, joined with `;`. Listed in sweep order. |
 | `drive` | no | `level` (default), `low`, `mid`, `high`, `beat` | What sets the brightness. `beat` jumps to full on each beat and falls back by `smoothing`. |
 | `colour` | no | palette index (0), `cycle`, `beat`, `centroid` | A fixed palette colour; `cycle`: round the palette and back to its first colour over `cycle_s`, blending between colours (a palette of one colour goes once round the colour wheel, keeping its saturation; one white stays put); `beat`: the next palette colour on each step, blended over 0.4 s; `centroid`: a colour along the palette set by the centroid (first entry for bass-heavy sound, last for bright). |
-| `chase` | no | `true` / `false` (false) | Step through the part's lights one at a time on the beat (every other beat above 150 BPM): the current light rises, the others fall back. The brightest step scales with the level. |
+| `chase` | no | `true` / `false` (false) | Step through the part's lights one at a time on the beat (every other beat above 150 BPM): the current light rises, the others fall back. The brightest step scales with the level; in silence the lit light falls to the floor too. |
 | `floor`, `ceiling` | no | 0 to 100 | This part's own brightness range. |
 
 Hue blends take the short way round the colour wheel. Avoid palettes that cross saturated red (hues within 20 of 0) back and forth: changes to and from saturated red count as flashes.

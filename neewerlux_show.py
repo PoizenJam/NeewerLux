@@ -1025,6 +1025,8 @@ SOUND_FLASH_WINDOW_S = 1.05 # a little over a second: evenly paced transitions 0
 SOUND_CHASE_MAX_BPM = 150   # faster than this, chases step on every other beat
 SOUND_ATTACK_MS = 60        # how fast a light rises to a louder value
 SOUND_COLOUR_STEP_MS = 400  # how long a palette step (colour "beat") takes to blend
+SOUND_SETTLE_MS = 300       # a value held this long is written even if under the write deadband,
+                            # so a fade ends exactly on its floor or ceiling
 SOUND_CYCLE_MIN_S = 4       # colour "cycle": at least this long round the palette, and at least
                             # a second per colour, so a cycle can't turn into colour flashing
 ANALYSIS_RANGE_DB = 30.0    # the analysis reads this many dB under the recent peak as 0 (neewerlux_audio.NORM_RANGE_DB)
@@ -1202,6 +1204,7 @@ class _SoundVoice:
         self.partLights = []
         self._env = {}          # (part, light) -> 0..1
         self._levelEnv = 0.0
+        self._presence = 0.0    # 1 while there is sound, easing to 0 in silence
         self._centroid = {}     # part -> smoothed centroid
         self._step = {}         # part -> chase step / palette step
         self._stepAt = {}       # part -> ms when the palette step changed
@@ -1241,6 +1244,8 @@ class _SoundVoice:
             return min(1.0, v * mode.sensitivity)
         level = driveOf("level")
         self._levelEnv += (level - self._levelEnv) * (up if level > self._levelEnv else down)
+        present = 1.0 if f and not f.get("silent", True) else 0.0
+        self._presence += (present - self._presence) * (up if present > self._presence else down)
 
         out = {}
         for pi, part in enumerate(mode.parts):
@@ -1277,8 +1282,10 @@ class _SoundVoice:
 
             for li, idx in enumerate(lights):
                 if part["chase"]:
+                    # the lit light keeps some brightness through quiet passages, but not silence:
+                    # with no beats the chase can't step, and no sound means the floor
                     on = li == self._step.get(pi, 0) % len(lights)
-                    target = (1.0 if on else 0.0) * (0.4 + 0.6 * self._levelEnv)
+                    target = (1.0 if on else 0.0) * (0.4 + 0.6 * self._levelEnv) * self._presence
                 else:
                     target = drive
                 key = (pi, idx)
@@ -1315,6 +1322,7 @@ class SoundPlayer:
         self._beats = 0
         self._counters = {}     # light -> FlashCounter (SOUND_FLASH_LIMIT)
         self._sent = {}         # light -> command last output
+        self._held = {}         # light -> (command computed, ms it has been the same since)
         self.assign(mode, lights)
 
     def assign(self, mode, lights=None):
@@ -1402,7 +1410,11 @@ class SoundPlayer:
         t = nowMs / 1000.0
         for idx, cmd in out.items():
             prev = self._sent.get(idx)
-            if _soundClose(prev, cmd):
+            held = self._held.get(idx)
+            if held is None or held[0] != cmd:
+                held = self._held[idx] = (cmd, nowMs)
+            settled = nowMs - held[1] >= SOUND_SETTLE_MS
+            if _soundClose(prev, cmd) and not (settled and cmd != prev):
                 out[idx] = prev
                 continue
             counter = self._counters.get(idx)

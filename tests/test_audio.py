@@ -431,10 +431,43 @@ def t_retryNow():
     engine.stop()
 
 
+def t_silenceMeansFloor():
+    """When the sound stops (silent blocks, or the device delivering nothing), every shipped
+    mode's lights settle exactly on their floor, the lit light of a chase included."""
+    rng = np.random.default_rng(3)
+    t = np.arange(int(6 * SR)) / SR
+    music = 0.3 * np.sin(2 * np.pi * 110 * t) + 0.6 * ((t % 0.5) < 0.05) * rng.standard_normal(len(t))
+    for name in ("Pulse", "Bands", "Beat Chase", "Colour Drift", "Warm Glow"):
+        with open(os.path.join(ROOT, "light_prefs", "sound_modes", name + ".json"), encoding="utf-8") as f:
+            mode = show.parseSoundMode(json.load(f))[0]
+        floors = {}
+        for pi, part in enumerate(mode.parts):
+            for idx in resolve(part["target"]):
+                floors[idx] = mode.floor if part["floor"] is None else part["floor"]
+        for kind in ("silent blocks", "no data"):
+            an = au.Analyzer(SR)
+            latest = {"f": None}
+            player = show.SoundPlayer(mode, resolve, lambda: latest["f"])
+            player.start(0.0)
+            hopMs = au.HOP / SR * 1000.0
+            ms, pos, nextFrame, out = 0.0, 0, 0.0, {}
+            while ms < 16000:
+                if ms < 6000:
+                    latest["f"] = an.process(music[pos:pos + au.HOP]); pos += au.HOP
+                else:
+                    latest["f"] = an.process(np.zeros(au.HOP)) if kind == "silent blocks" else None
+                ms += hopMs
+                while nextFrame <= ms:
+                    out, _ = player.frame(nextFrame)
+                    nextFrame += player.frameMs
+            got = {idx: c["bri"] for idx, c in out.items()}
+            check(got == floors, "%s, %s: 10 s after the sound stops %s, floors %s" % (name, kind, got, floors))
+
+
 TESTS = [t_tempoOfClickTracks, t_tempoOfDrumPattern, t_tempoChange, t_bandsAndCentroid, t_silenceAndGaps,
          t_levelIsRelative, t_shippedModesValid, t_shippedModesUnderFlashLimit, t_modesMoveWithTheMusic,
          t_modesAimAtRoles, t_beatChase, t_warmGlowIsWhiteOnly, t_silenceSettlesAtTheFloor, t_modeValidation,
-         t_docExamplesValidate, t_colourCycle, t_voices, t_retryNow]
+         t_docExamplesValidate, t_colourCycle, t_voices, t_retryNow, t_silenceMeansFloor]
 
 
 def main():
