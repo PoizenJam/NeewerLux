@@ -4861,7 +4861,7 @@ def recallCustomPreset(numOfPreset, updateGUI=True, loop=None):
         # they return to when the sound stops (a write would take them out of the sound layer)
         soundLights = _recallPresetSounds(numOfPreset) if presetSounds.get(numOfPreset) else []
         if soundLights:
-            showEngine.fadeBase(soundLights, 0)
+            showEngine.fadeBase(soundLights, 0, takeFromSound=False)
             changedLights = [i for i in changedLights if i not in soundLights]
 
         # Fade in (the preset's own time, else the global Fade in): the compositor fades the lights

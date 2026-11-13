@@ -1342,7 +1342,8 @@ class SoundPlayer:
                 same.lights += lights
                 self.voices.remove(same)
                 self.voices.append(same)  # the latest assignment names the player
-            self.voices = [v for v in self.voices if v.lights is None or v.lights]
+            self._modesChanged()
+            self._dropEmpty()
         self._modesChanged()
 
     def setMode(self, mode):
@@ -1356,9 +1357,15 @@ class SoundPlayer:
         """Take lights out of every assignment. Returns True when no light is left."""
         for v in self.voices:
             v.drop(lights)
-        self.voices = [v for v in self.voices if v.lights is None or v.lights]
         self.refreshMap()
-        return not self.lights()
+        empty = not self.lights()
+        self._dropEmpty()
+        self._modesChanged()
+        return empty
+
+    def _dropEmpty(self):
+        """Forget modes left with no lights (keeping one, so the player always has a mode)."""
+        self.voices = [v for v in self.voices if any(v.partLights)] or self.voices[-1:]
 
     def _modesChanged(self):
         self.mode = self.voices[-1].mode
@@ -1789,12 +1796,22 @@ class ShowCompositor:
     def hasPending(self):
         return bool(self.mailbox)
 
-    def fadeBase(self, indexes, durMs, now=None):
+    def fadeBase(self, indexes, durMs, now=None, takeFromSound=True):
         """A preset was just recalled (each light's stored value is already the preset's):
         fade the lights no layer is driving from what they show to it, and make it the revert
-        target for those a layer is driving. Returns the indexes handled; the caller sends
-        the rest the usual way."""
+        target for those a layer is driving. The sound layer lets go of them first, as for any
+        manual write (takeFromSound False: the preset just set them following sound). Returns
+        the indexes handled; the caller sends the rest the usual way."""
         def run(nowMs):
+            sound = self.layers[LAYER_SOUND]
+            taken = [idx for idx in indexes if takeFromSound and sound is not None and sound.drives(idx)]
+            if taken and sound.release(taken):
+                self._endPlayer(LAYER_SOUND, sound, nowMs, "manual")
+            for idx in taken:
+                if self.ownerPlayer.get(idx) is sound:
+                    # showing the sound's look: fade from that like a light no layer drives
+                    self.owner.pop(idx, None)
+                    self.ownerPlayer.pop(idx, None)
             done = []
             for idx in indexes:
                 to = self.hooks.currentBytes(idx)

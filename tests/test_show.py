@@ -1643,6 +1643,44 @@ def t_manualWriteReleasesSound(rig):
     check(w and w[-1][1][1] == 135 and w[-1][1][4] == 45, "and the preset shows: %s" % [d for _, d in w][-2:])
 
 
+def t_presetFadeTakesLightsFromSound(rig):
+    """A preset recalled with a fade (its own or the global Fade in) takes the lights it sets out
+    of the sound layer like one without, fading them from the sound's look to the preset; a
+    light the preset sets following sound keeps following it."""
+    nl = rig.nl
+    if _needsNumpy(rig):
+        return
+    _soundSignal(nl)
+    nl.fadeInMs = 400
+    try:
+        rig.post("/NeewerLux/presets", {"action": "save", "index": 3, "entries": [{"light": "*", "mode": "CCT", "temp": 45, "bri": 25}]})
+        rig.post("/NeewerLux/sound", {"action": "start", "mode": "Pulse"})
+        check(_waitLayers(rig, [None, None, "sound", "sound"])[2:] == ["sound", "sound"], "Pulse running")
+        t0 = time.monotonic()
+        rig.get("use_preset=3", 0.1)
+        st = rig.post("/NeewerLux/sound", {"action": "status"})
+        check(not st["running"] and not st["capturing"], "a global preset with a fade stops sound: %s" % st)
+        done = lambda: [d for _, d in writesFor(rig, AMB, t0)][-1:] == [[120, 135, 2, 25, 45, 71]]
+        end = time.monotonic() + 3
+        while not done() and time.monotonic() < end:
+            time.sleep(0.02)
+        w = writesFor(rig, AMB, t0)
+        check(done() and len(w) >= 3, "and the light fades to the preset: %s" % [d for _, d in w][-3:])
+
+        rig.post("/NeewerLux/presets", {"action": "save", "index": 4, "entries": [
+            {"target": "AA:00:00:00:00:03", "mode": "CCT", "temp": 45, "bri": 25},
+            {"target": "AA:00:00:00:00:04", "mode": "HSI", "hue": 100, "sat": 80, "bri": 50, "sound": "Colour Drift"}]})
+        rig.post("/NeewerLux/sound", {"action": "start", "mode": "Pulse"})
+        _waitLayers(rig, [None, None, "sound", "sound"])
+        rig.get("use_preset=4", 0.1)
+        st = rig.post("/NeewerLux/sound", {"action": "status"})
+        check(st["assignments"] == [{"mode": "Colour Drift", "lights": [4]}], "the rim leaves sound, the background follows Colour Drift: %s" % st["assignments"])
+        check(_waitLayers(rig, ["base", "base", "base", "sound"]) == ["base", "base", "base", "sound"], "layers")
+        rig.post("/NeewerLux/sound", {"action": "stop"})
+    finally:
+        nl.fadeInMs = 0
+
+
 def t_soundOnSomeLights(rig):
     """1.4.0: a sound mode can be put on some lights only (HTTP GET and POST): those lights leave
     whatever sound they followed, the rest play on; stop with lights takes only those out."""
@@ -1819,7 +1857,7 @@ TESTS = [t_maxBrightnessHTTP, t_maxBrightnessAnimationAndSequence, t_minBrightne
          t_fadesOnlyBetweenItems,
          t_addSimulatedRig, t_compositorWakesOnlyWhenDue, t_handBackToRunningLayerFades,
          t_soundModeHTTP, t_soundUnderShowAndEffects, t_soundRespectsLimitsAndLocks, t_soundUnavailable, t_soundModeFilesHTTP,
-         t_offWinsDuringShows, t_manualWriteReleasesSound, t_soundOnSomeLights,
+         t_offWinsDuringShows, t_manualWriteReleasesSound, t_presetFadeTakesLightsFromSound, t_soundOnSomeLights,
          t_presetSounds, t_paletteLibrary]
 
 
