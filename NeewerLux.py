@@ -1903,9 +1903,11 @@ try: # try to load the GUI
             for col, w in enumerate((target, drive, colour, chase, remove)):
                 table.setCellWidget(row, col, w)
             table.setRowHeight(row, 36)  # the theme pads combo boxes; less clips the text
-            fitColumnsToWidgets(table, (1, 2, 3))
+            fitColumnsToWidgets(table, (0, 1, 2, 3))
             target.lineEdit().editingFinished.connect(self.soundPartsEdited)
             target.lineEdit().editingFinished.connect(lambda w=target: self._soundTargetShown(w))
+            target.lineEdit().editingFinished.connect(lambda: fitColumnsToWidgets(table, (0,)))
+            target.activated.connect(lambda i: fitColumnsToWidgets(table, (0,)))
             target.activated.connect(lambda i: self.soundPartsEdited())
             drive.activated.connect(lambda i: self.soundPartsEdited())
             colour.activated.connect(lambda i: self.soundPartsEdited())

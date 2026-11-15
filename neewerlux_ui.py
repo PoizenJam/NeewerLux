@@ -245,14 +245,14 @@ class SpinBoxWithButtons(QWidget):
         self._spin.setMinimumWidth(w)
 
 
-def adjustableColumns(table, stretch=None, fixed=()):
+def adjustableColumns(table, fixed=()):
     """Columns the user can drag to any width (double-clicking a divider fits the column to its
-    contents). One column (stretch) takes the room left over; without one the last does."""
+    contents). The last column takes the room left over: a stretching column further left would
+    make each divider move the one to its left instead, and its own divider couldn't be dragged."""
     hdr = table.horizontalHeader()
     for col in range(table.columnCount()):
-        hdr.setSectionResizeMode(col, QHeaderView.Fixed if col in fixed else
-                                 QHeaderView.Stretch if col == stretch else QHeaderView.Interactive)
-    hdr.setStretchLastSection(stretch is None)
+        hdr.setSectionResizeMode(col, QHeaderView.Fixed if col in fixed else QHeaderView.Interactive)
+    hdr.setStretchLastSection(True)
 
 
 def fitColumnsToWidgets(table, columns):
@@ -266,6 +266,9 @@ def fitColumnsToWidgets(table, columns):
             w = table.cellWidget(row, col)
             if w is not None:
                 want = max(want, w.sizeHint().width() + 8)
+                if isinstance(w, QComboBox) and w.isEditable():
+                    # an editable combo's size hint follows its list, not the text typed into it
+                    want = max(want, w.fontMetrics().horizontalAdvance(w.currentText()) + 48)
         if want > table.columnWidth(col):
             table.setColumnWidth(col, want)
 
@@ -642,7 +645,7 @@ class Ui_MainWindow(object):
         self.lightTable.setAlternatingRowColors(True)
         self.lightTable.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.lightTable.verticalHeader().setStretchLastSection(False)
-        adjustableColumns(self.lightTable, stretch=3)
+        adjustableColumns(self.lightTable)
         fm = self.lightTable.fontMetrics()
         for col, sample in ((0, "W" * 30), (1, "WW:WW:WW:WW:WW:WW"), (2, "LINKED  ON / CH. 0")):
             self.lightTable.setColumnWidth(col, fm.horizontalAdvance(sample) + 24)
@@ -1037,8 +1040,8 @@ class Ui_MainWindow(object):
         soundLeft.addWidget(QLabel("Lights and what drives them:"))
         self.soundPartsTable = QTableWidget(0, 5)
         self.soundPartsTable.setHorizontalHeaderLabels(["Lights", "Brightness", "Colour", "Chase", ""])
-        adjustableColumns(self.soundPartsTable, stretch=0, fixed=(4,))
-        self.soundPartsTable.setColumnWidth(4, 34)
+        adjustableColumns(self.soundPartsTable)
+        self.soundPartsTable.setColumnWidth(0, self.soundPartsTable.fontMetrics().horizontalAdvance("@rim;@background;@practical") + 48)
         self.soundPartsTable.horizontalHeaderItem(1).setToolTip("What drives these lights' brightness")
         self.soundPartsTable.verticalHeader().setVisible(False)
         self.soundPartsTable.setMinimumHeight(150)

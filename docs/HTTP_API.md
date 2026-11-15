@@ -257,7 +257,7 @@ From PowerShell, build JSON bodies with `ConvertTo-Json` rather than by hand: a 
 ```powershell
 $body = @{ action = "analyze"; path = "C:\Music\Song.mp3" } | ConvertTo-Json
 $a = Invoke-RestMethod -Method Post -Uri http://localhost:8080/NeewerLux/sequence -ContentType application/json -Body $body
-$body = @{ action = "draft"; analysis = $a; style = "Concert"; name = "Song"; save = $true } | ConvertTo-Json -Depth 6
+$body = @{ action = "draft"; analysis = $a; style = "Concert"; name = "Song"; save = $true; overwrite = $true } | ConvertTo-Json -Depth 6
 Invoke-RestMethod -Method Post -Uri http://localhost:8080/NeewerLux/sequence -ContentType application/json -Body $body
 
 # Upload instead, when the file is on another computer

@@ -57,12 +57,14 @@ def checkWorkerUsesGuiThread(nl, app, win):
 
 
 def fixedTables(widget):
-    """Tables in widget whose columns the user can't drag (none Interactive)."""
+    """Tables in widget whose columns the user can't drag (none Interactive), or with a stretching
+    column, which makes each divider move the one to its left."""
     from PySide6.QtWidgets import QTableWidget, QHeaderView
     bad = []
     for t in widget.findChildren(QTableWidget):
         hdr = t.horizontalHeader()
-        if not any(hdr.sectionResizeMode(c) == QHeaderView.Interactive for c in range(t.columnCount())):
+        if (not any(hdr.sectionResizeMode(c) == QHeaderView.Interactive for c in range(t.columnCount())) or
+                any(hdr.sectionResizeMode(c) == QHeaderView.Stretch for c in range(t.columnCount()))):
             bad.append(t.objectName() or "%d-column table" % t.columnCount())
     return bad
 
@@ -134,6 +136,19 @@ def checkSoundTab(nl, app, win, rig):
     assert win.soundPartsTable.columnWidth(2) >= widest + 20, "the Colour column fits 'Steps on the beat': %d < %d" % (win.soundPartsTable.columnWidth(2), widest + 20)
     assert colour.view().minimumWidth() >= widest, "its list opens wide enough to read"
     assert not fixedTables(win), "every table's columns can be dragged: %s" % fixedTables(win)
+    target = win.soundPartsTable.cellWidget(0, 0)
+    long = "@rim;@background;@practical;@back.left;@high"
+    target.setEditText(long)
+    target.lineEdit().editingFinished.emit()
+    app.processEvents()
+    need = target.fontMetrics().horizontalAdvance(long) + 30
+    assert win.soundPartsTable.columnWidth(0) >= need, "the Lights column widens to a long target: %d < %d" % (win.soundPartsTable.columnWidth(0), need)
+    assert target.width() >= need, "and the drop-down with it: %d" % target.width()
+    hdr = win.soundPartsTable.horizontalHeader()
+    before = [hdr.sectionPosition(c) for c in range(4)]
+    win.soundPartsTable.setColumnWidth(1, win.soundPartsTable.columnWidth(1) + 40)
+    after = [hdr.sectionPosition(c) for c in range(4)]
+    assert after[:2] == before[:2] and after[2] == before[2] + 40, "widening Brightness moves the columns to its right, not its left: %s %s" % (before, after)
     shot = os.path.join(rig.workdir, "sound_tab.png")
     win.grab().save(shot)
     win.soundPartsTable.grab().save(os.path.join(rig.workdir, "sound_parts.png"))
