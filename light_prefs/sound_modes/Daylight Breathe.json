@@ -8,8 +8,8 @@
     "white"
   ],
   "sensitivity": 1.0,
-  "floor": 30,
-  "ceiling": 65,
+  "floor": 6,
+  "ceiling": 75,
   "smoothing": 0.75,
   "palette": [
     {

@@ -8,8 +8,8 @@
     "pastel"
   ],
   "sensitivity": 1.0,
-  "floor": 30,
-  "ceiling": 50,
+  "floor": 10,
+  "ceiling": 70,
   "smoothing": 0.9,
   "palette": [
     {

@@ -8,9 +8,9 @@
     "moody"
   ],
   "sensitivity": 1.0,
-  "floor": 8,
-  "ceiling": 80,
-  "smoothing": 0.2,
+  "floor": 3,
+  "ceiling": 95,
+  "smoothing": 0.15,
   "palette": [
     {
       "hue": 275,

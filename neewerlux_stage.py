@@ -31,6 +31,7 @@ PLAN_DEPTHS = ["front", "beside", "back"]     # plan rows: front (towards the ca
 HEIGHT_ROWS = ["high", "middle", "low"]       # height view rows, top to bottom
 HEIGHT_LEVEL = {"low": 1, "middle": 2, "high": 3}
 VIEW_MODES = ["plan", "height", "strip"]
+STAGE_MIN_SCALE = 0.5  # the plan and height grids shrink to fit, down to half size
 # where a light points, as (dx, dy) on the plan (front is up); "you" is worked out per light
 AIM_VECTORS = {"front": (0, -1), "front-right": (1, -1), "right": (1, 0), "back-right": (1, 1),
                "back": (0, 1), "back-left": (-1, 1), "left": (-1, 0), "front-left": (-1, -1)}
@@ -151,8 +152,17 @@ class StageView(QWidget):
         if self.viewMode == "strip":
             self.setMinimumSize(cw + gap, ch + gap)
         else:
-            self.setMinimumSize(*self._gridSize())
+            # the grid shrinks to fit (down to half size) rather than holding windows open wide
+            w, h = self._gridSize()
+            self.setMinimumSize(int(w * STAGE_MIN_SCALE), int(h * STAGE_MIN_SCALE))
         self.updateGeometry()
+
+    def _scale(self):
+        """How far the grid views are shrunk to fit the widget (1 when there's room)."""
+        if self.viewMode == "strip":
+            return 1.0
+        w, h = self._gridSize()
+        return max(STAGE_MIN_SCALE, min(1.0, self.width() / float(w or 1), self.height() / float(h or 1)))
 
     def _rows(self):
         return PLAN_DEPTHS if self.viewMode == "plan" else HEIGHT_ROWS
@@ -168,8 +178,8 @@ class StageView(QWidget):
             cells.setdefault((side, row), []).append(n)
         return cells
 
-    def _gridMetrics(self):
-        """(left edge of the grid, top edge, column widths per side, row height, margin)."""
+    def _gridBase(self):
+        """(row label width, margin, column widths per side, row height, top edge) at full size."""
         tileW, swatchH, gap, line, sline = self._geometry()
         cw, ch = self._cell()
         fm = QFontMetrics(self._smallFont())
@@ -177,16 +187,19 @@ class StageView(QWidget):
         labelW = max(_textWidth(fm, w) for w in ("Front", "Beside", "Back", "Middle")) + gap
         cells = self._gridCells()
         colW = [max([len(cells.get((side, r), [])) for r in self._rows()] + [1]) * cw for side in PLAN_SIDES]
+        return labelW, margin, colW, ch, sline + 4 + margin
+
+    def _gridMetrics(self):
+        """(left edge of the grid, top edge, column widths per side, row height, margin), in
+        full-size units (paintEvent scales them down when the widget is smaller)."""
+        labelW, margin, colW, ch, y0 = self._gridBase()
         natural = labelW + margin + sum(colW) + margin
-        shift = max(0, (self.width() - natural) / 2.0)  # centred when the window is wider than the grid
-        return labelW + margin + shift, sline + 4 + margin, colW, ch, margin
+        shift = max(0, (self.width() / self._scale() - natural) / 2.0)  # centred when the window is wider than the grid
+        return labelW + margin + shift, y0, colW, ch, margin
 
     def _gridSize(self):
-        tileW, swatchH, gap, line, sline = self._geometry()
-        fm = QFontMetrics(self._smallFont())
-        labelW = max(_textWidth(fm, w) for w in ("Front", "Beside", "Back", "Middle")) + gap
-        x0, y0, colW, rowH, margin = self._gridMetrics()
-        return int(labelW + 2 * margin + sum(colW)), int(y0 + 3 * rowH + margin)
+        labelW, margin, colW, ch, y0 = self._gridBase()
+        return int(labelW + 2 * margin + sum(colW)), int(y0 + 3 * ch + margin)
 
     def _layout(self):
         """[(tile index, x, y)] for every tile in the current view."""
@@ -232,6 +245,8 @@ class StageView(QWidget):
         return QSize(min(n, 6) * cw + gap, ((n + 5) // 6) * ch + gap)
 
     def _tileAt(self, pos):
+        s = self._scale()
+        pos = QPointF(pos.x() / s, pos.y() / s)
         tileW, swatchH, gap, line, sline = self._geometry()
         cw, ch = self._cell()
         for n, x, y in self._layout():
@@ -259,6 +274,9 @@ class StageView(QWidget):
             p.setPen(QColor(160, 160, 160))
             p.drawText(self.rect(), Qt.AlignCenter, "No lights yet")
             return
+        scale = self._scale()
+        if scale < 1.0:
+            p.scale(scale, scale)
         tileW, swatchH, gap, line, sline = self._geometry()
         cw, ch = self._cell()
         font, small = self.font(), self._smallFont()

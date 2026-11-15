@@ -8,8 +8,8 @@
     "cool"
   ],
   "sensitivity": 1.0,
-  "floor": 20,
-  "ceiling": 50,
+  "floor": 6,
+  "ceiling": 75,
   "smoothing": 0.9,
   "cycle_s": 90,
   "palette": [

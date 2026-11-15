@@ -1125,7 +1125,7 @@ def draftSequence(analysis, style="Concert", name=None, bpm=None, offsetMs=None)
            "description": "Drafted from the song (" + DRAFT_STYLES[list(_DRAFT).index(key)] + " style, " + ("%g" % round(tempo, 2)) + " BPM)",
            "tempo": {"bpm": round(tempo, 2), "offset_ms": int(round(bars[0] if bars else 0))},
            "sections": [{"start_ms": int(s["start_ms"]), "end_ms": int(s["end_ms"]), "label": s.get("label", ""),
-                         "level": int(s.get("level", 2)), **({"group": s["group"]} if s.get("group") else {})} for s in sections],
+                         "level": int(s.get("level", 2)), **{k: s[k] for k in ("group", "kind") if s.get(k)}} for s in sections],
            "cues": sorted(cues, key=lambda c: c["at_ms"])}
     return seq, []
 
@@ -1137,17 +1137,19 @@ SOUND_FLASH_LIMIT = 2       # flashes a second a sound mode allows itself; the f
 SOUND_FLASH_WINDOW_S = 1.05 # a little over a second: evenly paced transitions 0.25 s apart would put five
                             # in one closed second on a 50 ms frame grid
 SOUND_CHASE_MAX_BPM = 150   # faster than this, chases step on every other beat
-SOUND_ATTACK_MS = 60        # how fast a light rises to a louder value
+SOUND_BLINK_MAX_BPM = 120   # faster than this, Beat-driven lights flash on every other beat (one flash per beat at 120 BPM is the 2/s limit)
+SOUND_ATTACK_MS = 60        # how fast a light rises to a louder value (less with low Smoothing, none at 0)
 SOUND_COLOUR_STEP_MS = 400  # how long a palette step (colour "beat") takes to blend
 SOUND_SETTLE_MS = 300       # a value held this long is written even if under the write deadband,
                             # so a fade ends exactly on its floor or ceiling
+SOUND_DEFAULT_CURVE = 2.0   # brightness = floor + (ceiling - floor) * value ** curve; 1 is straight
 SOUND_CYCLE_MIN_S = 4       # colour "cycle": at least this long round the palette, and at least
                             # a second per colour, so a cycle can't turn into colour flashing
 ANALYSIS_RANGE_DB = 30.0    # the analysis reads this many dB under the recent peak as 0 (neewerlux_audio.NORM_RANGE_DB)
 
 
 class SoundMode:
-    __slots__ = ("name", "description", "tags", "sensitivity", "rangeDb", "floor", "ceiling", "smoothing", "fps", "palette",
+    __slots__ = ("name", "description", "tags", "sensitivity", "rangeDb", "floor", "ceiling", "smoothing", "curve", "fps", "palette",
                  "cycleS", "parts", "fadeInMs", "handbackMs", "raw")
 
 
@@ -1213,6 +1215,7 @@ def parseSoundMode(data, defaultFps=DEFAULT_SEQUENCE_FPS, resolveTarget=None):
     if m.floor > m.ceiling:
         errors.append("floor can't be above ceiling")
     m.smoothing = _modeNum(data, "smoothing", 0.5, 0.0, 1.0, errors)
+    m.curve = _modeNum(data, "curve", SOUND_DEFAULT_CURVE, 1.0, 3.0, errors)
     m.fps = _modeNum(data, "fps", defaultFps, 1, MAX_FPS, errors, integer=True)
     m.fadeInMs = _modeNum(data, "fade_in_ms", None, 0, 10000, errors, integer=True)
     m.handbackMs = _modeNum(data, "handback_fade_ms", None, 0, 10000, errors, integer=True)
@@ -1260,8 +1263,8 @@ def parseSoundMode(data, defaultFps=DEFAULT_SEQUENCE_FPS, resolveTarget=None):
 
 def soundModeWithParams(mode, params, defaultFps=DEFAULT_SEQUENCE_FPS):
     """The mode with some values changed (sensitivity, range_db, floor, ceiling, smoothing,
-    palette, cycle_s, fps, parts), checked like a saved mode. Returns (SoundMode or None, errors)."""
-    allowed = ("sensitivity", "range_db", "floor", "ceiling", "smoothing", "palette", "cycle_s", "fps", "parts")
+    curve, palette, cycle_s, fps, parts), checked like a saved mode. Returns (SoundMode or None, errors)."""
+    allowed = ("sensitivity", "range_db", "floor", "ceiling", "smoothing", "curve", "palette", "cycle_s", "fps", "parts")
     if not isinstance(params, dict):
         return None, ["params must be an object"]
     bad = [k for k in params if k not in allowed]
@@ -1327,6 +1330,7 @@ class _SoundVoice:
         self._step = {}         # part -> chase step / palette step
         self._stepAt = {}       # part -> ms when the palette step changed
         self._beatEnv = {}      # part -> beat envelope
+        self._blinkAt = {}      # part -> when its last Beat flash began
 
     def drop(self, lights):
         if self.lights is None:
@@ -1349,11 +1353,13 @@ class _SoundVoice:
             order = resolved[pi]
             lights.sort(key=lambda i: (0, order.index(i)) if i in order else (1, sweep.index(i) if i in sweep else i))
 
-    def frame(self, f, nowMs, dt, newBeat, stepBeat, startMs):
+    def frame(self, f, nowMs, dt, blinkBeat, stepBeat, startMs):
         mode = self.mode
-        release = 120.0 + mode.smoothing * 1500.0
-        up = 1.0 - math.exp(-dt / SOUND_ATTACK_MS)
-        down = 1.0 - math.exp(-dt / release)
+        # Smoothing 0 is a hard cut both ways: lights snap to each new value
+        attack = min(SOUND_ATTACK_MS, mode.smoothing * 4 * SOUND_ATTACK_MS)
+        release = mode.smoothing * 1620.0
+        up = 1.0 - math.exp(-dt / attack) if attack > 0 else 1.0
+        down = 1.0 - math.exp(-dt / release) if release > 0 else 1.0
         def driveOf(key):
             # the analysis spans 30 dB; a smaller range makes the same music swing further
             v = f.get(key, 0.0)
@@ -1377,7 +1383,11 @@ class _SoundVoice:
                 self._step[pi] = self._step.get(pi, 0) + 1
                 self._stepAt[pi] = nowMs
             if part["drive"] == "beat":
-                be = 1.0 if newBeat else self._beatEnv.get(pi, 0.0) * (1.0 - down)
+                # full for half a beat, then falling at the Smoothing speed (gone at once at 0)
+                if blinkBeat:
+                    self._blinkAt[pi] = nowMs
+                held = nowMs - self._blinkAt.get(pi, -1e9) < 30000.0 / (f.get("bpm") or 200.0)
+                be = 1.0 if held else self._beatEnv.get(pi, 0.0) * (1.0 - down)
                 self._beatEnv[pi] = be
                 drive = be
             else:
@@ -1403,14 +1413,18 @@ class _SoundVoice:
                     # the lit light keeps some brightness through quiet passages, but not silence:
                     # with no beats the chase can't step, and no sound means the floor
                     on = li == self._step.get(pi, 0) % len(lights)
-                    target = (1.0 if on else 0.0) * (0.4 + 0.6 * self._levelEnv) * self._presence
+                    # a chase on the Beat lights each step fully; otherwise louder music, brighter step
+                    lit = 1.0 if part["drive"] == "beat" else 0.4 + 0.6 * self._levelEnv
+                    target = (1.0 if on else 0.0) * lit * self._presence
                 else:
                     target = drive
                 key = (pi, idx)
                 env = self._env.get(key, 0.0)
                 env += (target - env) * (up if target > env else down)
                 self._env[key] = env
-                bri = int(round(lo + (hi - lo) * env))
+                # eyes notice a change at the dim end far more than near full, so the curve spends
+                # more of the movement down there
+                bri = int(round(lo + (hi - lo) * env ** mode.curve))
                 if "temp" in entry:
                     out[idx] = {"mode": "CCT", "temp": int(round(entry["temp"] / 100.0)), "bri": bri}
                 else:
@@ -1526,11 +1540,14 @@ class SoundPlayer:
         self._lastBeat = beat
         if newBeat:
             self._beats += 1
+        # every other beat when every beat would be too fast: steady, rather than the limiter
+        # holding back flashes here and there
         stepBeat = newBeat and (f.get("bpm", 0) <= SOUND_CHASE_MAX_BPM or self._beats % 2 == 0)
+        blinkBeat = newBeat and (f.get("bpm", 0) <= SOUND_BLINK_MAX_BPM or self._beats % 2 == 0)
 
         out = {}
         for v in self.voices:
-            out.update(v.frame(f, nowMs, dt, newBeat, stepBeat, self.startMs))
+            out.update(v.frame(f, nowMs, dt, blinkBeat, stepBeat, self.startMs))
 
         t = nowMs / 1000.0
         for idx, cmd in out.items():
@@ -1549,7 +1566,8 @@ class SoundPlayer:
             # further in luminance than the colour does) and on its real colour (a colour step at
             # the same brightness, yellow to blue, is a swing white doesn't show)
             colour = flashLevel(cmd) or (0.0, False)
-            levels = ((cmd["bri"] / 100.0, colour[1]), colour)
+            white = flashLevel({"mode": "CCT", "temp": 56, "bri": cmd["bri"]}) or (0.0, False)
+            levels = ((white[0], colour[1]), colour)
             if prev is not None and any(c.check(t, lv, SOUND_FLASH_LIMIT, SOUND_FLASH_WINDOW_S, paced=True)
                                         for c, lv in zip(counters, levels)):
                 out[idx] = prev

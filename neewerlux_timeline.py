@@ -17,7 +17,7 @@ import time
 
 import neewerlux_show as show
 from neewerlux_stage import StageView
-from neewerlux_ui import SpinBoxWithButtons, DoubleSpinBoxWithButtons
+from neewerlux_ui import SpinBoxWithButtons, DoubleSpinBoxWithButtons, FlowLayout
 
 try:
     from PySide6.QtCore import Qt, QTimer, QRectF, QPointF, QSize
@@ -25,14 +25,14 @@ try:
     from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel, QLineEdit,
                                    QComboBox, QSpinBox, QDoubleSpinBox, QPushButton, QCheckBox, QScrollBar,
                                    QSplitter, QStackedWidget, QMessageBox, QMenu, QDialog, QDialogButtonBox,
-                                   QInputDialog, QSizePolicy, QFrame, QTextEdit, QFileDialog)
+                                   QInputDialog, QSizePolicy, QFrame, QTextEdit, QFileDialog, QScrollArea)
 except ImportError:
     from PySide2.QtCore import Qt, QTimer, QRectF, QPointF, QSize
     from PySide2.QtGui import QColor, QPainter, QPen, QFont, QFontMetrics, QKeySequence, QPolygonF, QBrush
     from PySide2.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel, QLineEdit,
                                    QComboBox, QSpinBox, QDoubleSpinBox, QPushButton, QCheckBox, QScrollBar,
                                    QSplitter, QStackedWidget, QMessageBox, QMenu, QDialog, QDialogButtonBox,
-                                   QInputDialog, QSizePolicy, QFrame, QTextEdit, QShortcut, QFileDialog)
+                                   QInputDialog, QSizePolicy, QFrame, QTextEdit, QShortcut, QFileDialog, QScrollArea)
 
 SNAP_CHOICES = [("No snap", 0), ("10 ms", 10), ("50 ms", 50), ("100 ms", 100), ("250 ms", 250),
                 ("500 ms", 500), ("1 s", 1000), ("Beat", -1), ("Half beat", -2), ("Bar (4 beats)", -4)]
@@ -50,7 +50,9 @@ def describeSection(sec):
     a, b = int(sec.get("start_ms", 0)), int(sec.get("end_ms", 0))
     level = int(sec.get("level", 2))
     part = ("Part %s\n" % sec["group"]) if sec.get("group") else ""
-    if sec.get("ai_label"):
+    if sec.get("kind"):
+        part += "NeewerLux: %s\n" % sec["kind"]
+    elif sec.get("ai_label"):
         part += "Section finder: %s\n" % sec["ai_label"]
     return "%s\n%s to %s (%s)\n%sLevel %d (%s)" % (sec.get("label") or "Section", fmtTime(a), fmtTime(b), fmtTime(b - a),
                                                     part, level, LEVEL_NAMES.get(level, ""))
@@ -991,12 +993,17 @@ class SequenceEditor(QWidget):
             avail = self.screen().availableGeometry().height()
         except Exception:
             avail = 900
-        self.resize(1250, int(max(680, min(1000, avail * 0.85))))
+        try:
+            availW = self.screen().availableGeometry().width()
+        except Exception:
+            availW = 1280
+        self.resize(min(1250, int(availW * 0.95)), int(max(min(680, avail * 0.9), min(1000, avail * 0.85))))
         root = QVBoxLayout(self)
         root.setContentsMargins(6, 6, 6, 6)
 
         # --- top bar: name, length, tempo, snap, zoom, file actions
-        top = QHBoxLayout()
+        # toolbars wrap onto more rows in a narrow window rather than holding it wide
+        top = FlowLayout()
         top.addWidget(QLabel("Name"))
         self.nameEdit = QLineEdit(self.seq.get("name", ""))
         self.nameEdit.setMinimumWidth(200)
@@ -1038,7 +1045,8 @@ class SequenceEditor(QWidget):
         self.snapCombo = QComboBox()
         for label, value in SNAP_CHOICES:
             self.snapCombo.addItem(label, value)
-        self.snapCombo.setCurrentIndex(3)
+        # a sequence with a tempo (a song draft) snaps to beats from the start
+        self.snapCombo.setCurrentIndex(self.snapCombo.findData(-1) if self.bpmSpin.value() > 0 else 3)
         top.addWidget(self.snapCombo)
         zoomOut, zoomIn, fit = QPushButton("Zoom -"), QPushButton("Zoom +"), QPushButton("Fit")
         zoomOut.setToolTip("Zoom out (Ctrl+wheel)")
@@ -1054,7 +1062,7 @@ class SequenceEditor(QWidget):
         root.addLayout(top)
 
         # --- transport
-        trans = QHBoxLayout()
+        trans = FlowLayout()
         self.toStartButton = QPushButton("|<")
         self.playButton = QPushButton("Play")
         self.stopButton = QPushButton("Stop")
@@ -1070,7 +1078,7 @@ class SequenceEditor(QWidget):
         self.sendCheck = QCheckBox("Send to lights")
         self.sendCheck.setToolTip("Play the edit through the real lights from the playhead. Off: preview on screen only.")
         trans.addWidget(self.sendCheck)
-        trans.addStretch(1)
+        trans.addSpacing(16)
         self.addColourButton = QPushButton("+ Colour cue")
         self.addClipButton = QPushButton("+ Clip cue")
         self.undoButton = QPushButton("Undo")
@@ -1111,9 +1119,21 @@ class SequenceEditor(QWidget):
         self.viewCombo.currentIndexChanged.connect(lambda i: self.stage.setViewMode(["plan", "height", "strip"][i]))
         leftLay.addWidget(self.stage)
         leftLay.addStretch(1)
-        split.addWidget(left)
+        # both sides scroll when the window is short, so the tracks, preview and properties
+        # don't set its minimum height
+        leftScroll = QScrollArea()
+        leftScroll.setWidgetResizable(True)
+        leftScroll.setFrameShape(QFrame.NoFrame)
+        leftScroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        leftScroll.setWidget(left)
+        split.addWidget(leftScroll)
         self.props = self._buildProperties()
-        split.addWidget(self.props)
+        propsScroll = QScrollArea()
+        propsScroll.setWidgetResizable(True)
+        propsScroll.setFrameShape(QFrame.NoFrame)
+        propsScroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        propsScroll.setWidget(self.props)
+        split.addWidget(propsScroll)
         split.setStretchFactor(0, 4)
         split.setStretchFactor(1, 1)
         root.addWidget(split, 1)

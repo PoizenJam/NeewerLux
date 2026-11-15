@@ -1887,9 +1887,18 @@ def t_songHTTP(rig):
             got = rig.post("/NeewerLux/sequence", {"action": "analyze", "path": path})
             check(got["success"] and got["sections_from"] == "command" and any(s.get("ai_label") == "chorus" for s in got["sections"]),
                   "a finder command sets the sections: %s" % {k: got.get(k) for k in ("sections_from", "warnings", "sections")})
+            check(all("kind" not in s for s in got["sections"]), "NeewerLux names them by default")
+            nl.songFinderNames = True
+            got = rig.post("/NeewerLux/sequence", {"action": "analyze", "path": path})
+            named = [s for s in got["sections"] if s.get("ai_label") == "chorus"]
+            check(named and named[0]["label"] == "Chorus" and named[0]["kind"] in ("Intro", "Groove", "Build", "Drop", "Breakdown", "Outro"),
+                  "or with the finder's labels, NeewerLux's kept as the kind: %s" % named)
+            dr = rig.post("/NeewerLux/sequence", {"action": "draft", "analysis": got, "style": "Concert", "name": "Named"})
+            check(any(s.get("label") == "Chorus" and s.get("kind") for s in dr["sequence"]["sections"]), "drafts keep both")
+            nl.songFinderNames = False
             nl.songSectionCommand = '"%s" -c "import sys; sys.exit(2)" "{song}"' % sys.executable
             got = rig.post("/NeewerLux/sequence", {"action": "analyze", "path": path})
-            check(got["success"] and got["sections_from"] == "analysis" and "exit code 2" in got["warnings"][0] and got["sections"],
+            check(got["success"] and got["sections_from"] == "analysis" and got["warnings"][0].startswith("the section finder failed (exit code 2); ") and got["sections"],
                   "a failing finder falls back, with a warning: %s" % got.get("warnings"))
         finally:
             nl.songSectionCommand = ""

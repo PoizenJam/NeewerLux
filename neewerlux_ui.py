@@ -6,7 +6,7 @@ contract with NeewerLux.py, which connects the signal handlers.
 
 try:
     import PySide6
-    from PySide6.QtCore import Qt, Signal, QSize, QRectF, QPointF
+    from PySide6.QtCore import Qt, Signal, QSize, QRectF, QPointF, QRect, QPoint
     from PySide6.QtGui import QFont, QColor, QLinearGradient, QBrush, QKeySequence, QIcon, QPainter, QPixmap, QPolygonF
     from PySide6.QtWidgets import (
         QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QFormLayout,
@@ -15,13 +15,13 @@ try:
         QTabWidget, QCheckBox, QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, QComboBox, QAbstractButton,
         QGraphicsView, QGraphicsScene, QScrollArea, QKeySequenceEdit,
         QListWidget, QListWidgetItem, QStatusBar, QHeaderView, QFrame,
-        QSystemTrayIcon, QMenu, QTextBrowser, QProgressBar
+        QSystemTrayIcon, QMenu, QTextBrowser, QProgressBar, QLayout, QWidgetItem
     )
     customSignal = Signal
 except ImportError:
     try:
         import PySide2
-        from PySide2.QtCore import Qt, Signal, QSize, QRectF, QPointF
+        from PySide2.QtCore import Qt, Signal, QSize, QRectF, QPointF, QRect, QPoint
         from PySide2.QtGui import QFont, QColor, QLinearGradient, QBrush, QKeySequence, QIcon, QPainter, QPixmap, QPolygonF
         from PySide2.QtWidgets import (
             QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QFormLayout,
@@ -30,7 +30,7 @@ except ImportError:
             QTabWidget, QCheckBox, QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, QComboBox, QAbstractButton,
             QGraphicsView, QGraphicsScene, QScrollArea, QKeySequenceEdit,
             QListWidget, QListWidgetItem, QStatusBar, QHeaderView, QFrame,
-            QSystemTrayIcon, QMenu, QTextBrowser, QProgressBar
+            QSystemTrayIcon, QMenu, QTextBrowser, QProgressBar, QLayout, QWidgetItem
         )
         customSignal = Signal
     except ImportError:
@@ -243,6 +243,93 @@ class SpinBoxWithButtons(QWidget):
 
     def setMinimumWidth(self, w):
         self._spin.setMinimumWidth(w)
+
+
+class FlowLayout(QLayout):
+    """Lays its widgets out in a row and wraps them onto further rows when the window is too
+    narrow, so a long toolbar doesn't set a window's minimum width."""
+
+    def __init__(self, parent=None, spacing=6):
+        super().__init__(parent)
+        self._items = []
+        self.setSpacing(spacing)
+        self.setContentsMargins(0, 0, 0, 0)
+
+    def addItem(self, item):
+        self._items.append(item)
+
+    def addWidget(self, widget, stretch=0):  # stretch has no meaning in a wrapping row
+        super().addWidget(widget)
+
+    def addSpacing(self, size):
+        gap = QWidget()
+        gap.setFixedSize(size, 1)
+        self.addWidget(gap)
+
+    def count(self):
+        return len(self._items)
+
+    def itemAt(self, index):
+        return self._items[index] if 0 <= index < len(self._items) else None
+
+    def takeAt(self, index):
+        return self._items.pop(index) if 0 <= index < len(self._items) else None
+
+    def expandingDirections(self):
+        return Qt.Orientations(0)
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, width):
+        return self._place(QRect(0, 0, width, 0), False)
+
+    def setGeometry(self, rect):
+        super().setGeometry(rect)
+        self._place(rect, True)
+
+    def sizeHint(self):
+        return self.minimumSize()
+
+    def minimumSize(self):
+        size = QSize()
+        for item in self._items:
+            size = size.expandedTo(item.minimumSize())
+        m = self.contentsMargins()
+        return size + QSize(m.left() + m.right(), m.top() + m.bottom())
+
+    def _place(self, rect, move):
+        m = self.contentsMargins()
+        area = rect.adjusted(m.left(), m.top(), -m.right(), -m.bottom())
+        gap = self.spacing()
+        items = [i for i in self._items if not i.isEmpty()]  # hidden widgets take no room
+        # a label stays on the same row as the field after it
+        units, k = [], 0
+        while k < len(items):
+            keep = isinstance(items[k].widget(), QLabel) and k + 1 < len(items)
+            units.append(items[k:k + 2] if keep else items[k:k + 1])
+            k += 2 if keep else 1
+        rows, row, x = [], [], 0
+        for unit in units:
+            w = sum(i.sizeHint().width() for i in unit) + gap * (len(unit) - 1)
+            if row and x + w > area.width():
+                rows.append(row)
+                row, x = [], 0
+            row += unit
+            x += w + gap
+        if row:
+            rows.append(row)
+        y = area.y()
+        for row in rows:
+            rowH = max(i.sizeHint().height() for i in row)
+            if move:
+                x = area.x()
+                for i in row:  # centred in the row, so labels line up with their fields
+                    size = i.sizeHint()
+                    i.setGeometry(QRect(QPoint(x, y + (rowH - size.height()) // 2), size))
+                    x += size.width() + gap
+            y += rowH + gap
+        return max(0, y - gap) - rect.y() + m.bottom()
 
 
 def adjustableColumns(table, fixed=()):
@@ -574,7 +661,8 @@ class Ui_MainWindow(object):
 
         # === WINDOW ===
         MainWindow.setMinimumSize(780, 620)
-        MainWindow.resize(900, 800)
+        avail = MainWindow.screen().availableGeometry()  # a small screen gets a window that fits it
+        MainWindow.resize(min(900, avail.width()), min(800, int(avail.height() * 0.95)))
         MainWindow.setWindowTitle("NeewerLux")
 
         self.centralwidget = QWidget(MainWindow)
@@ -992,7 +1080,9 @@ class Ui_MainWindow(object):
                 ("range_db", "Range", 6, 30, "How far under the loudest recent moment counts as dark: smaller swings further"),
                 ("floor", "Floor", 0, 100, "Brightness when it's quiet"),
                 ("ceiling", "Ceiling", 0, 100, "Brightness at full"),
-                ("smoothing", "Smoothing", 0, 100, "How slowly lights fall back and colours drift"))):
+                ("smoothing", "Smoothing", 0, 100, "How slowly lights fall back and colours drift; 0 snaps on and off"),
+                ("curve", "Curve", 10, 30, "How much of the movement happens at the dim end, where eyes notice it most:\n"
+                                           "x1.0 is straight, x2.0 (the default) spends most of it low"))):
             slider = QSlider(Qt.Horizontal)
             slider.setRange(lo, hi)
             slider.setToolTip(tip)
@@ -1392,6 +1482,11 @@ class Ui_MainWindow(object):
             "with JSON segments (start, end, label). Example: allin1 \"{song}\" -o \"{out}\"\n"
             "Tempo and beats still come from NeewerLux. Set here only: it runs a program on this computer.")
         shows.addRow("Song section finder command:", self.songSectionCommandField)
+        self.songFinderNamesCheck = QCheckBox("Name sections with the section finder's labels (such as Verse, Chorus)")
+        self.songFinderNamesCheck.setToolTip("Off: NeewerLux names the sections (Intro, Groove, Build, Drop, Breakdown, Outro)\n"
+                                             "and the finder's label shows on hover. On: the finder's label is the name and\n"
+                                             "NeewerLux's shows on hover; drafts still go by NeewerLux's.")
+        shows.addRow("", self.songFinderNamesCheck)
         shows.addRow(QLabel("<br><strong>Your rig</strong>"))
         shows.addRow("Main camera:", self.cameraPositionCombo)
         shows.addRow(cctFallbackRow)

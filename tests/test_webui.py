@@ -398,6 +398,9 @@ def main():
         until(lambda: player.mode.sensitivity == 2.5 and player.mode.ceiling == 90, "sliders to apply live")
         js(page, "sndSlider('floor', 20); sndPal(0, 'hue', 120)")
         until(lambda: player.mode.palette[0]["hue"] == 120 and player.mode.floor == 20, "a palette edit to apply live")
+        js(page, "sndSlider('curve', 15)")
+        until(lambda: player.mode.curve == 1.5, "the curve slider to apply live")
+        check(js(page, "document.getElementById('snd_curve_v').textContent") == "x1.5", "the curve shows as x1.5")
         js(page, "sndPartAdd(); sndPart(1, 'target', '@fill'); sndPart(1, 'drive', 'high')")
         until(lambda: len(player.mode.parts) == 2 and player.mode.parts[1]["target"] == "@fill" and player.mode.parts[1]["drive"] == "high",
               "an added part to apply live")
@@ -515,6 +518,7 @@ def main():
         js(page, "tlOpen(null, 'Starter - Countdown')")
         waitFor(page, "!!(tl && tl.original === null && tl.seq.name === 'Countdown' && tl.render)", "editor on a copy of a starter")
         check(js(page, "tl.seq.cues.length") == 21, "starter copied")
+        check(js(page, "document.getElementById('tlSnap').value") == "100", "without a tempo, snap is 100 ms")
         js(page, "tl.dirty = false; tlClose()")
         # New, Duplicate, Delete from the panel
         js(page, "tlOpen(null)")
@@ -573,6 +577,7 @@ def main():
                             cv.dispatchEvent(new MouseEvent('mousemove', {bubbles: true, clientX: r.left + tlX((s.start_ms + s.end_ms) / 2), clientY: r.top + 4}));
                             cv.title""")
         check(title.startswith(seq["sections"][0]["label"] + "\n"), "hovering a section in the editor names it: %r" % title)
+        check(js(page, "document.getElementById('tlSnap').value") == "-1", "a draft (it has a tempo) snaps to beats")
         # Change tempo: move and stretch the cues
         old = seq["tempo"]["bpm"]
         page.runJavaScript("window.prompt = () => '%s'; window.confirm = () => true" % (old * 2))

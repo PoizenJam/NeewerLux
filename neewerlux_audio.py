@@ -571,8 +571,8 @@ def externalSections(command, path, timeoutS=SECTION_COMMAND_TIMEOUT_S):
         except subprocess.TimeoutExpired:
             return None, "the section finder took longer than %d s" % timeoutS
         if run.returncode:
-            last = (run.stderr or run.stdout or "").strip().splitlines()[-1:] or [""]
-            return None, "the section finder failed (exit code %d): %s" % (run.returncode, last[0][:200])
+            last = (run.stderr or run.stdout or "").strip().splitlines()[-1:]
+            return None, "the section finder failed (exit code %d)%s" % (run.returncode, ": " + last[0][:200] if last else "")
         found = []
         try:
             found.append(json.loads(run.stdout))

@@ -2332,10 +2332,10 @@ async function tlOpen(name, template, given) {
     tl.seq.cues = tl.seq.cues || [];
     const snapSel = document.getElementById('tlSnap');
     snapSel.innerHTML = TL_SNAPS.map(s => '<option value="' + s[1] + '">' + s[0] + '</option>').join('');
-    snapSel.value = '100';
+    const tempo = tl.seq.tempo || {};
+    snapSel.value = tempo.bpm > 0 ? '-1' : '100';  // a sequence with a tempo snaps to beats from the start
     document.getElementById('tlName').value = tl.seq.name || '';
     document.getElementById('tlDuration').value = ((+tl.seq.duration_ms || 30000) / 1000);
-    const tempo = tl.seq.tempo || {};
     document.getElementById('tlBpm').value = tempo.bpm || 0;
     document.getElementById('tlBeatOffset').value = tempo.offset_ms || 0;
     document.getElementById('tlSend').checked = false;
@@ -2866,7 +2866,7 @@ const TL_LEVEL_NAMES = {1: 'quiet', 2: 'medium', 3: 'loud'};
 function tlSectionAt(sections, ms) { return (sections || []).find(s => (+s.start_ms || 0) <= ms && ms < (+s.end_ms || 0)) || null; }
 function tlDescribeSection(sec) {
     const a = +sec.start_ms || 0, b = +sec.end_ms || 0, lv = +sec.level || 2;
-    return (sec.label || 'Section') + '\n' + tlFmt(a) + ' to ' + tlFmt(b) + ' (' + tlFmt(b - a) + ')\n' + (sec.group ? 'Part ' + sec.group + '\n' : '') + (sec.ai_label ? 'Section finder: ' + sec.ai_label + '\n' : '') + 'Level ' + lv + ' (' + (TL_LEVEL_NAMES[lv] || '') + ')';
+    return (sec.label || 'Section') + '\n' + tlFmt(a) + ' to ' + tlFmt(b) + ' (' + tlFmt(b - a) + ')\n' + (sec.group ? 'Part ' + sec.group + '\n' : '') + (sec.kind ? 'NeewerLux: ' + sec.kind + '\n' : sec.ai_label ? 'Section finder: ' + sec.ai_label + '\n' : '') + 'Level ' + lv + ' (' + (TL_LEVEL_NAMES[lv] || '') + ')';
 }
 
 // ---- draft from a song
@@ -3147,7 +3147,7 @@ function tlUpdateStage() {
 // SOUND MODES
 let sndDraft = null, sndName = '', sndEditing = 0;
 const SND_SLIDERS = [['sensitivity', 'Sensitivity', 10, 500, '%', 100], ['range_db', 'Range', 6, 30, ' dB', 1],
-                     ['floor', 'Floor', 0, 100, '%', 1], ['ceiling', 'Ceiling', 0, 100, '%', 1], ['smoothing', 'Smoothing', 0, 100, '%', 100]];
+                     ['floor', 'Floor', 0, 100, '%', 1], ['ceiling', 'Ceiling', 0, 100, '%', 1], ['smoothing', 'Smoothing', 0, 100, '%', 100], ['curve', 'Curve', 10, 30, '', 10]];
 const SND_DRIVES = [['level', 'Level'], ['low', 'Bass'], ['mid', 'Mids'], ['high', 'Treble'], ['beat', 'Beat']];
 const SND_METERS = [['level', 'Level'], ['low', 'Bass'], ['mid', 'Mids'], ['high', 'Treble'], ['centroid', 'Brightness of sound']];
 async function sndPost(body) { return postJSON('/NeewerLux/sound', body); }
@@ -3178,7 +3178,7 @@ async function sndModeChosen(name) {
 }
 function sndEditable() {
     const out = {};
-    ['sensitivity', 'range_db', 'floor', 'ceiling', 'smoothing', 'palette', 'cycle_s', 'parts'].forEach(k => { if (sndDraft[k] !== undefined) out[k] = sndDraft[k]; });
+    ['sensitivity', 'range_db', 'floor', 'ceiling', 'smoothing', 'curve', 'palette', 'cycle_s', 'parts'].forEach(k => { if (sndDraft[k] !== undefined) out[k] = sndDraft[k]; });
     return out;
 }
 let sndLiveChain = Promise.resolve(), sndLivePending = null;
@@ -3198,11 +3198,11 @@ function sndLive(params) {
 function sndRender() {
     const d = sndDraft;
     document.getElementById('sndDesc').textContent = (d.description || '') + ((d.tags || []).length ? '\nTags: ' + d.tags.join(', ') : '');
-    const defaults = {sensitivity: 1, range_db: 18, floor: 10, ceiling: 75, smoothing: 0.5};
+    const defaults = {sensitivity: 1, range_db: 18, floor: 10, ceiling: 75, smoothing: 0.5, curve: 2};
     document.getElementById('sndSliders').innerHTML = SND_SLIDERS.map(([k, label, lo, hi, unit, scale]) => {
         const v = Math.round((d[k] !== undefined ? d[k] : defaults[k]) * scale);
         return '<div class="snd-row"><label>' + label + '</label><input type="range" id="snd_' + k + '" min="' + lo + '" max="' + hi + '" value="' + v
-            + '" oninput="sndSlider(\'' + k + '\', this.value)"><span id="snd_' + k + '_v" style="min-width:48px;text-align:right">' + v + unit + '</span></div>';
+            + '" oninput="sndSlider(\'' + k + '\', this.value)"><span id="snd_' + k + '_v" style="min-width:48px;text-align:right">' + sndValueText(k, v) + '</span></div>';
     }).join('');
     const pal = d.palette || [{hue: 240, sat: 100}];
     const white = pal.length && pal[0].temp !== undefined;
@@ -3233,12 +3233,16 @@ function sndColour(e) {
     if (e.temp !== undefined) { const t = Math.max(0, Math.min(1, (e.temp - 2700) / 7300)); return 'rgb(255,' + Math.round(170 + 70 * t) + ',' + Math.round(110 + 145 * t) + ')'; }
     return 'hsl(' + e.hue + ',' + e.sat + '%,' + (100 - e.sat / 2) + '%)';
 }
+function sndValueText(k, v) {
+    const spec = SND_SLIDERS.find(s => s[0] === k);
+    return k === 'curve' ? 'x' + (v / 10).toFixed(1) : v + spec[4];
+}
 function sndSlider(k, raw) {
     const spec = SND_SLIDERS.find(s => s[0] === k);
     let v = Number(raw);
-    document.getElementById('snd_' + k + '_v').textContent = v + spec[4];
+    document.getElementById('snd_' + k + '_v').textContent = sndValueText(k, v);
     const changes = {};
-    changes[k] = spec[5] === 100 ? v / 100 : v;
+    changes[k] = spec[5] === 1 ? v : v / spec[5];
     if (k === 'floor' && v > (sndDraft.ceiling !== undefined ? sndDraft.ceiling : 75)) { changes.ceiling = v; document.getElementById('snd_ceiling').value = v; document.getElementById('snd_ceiling_v').textContent = v + '%'; }
     if (k === 'ceiling' && v < (sndDraft.floor !== undefined ? sndDraft.floor : 10)) { changes.floor = v; document.getElementById('snd_floor').value = v; document.getElementById('snd_floor_v').textContent = v + '%'; }
     Object.assign(sndDraft, changes);

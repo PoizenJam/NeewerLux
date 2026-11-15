@@ -8,8 +8,8 @@
     "moody"
   ],
   "sensitivity": 1.2,
-  "floor": 10,
-  "ceiling": 75,
+  "floor": 0,
+  "ceiling": 100,
   "smoothing": 0.0,
   "palette": [
     {
@@ -27,14 +27,14 @@
       "drive": "low",
       "colour": 0,
       "floor": 0,
-      "ceiling": 85
+      "ceiling": 100
     },
     {
       "target": "@rim;@practical",
       "drive": "level",
       "colour": 1,
-      "floor": 15,
-      "ceiling": 60
+      "floor": 5,
+      "ceiling": 65
     }
   ]
 }

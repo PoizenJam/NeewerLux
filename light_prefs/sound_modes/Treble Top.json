@@ -8,8 +8,8 @@
     "cool"
   ],
   "sensitivity": 1.2,
-  "floor": 10,
-  "ceiling": 75,
+  "floor": 0,
+  "ceiling": 100,
   "smoothing": 0.0,
   "palette": [
     {
@@ -27,14 +27,14 @@
       "drive": "high",
       "colour": 1,
       "floor": 0,
-      "ceiling": 80
+      "ceiling": 100
     },
     {
       "target": "@background",
       "drive": "level",
       "colour": 0,
-      "floor": 15,
-      "ceiling": 55
+      "floor": 5,
+      "ceiling": 65
     }
   ]
 }

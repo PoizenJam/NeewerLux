@@ -9,7 +9,7 @@
   ],
   "sensitivity": 1.2,
   "floor": 0,
-  "ceiling": 85,
+  "ceiling": 100,
   "smoothing": 0.0,
   "palette": [
     {
@@ -31,8 +31,8 @@
       "target": "@background",
       "drive": "level",
       "colour": 1,
-      "floor": 10,
-      "ceiling": 55
+      "floor": 5,
+      "ceiling": 65
     }
   ]
 }

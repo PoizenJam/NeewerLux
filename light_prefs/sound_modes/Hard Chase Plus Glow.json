@@ -10,7 +10,7 @@
   ],
   "sensitivity": 1.0,
   "floor": 0,
-  "ceiling": 80,
+  "ceiling": 100,
   "smoothing": 0.0,
   "palette": [
     {
@@ -33,14 +33,14 @@
       "colour": "beat",
       "chase": true,
       "floor": 0,
-      "ceiling": 85
+      "ceiling": 100
     },
     {
       "target": "@background;@practical",
       "drive": "level",
       "colour": 1,
-      "floor": 15,
-      "ceiling": 55
+      "floor": 5,
+      "ceiling": 65
     }
   ]
 }

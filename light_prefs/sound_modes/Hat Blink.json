@@ -9,7 +9,7 @@
   ],
   "sensitivity": 1.3,
   "floor": 0,
-  "ceiling": 75,
+  "ceiling": 100,
   "smoothing": 0.0,
   "palette": [
     {

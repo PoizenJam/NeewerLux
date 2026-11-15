@@ -297,6 +297,50 @@ def t_beatChase():
         check(abs(float(np.median(gaps)) - stepS) < 0.06, "%d BPM: steps %.2f s apart, expected %.2f" % (bpm, float(np.median(gaps)), stepS))
 
 
+def t_hardModesSnap():
+    """Smoothing 0 is a hard cut: Hard Chase lights each step at its ceiling and drops it
+    straight to its floor, with nothing in between (Robert saw lights not reaching black)."""
+    mode = next(m for m in shippedModes() if m.name == "Hard Chase")
+    saved = dict(ROLES)
+    ROLES.update({"practical": [4]})
+    try:
+        s = play(mode, au.Analyzer().analyze(kickHats(128, 12)))
+    finally:
+        ROLES.clear(); ROLES.update(saved)
+    for idx, seq in s.items():
+        values = {c["bri"] for t, c in seq if t > 3}
+        check(values == {0, 100}, "light %d: only fully off or fully on: %s" % (idx + 1, sorted(values)))
+
+
+def t_beatBlinkPaced():
+    """Beat-driven lights flash on every beat up to 120 BPM and on every other beat above it,
+    evenly, so the 2-a-second limit never has to hold a flash back."""
+    mode = next(m for m in shippedModes() if m.name == "Beat Blink")
+    for bpm, every in ((100, 1), (128, 2)):
+        fs = au.Analyzer().analyze(clicks(bpm, 12)[0])
+        beats = len([b for b in beatTimes(fs) if 3 < b < 11.5])
+        seq = [(t, c["bri"]) for t, c in play(mode, fs)[2] if 3 < t < 11.5]
+        rises = [t for (t0, a), (t, b) in zip(seq, seq[1:]) if a == 0 and b > 0]
+        gaps = [b - a for a, b in zip(rises, rises[1:])]
+        check(abs(len(rises) - beats / every) <= 1.5 and gaps and max(gaps) - min(gaps) < 0.15,
+              "%d BPM: a flash every %d beat(s): %d flashes for %d beats, gaps %s" % (bpm, every, len(rises), beats, [round(g, 2) for g in gaps]))
+
+
+def t_brightnessCurve():
+    """curve spends more of the movement at the dim end: the same music sits lower with 2 than
+    with 1; it must be 1 to 3."""
+    base = next(m for m in shippedModes() if m.name == "Pulse")
+    fs = au.Analyzer().analyze(kickHats(128, 8))
+    mean = {}
+    for curve in (1.0, 2.0):
+        m, errors = show.soundModeWithParams(base, {"curve": curve})
+        check(m is not None, str(errors))
+        vals = [c["bri"] for t, c in play(m, fs)[3] if t > 2]
+        mean[curve] = sum(vals) / len(vals)
+    check(mean[2.0] < mean[1.0] - 5, "lower with curve 2: %s" % mean)
+    check(show.soundModeWithParams(base, {"curve": 4})[0] is None, "curve over 3 is refused")
+
+
 def t_warmGlowIsWhiteOnly():
     mode = [m for m in shippedModes() if m.name == "Warm Glow"][0]
     for idx, s in play(mode, au.Analyzer().analyze(kickHats(110, 6))).items():
@@ -643,7 +687,7 @@ def t_songFiles():
 
 TESTS = [t_tempoOfClickTracks, t_tempoOfDrumPattern, t_tempoChange, t_bandsAndCentroid, t_silenceAndGaps,
          t_levelIsRelative, t_shippedModesValid, t_shippedModesUnderFlashLimit, t_modesMoveWithTheMusic,
-         t_modesAimAtRoles, t_beatChase, t_warmGlowIsWhiteOnly, t_silenceSettlesAtTheFloor, t_modeValidation,
+         t_modesAimAtRoles, t_beatChase, t_hardModesSnap, t_beatBlinkPaced, t_brightnessCurve, t_warmGlowIsWhiteOnly, t_silenceSettlesAtTheFloor, t_modeValidation,
          t_docExamplesValidate, t_colourCycle, t_voices, t_retryNow, t_silenceMeansFloor, t_songAnalysis, t_songRiser, t_externalSections, t_songFiles]
 
 

@@ -8,9 +8,9 @@
     "cool"
   ],
   "sensitivity": 1.0,
-  "floor": 20,
-  "ceiling": 60,
-  "smoothing": 0.7,
+  "floor": 6,
+  "ceiling": 75,
+  "smoothing": 0.75,
   "palette": [
     {
       "hue": 95,

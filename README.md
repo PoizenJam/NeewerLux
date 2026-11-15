@@ -112,7 +112,7 @@ Five starter sequences ship alongside the example: an intro build, an outro wind
 
 **+New** or **Edit** on the Sequences tab opens the timeline editor: one track per light, in sweep order, with each cue drawn on the tracks of the lights it drives (a cue aimed at several lights shows on each, with a dashed outline, and moves as one). A thin band under each track shows what that light will really do, with its limits and the CCT-only conversion applied.
 
-Double-click a track to add a cue there (it starts from the colour the light already has). Drag a cue to move it, its right edge to change its length, and the notch at its top to change its fade; Ctrl or Shift selects several. Snap to a time grid or, with a tempo set, to beats, half beats or bars. The panel on the right edits the selected cue: start, which lights, colour or clip, fade, length and label. Undo and redo, copy and paste at the playhead, and duplicate all have the usual shortcuts, and Space plays.
+Double-click a track to add a cue there (it starts from the colour the light already has). Drag a cue to move it, its right edge to change its length, and the notch at its top to change its fade; Ctrl or Shift selects several. Snap to a time grid or, with a tempo set, to beats, half beats or bars (a sequence that has a tempo, such as a song draft, opens snapping to beats). The panel on the right edits the selected cue: start, which lights, colour or clip, fade, length and label. Undo and redo, copy and paste at the playhead, and duplicate all have the usual shortcuts, and Space plays.
 
 With a tempo set, **Change tempo...** sets a new one and can move and stretch every cue so it stays on its beat. Song sections, when a sequence has them, show as a coloured row above the ruler.
 

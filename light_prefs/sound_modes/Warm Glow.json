@@ -9,9 +9,9 @@
     "white"
   ],
   "sensitivity": 1.0,
-  "floor": 25,
-  "ceiling": 60,
-  "smoothing": 0.7,
+  "floor": 10,
+  "ceiling": 70,
+  "smoothing": 0.85,
   "palette": [
     {
       "temp": 2900

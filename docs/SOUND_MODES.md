@@ -61,7 +61,8 @@ Every 21 ms or so NeewerLux measures:
 | `range_db` | no | 6 to 30 (18) | How far under the loudest recent moment counts as 0, in dB: the smaller, the further the lights swing for the same music. 30 uses the analysis as it is. |
 | `floor` | no | 0 to 100 (10) | Brightness, percent, when the driving value is 0. When the sound stops, every light settles exactly here (a chase's lit light too), easing down at the `smoothing` speed. |
 | `ceiling` | no | 0 to 100 (75) | Brightness at full. Not below `floor`. |
-| `smoothing` | no | 0 to 1 (0.5) | How slowly lights fall back and colours drift: 0 is quick (about 0.1 s), 1 is slow (about 1.6 s). Rises are always quick (60 ms). |
+| `smoothing` | no | 0 to 1 (0.5) | How slowly lights fall back and colours drift: 0 is a hard cut (lights snap straight to each new value, up and down), 1 is slow (about 1.6 s). Rises take up to 60 ms, less as smoothing goes towards 0. Low for dramatic modes, high for subtle ones. |
+| `curve` | no | 1 to 3 (2) | How brightness follows the driving value between `floor` and `ceiling`: `floor + (ceiling - floor) * value ^ curve`. Eyes notice a change at the dim end far more than near full, so 2 spends most of the movement low, where it shows; 1 is straight. On and off (0 and 1) are the same at any curve. |
 | `fps` | no | 1 to 30 | Updates a second. Default: the Sequence frame rate in Global Preferences (20). |
 | `palette` | no | list | Colours, either all `{"hue": 0-360, "sat": 0-100}` or all `{"temp": 2700-10000}` (Kelvin). Default: one blue. The parts pick from it (below). |
 | `cycle_s` | no | seconds (20) | How long a part with colour `cycle` takes to go round the whole palette. At least 4, and at least one second per palette colour, so a cycle drifts rather than flashes. |
@@ -73,9 +74,9 @@ Each part:
 | Field | Required | Values | Meaning |
 |---|---|---|---|
 | `target` | yes | light target | Which lights, as anywhere else: `@rim`, `@background.left`, `@back.high`, `1;3`, `@all`, joined with `;`. Listed in sweep order. |
-| `drive` | no | `level` (default), `low`, `mid`, `high`, `beat` | What sets the brightness. `beat` jumps to full on each beat and falls back by `smoothing`. |
+| `drive` | no | `level` (default), `low`, `mid`, `high`, `beat` | What sets the brightness. `beat` is full for half a beat from each beat, then falls back by `smoothing` (at once at 0); above 120 BPM it flashes on every other beat instead, evenly, since a flash on every beat would pass 2 a second. |
 | `colour` | no | palette index (0), `cycle`, `beat`, `centroid` | A fixed palette colour; `cycle`: round the palette and back to its first colour over `cycle_s`, blending between colours (a palette of one colour goes once round the colour wheel, keeping its saturation; one white stays put); `beat`: the next palette colour on each step, blended over 0.4 s; `centroid`: a colour along the palette set by the centroid (first entry for bass-heavy sound, last for bright). |
-| `chase` | no | `true` / `false` (false) | Step through the part's lights one at a time on the beat (every other beat above 150 BPM): the current light rises, the others fall back. The brightest step scales with the level; in silence the lit light falls to the floor too. |
+| `chase` | no | `true` / `false` (false) | Step through the part's lights one at a time on the beat (every other beat above 150 BPM): the current light rises, the others fall back. With `drive` `beat` each step is lit fully (to the ceiling); with any other drive the step is brighter for louder music. In silence the lit light falls to the floor too. |
 | `floor`, `ceiling` | no | 0 to 100 | This part's own brightness range. |
 
 Hue blends take the short way round the colour wheel. Avoid palettes that cross saturated red (hues within 20 of 0) back and forth: changes to and from saturated red count as flashes.

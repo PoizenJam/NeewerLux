@@ -382,6 +382,7 @@ handbackFadeMs = 500      # fade when a layer hands a light back (effect ends, s
 soundMode = "Pulse"       # the sound mode last started, and the capture device ("" = what the default output plays)
 soundDevice = ""
 songSectionCommand = ""   # another section finder to run on songs (Global Preferences only: it runs a program)
+songFinderNames = False   # name sections with that finder's labels instead of NeewerLux's
 stageView = "plan"        # the desktop Stage window's view, and its size and place ("x,y,w,h"), remembered
 stageGeometry = ""
 fadeInMs = 0              # fade when a preset, animation or sequence takes lights over; 0 = cut (each can set its own)
@@ -1602,7 +1603,7 @@ try: # try to load the GUI
             self.seqRefreshList()
 
         # ---------------------------------------------------------------- SOUND TAB
-        SOUND_EDITABLE = ("sensitivity", "range_db", "floor", "ceiling", "smoothing", "palette", "cycle_s", "parts")
+        SOUND_EDITABLE = ("sensitivity", "range_db", "floor", "ceiling", "smoothing", "curve", "palette", "cycle_s", "parts")
         SOUND_TARGETS = ["@rim;@background;@practical", "@all", "@key", "@fill", "@rim", "@background", "@practical",
                          "@front", "@back", "@left", "@right", "@high", "@low"]
         SOUND_DRIVES = [("level", "Level"), ("low", "Bass"), ("mid", "Mids"), ("high", "Treble"), ("beat", "Beat")]
@@ -1674,7 +1675,8 @@ try: # try to load the GUI
             d = self._soundDraft
             self.soundDescLabel.setText(d.get("description", "") + ("\nTags: " + ", ".join(d["tags"]) if d.get("tags") else ""))
             values = {"sensitivity": int(round(d.get("sensitivity", 1.0) * 100)), "range_db": int(round(d.get("range_db", 18))),
-                      "floor": d.get("floor", 10), "ceiling": d.get("ceiling", 75), "smoothing": int(round(d.get("smoothing", 0.5) * 100))}
+                      "floor": d.get("floor", 10), "ceiling": d.get("ceiling", 75), "smoothing": int(round(d.get("smoothing", 0.5) * 100)),
+                      "curve": int(round(d.get("curve", show.SOUND_DEFAULT_CURVE) * 10))}
             for key, (slider, label) in self.soundSliders.items():
                 slider.setValue(values[key])
                 label.setText(self._soundValueText(key, values[key]))
@@ -1688,13 +1690,13 @@ try: # try to load the GUI
 
         def _soundValueText(self, key, v):
             return {"sensitivity": "%d%%" % v, "range_db": "%d dB" % v, "floor": "%d%%" % v,
-                    "ceiling": "%d%%" % v, "smoothing": "%d%%" % v}[key]
+                    "ceiling": "%d%%" % v, "smoothing": "%d%%" % v, "curve": "x%.1f" % (v / 10.0)}[key]
 
         def soundSliderMoved(self, key, v):
             self.soundSliders[key][1].setText(self._soundValueText(key, v))
             if self._soundLoading or self._soundDraft is None:
                 return
-            value = v / 100.0 if key in ("sensitivity", "smoothing") else v
+            value = v / 100.0 if key in ("sensitivity", "smoothing") else v / 10.0 if key == "curve" else v
             changes = {key: value}
             floor, ceiling = self.soundSliders["floor"][0], self.soundSliders["ceiling"][0]
             if key == "floor" and v > ceiling.value():
@@ -3168,6 +3170,7 @@ try: # try to load the GUI
                 self.handbackFadeSpin.setValue(handbackFadeMs)
                 self.fadeInSpin.setValue(fadeInMs)
                 self.songSectionCommandField.setText(songSectionCommand)
+                self.songFinderNamesCheck.setChecked(songFinderNames)
                 self.simulatedLightsCombo.setCurrentIndex(simulatedLights)
                 self.simulatedCCTOnlyCheck.setChecked(simulatedCCTOnly)
                 self.maxNumOfAttempts_field.setText(str(maxNumOfAttempts))
@@ -3227,6 +3230,7 @@ try: # try to load the GUI
                 self.handbackFadeSpin.setValue(500)
                 self.fadeInSpin.setValue(0)
                 self.songSectionCommandField.setText("")
+                self.songFinderNamesCheck.setChecked(False)
                 self.simulatedLightsCombo.setCurrentIndex(0)
                 self.simulatedCCTOnlyCheck.setChecked(False)
                 self.maxNumOfAttempts_field.setText("6")
@@ -3259,7 +3263,7 @@ try: # try to load the GUI
 
         def saveGlobalPrefs(self):
             # change these global values to the new values in Prefs
-            global customKeys, autoConnectToLights, printDebug, rememberLightsOnExit, rememberPresetsOnExit, autoReconnectOnDisconnect, maxNumOfAttempts, acceptable_HTTP_IPs, whiteListedMACs, hideConsoleOnLaunch, minimizeToTrayOnClose, httpAutoStart, httpPort, cctFallbackMode, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, globalCCTMin, globalCCTMax, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, cctFallbackMode, envMaxBri, envMinBri, seqFrameRate, effectMaxSeconds, simulatedLights, simulatedCCTOnly, flashGuardEnabled, cameraPosition, eyelineFlash, handbackFadeMs, fadeInMs, songSectionCommand
+            global customKeys, autoConnectToLights, printDebug, rememberLightsOnExit, rememberPresetsOnExit, autoReconnectOnDisconnect, maxNumOfAttempts, acceptable_HTTP_IPs, whiteListedMACs, hideConsoleOnLaunch, minimizeToTrayOnClose, httpAutoStart, httpPort, cctFallbackMode, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, globalCCTMin, globalCCTMax, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, cctFallbackMode, envMaxBri, envMinBri, seqFrameRate, effectMaxSeconds, simulatedLights, simulatedCCTOnly, flashGuardEnabled, cameraPosition, eyelineFlash, handbackFadeMs, fadeInMs, songSectionCommand, songFinderNames
 
             finalPrefs = [] # list of final prefs to merge together at the end
 
@@ -3412,6 +3416,9 @@ try: # try to load the GUI
             songSectionCommand = self.songSectionCommandField.text().strip()
             if songSectionCommand:
                 finalPrefs.append("songSectionCommand=" + songSectionCommand)
+            songFinderNames = self.songFinderNamesCheck.isChecked()
+            if songFinderNames:
+                finalPrefs.append("songFinderNames=1")
 
             # Simulated lights take effect at the next start (the light list isn't rebuilt live)
             simulatedLights = self.simulatedLightsCombo.currentIndex()
@@ -7748,6 +7755,11 @@ def analyzeSongFile(path, bpm=None, offsetMs=None):
         if segments is None:
             notes.append(why + "; sections are from the built-in analysis")
     result = audio.analyzeSong(samples, sr, bpm=bpm or None, offsetMs=offsetMs, segments=segments)
+    if segments and songFinderNames:
+        for sec in result["sections"]:
+            if sec.get("ai_label"):
+                # NeewerLux's name stays as the kind, which draft styles go by
+                sec["kind"], sec["label"] = sec["label"], sec["ai_label"][:1].upper() + sec["ai_label"][1:]
     result.update({"success": True, "errors": [], "warnings": notes, "sections_from": "command" if segments else "analysis",
                    "song": os.path.splitext(os.path.basename(path))[0]})
     return result
@@ -8434,7 +8446,7 @@ def setSoundDevice(device):
 
 def _soundParams(mode):
     return {"sensitivity": mode.sensitivity, "range_db": mode.rangeDb, "floor": mode.floor, "ceiling": mode.ceiling,
-            "smoothing": mode.smoothing, "cycle_s": mode.cycleS, "fps": mode.fps, "palette": mode.palette}
+            "smoothing": mode.smoothing, "curve": mode.curve, "cycle_s": mode.cycleS, "fps": mode.fps, "palette": mode.palette}
 
 
 def soundModeOfLights():
@@ -9960,7 +9972,7 @@ def loadPrefsFile(globalPrefsFile = ""):
            rememberLightsOnExit, acceptable_HTTP_IPs, customKeys, enableTabsOnLaunch, \
            whiteListedMACs, rememberPresetsOnExit, autoReconnectOnDisconnect, livePreview, hideConsoleOnLaunch, minimizeToTrayOnClose, httpAutoStart, httpPort, cctFallbackMode, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, \
            envMaxBri, envMinBri, seqFrameRate, effectMaxSeconds, simulatedLights, simulatedCCTOnly, flashGuardEnabled, \
-           cameraPosition, eyelineFlash, handbackFadeMs, fadeInMs, stageView, stageGeometry, soundMode, soundDevice, songSectionCommand
+           cameraPosition, eyelineFlash, handbackFadeMs, fadeInMs, stageView, stageGeometry, soundMode, soundDevice, songSectionCommand, songFinderNames
 
     if globalPrefsFile != "":
         printDebugString("Loading global preferences from file...")
@@ -9975,7 +9987,7 @@ def loadPrefsFile(globalPrefsFile = ""):
             "SC_Dec_1_Large", "SC_Inc_1_Large", "SC_Dec_2_Large", "SC_Inc_2_Large", "SC_Dec_3_Large", "SC_Inc_3_Large", \
             "enableTabsOnLaunch", "whiteListedMACs", "rememberPresetsOnExit", "autoReconnectOnDisconnect", "hideConsoleOnLaunch", "minimizeToTrayOnClose", "livePreview", "httpAutoStart", "httpPort", "cctFallbackMode", "enableLogTab", "logToFile", "logHeartbeat", "globalCCTMin", "globalCCTMax", \
             "envMaxBri", "envMinBri", "seqFrameRate", "effectMaxSeconds", "simulatedLights", "simulatedCCTOnly", "flashGuard", \
-            "cameraPosition", "eyelineFlash", "handbackFadeMs", "fadeInMs", "stageView", "stageGeometry", "soundMode", "soundDevice", "songSectionCommand"]
+            "cameraPosition", "eyelineFlash", "handbackFadeMs", "fadeInMs", "stageView", "stageGeometry", "soundMode", "soundDevice", "songSectionCommand", "songFinderNames"]
 
         # KICK OUT ANY PARAMETERS THAT AREN'T IN THE "ACCEPTABLE ARGUMENTS" LIST ABOVE
         # THIS SECTION OF CODE IS *SLIGHTLY* DIFFERENT THAN THE CLI KICK OUT CODE
@@ -10025,6 +10037,7 @@ def loadPrefsFile(globalPrefsFile = ""):
     prefsParser.add_argument("--soundMode", default="Pulse")
     prefsParser.add_argument("--soundDevice", default="")
     prefsParser.add_argument("--songSectionCommand", default="")
+    prefsParser.add_argument("--songFinderNames", default="0")
     prefsParser.add_argument("--seqFrameRate", default=20)
     prefsParser.add_argument("--effectMaxSeconds", default=30)
     prefsParser.add_argument("--simulatedLights", default=0)
@@ -10110,6 +10123,7 @@ def loadPrefsFile(globalPrefsFile = ""):
     soundMode = str(mainPrefs.soundMode or "Pulse")
     soundDevice = str(mainPrefs.soundDevice or "")
     songSectionCommand = str(mainPrefs.songSectionCommand or "").strip()
+    songFinderNames = str(mainPrefs.songFinderNames) == "1"
 
     if type(mainPrefs.acceptableIPs) is not list: # we have a string in the return, so we need to post-process it
         acceptable_HTTP_IPs = mainPrefs.acceptableIPs.replace(" ", "").split(";") # split the IP addresses into a list for acceptable IPs

@@ -9,9 +9,9 @@
     "retro"
   ],
   "sensitivity": 1.0,
-  "floor": 20,
-  "ceiling": 65,
-  "smoothing": 0.7,
+  "floor": 6,
+  "ceiling": 75,
+  "smoothing": 0.75,
   "cycle_s": 30,
   "palette": [
     {

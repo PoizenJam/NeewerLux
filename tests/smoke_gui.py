@@ -56,6 +56,17 @@ def checkWorkerUsesGuiThread(nl, app, win):
     print("worker to GUI on signals: PASS")
 
 
+SMALL_SCREEN = (1280, 720)  # every window must fit a screen this size
+
+
+def tooBig(widget):
+    """Whether a window can't be made small enough for SMALL_SCREEN."""
+    widget.ensurePolished()
+    hint, least = widget.minimumSizeHint(), widget.minimumSize()
+    w, h = max(hint.width(), least.width()), max(hint.height(), least.height())
+    return (w, h) if w > SMALL_SCREEN[0] or h > SMALL_SCREEN[1] else None
+
+
 def fixedTables(widget):
     """Tables in widget whose columns the user can't drag (none Interactive), or with a stretching
     column, which makes each divider move the one to its left."""
@@ -97,10 +108,12 @@ def checkSoundTab(nl, app, win, rig):
     player = nl.showEngine.soundPlayer()
     win.soundSliders["sensitivity"][0].setValue(250)
     win.soundSliders["range_db"][0].setValue(10)
-    win.soundSliders["floor"][0].setValue(80)  # past the ceiling: carries it along
+    win.soundSliders["floor"][0].setValue(90)  # past the ceiling: carries it along
     assert player.mode.sensitivity == 2.5 and player.mode.rangeDb == 10, "sliders apply live"
-    assert player.mode.floor == 80 and player.mode.ceiling == 80, (player.mode.floor, player.mode.ceiling)
+    assert player.mode.floor == 90 and player.mode.ceiling == 90, (player.mode.floor, player.mode.ceiling)
     win.soundSliders["floor"][0].setValue(20)
+    win.soundSliders["curve"][0].setValue(15)
+    assert player.mode.curve == 1.5 and win.soundSliders["curve"][1].text() == "x1.5", "the curve slider applies live"
     hueSpin = win.soundPaletteBox.itemAt(0).widget().findChildren(nl.SpinBoxWithButtons)[0]
     hueSpin.setValue(120)
     assert player.mode.palette[0]["hue"] == 120, "palette edits apply live"
@@ -254,7 +267,8 @@ def main():
     stage.resize(200, 100)  # smaller than it can be: the minimum size must win
     app.processEvents()
     tileW, swatchH, gap, line, sline = stage.view._geometry()
-    assert stage.view.height() >= swatchH + line + 2 * sline, "Stage view is shorter than one tile"
+    scale = stage.view._scale()  # the grid views shrink to fit, to half size at most
+    assert stage.view.height() >= (swatchH + line + 2 * sline) * scale, "Stage view is shorter than one tile"
     fm = QFontMetrics(stage.view._smallFont())
     assert tileW >= fm.horizontalAdvance("Background  HSI 100%"), "detail line doesn't fit the tile"
     stage.resize(stage.view.sizeHint().width() + 20, stage.view.sizeHint().height() + 60)
@@ -283,6 +297,16 @@ def main():
     stage.grab().save(shotH)
     print("stage height screenshot:", shotH)
     stage.viewCombo.setCurrentIndex(0)
+    full = stage.view.sizeHint()
+    stage.resize(int(full.width() * 0.6), int(full.height() * 0.6) + 60)
+    app.processEvents()
+    s = stage.view._scale()
+    n, x, y = stage.view._layout()[0]
+    from PySide6.QtCore import QPoint
+    hit = stage.view._tileAt(QPoint(int((x + 10) * s), int((y + 10) * s)))
+    assert s < 0.8 and not tooBig(stage) and hit is stage.view.tiles[n], \
+        "the plan shrinks to fit a small window and hovering still finds the tile: scale %.2f, %s" % (s, tooBig(stage))
+    stage.grab().save(os.path.join(rig.workdir, "stage_small.png"))
     stage.timer.start(50)
     win._updateShowStatus()
     swatch = win.lightTable.item(0, 0).data(nl.Qt.DecorationRole)
@@ -378,6 +402,7 @@ def main():
 
     def inspect(dlg):
         seen.append(dlg.windowTitle())
+        assert not tooBig(dlg), "%s fits a %dx%d screen: its minimum is %s" % ((dlg.windowTitle(),) + SMALL_SCREEN + (tooBig(dlg),))
         native.extend(nativeSpins(dlg))
         assert not fixedTables(dlg), "%s: every table's columns can be dragged: %s" % (dlg.windowTitle(), fixedTables(dlg))
         if dlg.windowTitle().startswith("Edit Preset"):
@@ -396,6 +421,7 @@ def main():
         {"hold_ms": 100, "fade_ms": 0, "lights": {"*": {"mode": "HSI", "hue": 0, "sat": 100, "bri": 50}}}]}, "Spin")
     native.extend(nativeSpins(ed))
     assert not fixedTables(ed), "animation editor: every table's columns can be dragged"
+    assert not tooBig(ed), "the animation editor fits a small screen: %s" % (tooBig(ed),)
     ed.close()
     native.extend(nativeSpins(SequenceSettingsDialog({"name": "x"}, 8, win)))
     from neewerlux_timeline import SequenceEditor
@@ -403,12 +429,14 @@ def main():
     app.processEvents()
     for w in app.topLevelWidgets():
         if isinstance(w, SequenceEditor):
+            assert not tooBig(w), "the sequence editor fits a small screen: %s" % (tooBig(w),)
             native.extend(nativeSpins(w))
             native.extend(nativeSpins(w._tempoDialog()))
             w.close()
     from neewerlux_timeline import SongDraftDialog
     assert win.seqFromSongButton.text() == "From song..."
     songDialog = SongDraftDialog(nl.SongDraftHost(), win)
+    assert not tooBig(songDialog) and not tooBig(win), "the song dialog and the main window fit a small screen: %s %s" % (tooBig(songDialog), tooBig(win))
     native.extend(nativeSpins(songDialog))
     songDialog.close()
     assert not native, "spin boxes with Qt arrows or no room for text (use SpinBoxWithButtons or hideSpinArrows): %r" % native

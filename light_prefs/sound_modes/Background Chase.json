@@ -9,8 +9,8 @@
     "cool"
   ],
   "sensitivity": 1.0,
-  "floor": 10,
-  "ceiling": 75,
+  "floor": 0,
+  "ceiling": 100,
   "smoothing": 0.0,
   "palette": [
     {
@@ -33,14 +33,14 @@
       "colour": "beat",
       "chase": true,
       "floor": 0,
-      "ceiling": 80
+      "ceiling": 100
     },
     {
       "target": "@rim",
       "drive": "level",
       "colour": 2,
-      "floor": 15,
-      "ceiling": 60
+      "floor": 5,
+      "ceiling": 65
     }
   ]
 }

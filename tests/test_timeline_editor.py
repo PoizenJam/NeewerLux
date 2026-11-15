@@ -357,6 +357,11 @@ def main():
         check(ed is not None and ed.seq["tempo"]["bpm"] == round(half, 2) and ed.seq["sections"] and ed.dirty, "the draft opens unsaved in the editor")
         check(ed.seq["name"] == "Test Song" and "Neon" in ed.seq["description"], ed.seq.get("description"))
         check(not any("key" in c["target"] for c in ed.seq["cues"]), "never the key")
+        plain = win.seqOpenEditor(sequence={"format": 1, "name": "No Tempo", "duration_ms": 5000, "cues": []})
+        check(ed.snapCombo.currentData() == -1 and plain.snapCombo.currentData() == 100,
+              "a sequence with a tempo snaps to beats, one without to 100 ms")
+        plain.dirty = False
+        plain.close()
         ed.grab().save(os.path.join(rig.workdir, "editor_draft.png"))
         RESULTS.append(("INFO", "screenshot", os.path.join(rig.workdir, "editor_draft.png")))
         ed.dirty = False

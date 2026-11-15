@@ -8,8 +8,8 @@
     "moody"
   ],
   "sensitivity": 1.0,
-  "floor": 15,
-  "ceiling": 70,
+  "floor": 5,
+  "ceiling": 85,
   "smoothing": 0.5,
   "palette": [
     {
