@@ -34,7 +34,16 @@ except ImportError:
                                    QSplitter, QStackedWidget, QMessageBox, QMenu, QDialog, QDialogButtonBox,
                                    QInputDialog, QSizePolicy, QFrame, QTextEdit, QShortcut, QFileDialog, QScrollArea)
 
-SEQ_PREVIEW_SHARE = 0.35  # most of the sequence editor's height the Stage preview may take
+class _FillColumn(QWidget):
+    """A scrolled column that takes the scroll area's height. A wrapping label inside gives its
+    layout a height-for-width, and the scroll area sizes such a widget by heightForWidth, which
+    would be the column's preferred height, leaving nothing over for the part that stretches;
+    answering with the minimum lets the scroll area fill the view instead."""
+
+    def heightForWidth(self, width):
+        return self.minimumSizeHint().height()
+
+
 SNAP_CHOICES = [("No snap", 0), ("10 ms", 10), ("50 ms", 50), ("100 ms", 100), ("250 ms", 250),
                 ("500 ms", 500), ("1 s", 1000), ("Beat", -1), ("Half beat", -2), ("Bar (4 beats)", -4)]
 UNDO_LIMIT = 200
@@ -1090,7 +1099,7 @@ class SequenceEditor(QWidget):
 
         # --- timeline + properties
         split = QSplitter(Qt.Horizontal)
-        left = QWidget()
+        left = _FillColumn()
         leftLay = QVBoxLayout(left)
         leftLay.setContentsMargins(0, 0, 0, 0)
         leftLay.setSpacing(0)
@@ -1118,8 +1127,10 @@ class SequenceEditor(QWidget):
         leftLay.addLayout(previewRow)
         self.stage = StageView(self)
         self.viewCombo.currentIndexChanged.connect(lambda i: self.stage.setViewMode(["plan", "height", "strip"][i]))
-        leftLay.addWidget(self.stage)
-        leftLay.addStretch(1)
+        # the preview takes whatever height the tracks leave, its grid scaling to fit (the tracks
+        # keep their own height; when the window is short the column scrolls)
+        self.stage.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        leftLay.addWidget(self.stage, 1)
         # both sides scroll when the window is short, so the tracks, preview and properties
         # don't set its minimum height
         leftScroll = QScrollArea()
@@ -1185,12 +1196,6 @@ class SequenceEditor(QWidget):
         QTimer.singleShot(0, self.view.zoomToFit)
 
     # --- properties panel ----------------------------------------------------
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        # the preview takes about a third of the window's height, its grid shrinking to fit, so
-        # the tracks keep most of the room
-        self.stage.setMaximumHeight(max(self.stage.minimumHeight(), int(self.height() * SEQ_PREVIEW_SHARE)))
-
     def _buildProperties(self):
         panel = QWidget()
         panel.setMinimumWidth(260)

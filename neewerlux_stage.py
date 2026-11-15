@@ -31,7 +31,8 @@ PLAN_DEPTHS = ["front", "beside", "back"]     # plan rows: front (towards the ca
 HEIGHT_ROWS = ["high", "middle", "low"]       # height view rows, top to bottom
 HEIGHT_LEVEL = {"low": 1, "middle": 2, "high": 3}
 VIEW_MODES = ["plan", "height", "strip"]
-STAGE_MIN_SCALE = 0.5  # the plan and height grids shrink to fit, down to half size
+STAGE_MIN_SCALE = 0.5  # the plan and height grids shrink to fit, down to half size,
+STAGE_MAX_SCALE = 1.5  # and grow to fill the room they have, up to one and a half times
 # where a light points, as (dx, dy) on the plan (front is up); "you" is worked out per light
 AIM_VECTORS = {"front": (0, -1), "front-right": (1, -1), "right": (1, 0), "back-right": (1, 1),
                "back": (0, 1), "back-left": (-1, 1), "left": (-1, 0), "front-left": (-1, -1)}
@@ -158,11 +159,11 @@ class StageView(QWidget):
         self.updateGeometry()
 
     def _scale(self):
-        """How far the grid views are shrunk to fit the widget (1 when there's room)."""
+        """How far the grid views are scaled to fill the widget."""
         if self.viewMode == "strip":
             return 1.0
         w, h = self._gridSize()
-        return max(STAGE_MIN_SCALE, min(1.0, self.width() / float(w or 1), self.height() / float(h or 1)))
+        return max(STAGE_MIN_SCALE, min(STAGE_MAX_SCALE, self.width() / float(w or 1), self.height() / float(h or 1)))
 
     def _rows(self):
         return PLAN_DEPTHS if self.viewMode == "plan" else HEIGHT_ROWS
@@ -275,7 +276,7 @@ class StageView(QWidget):
             p.drawText(self.rect(), Qt.AlignCenter, "No lights yet")
             return
         scale = self._scale()
-        if scale < 1.0:
+        if scale != 1.0:
             p.scale(scale, scale)
         tileW, swatchH, gap, line, sline = self._geometry()
         cw, ch = self._cell()
