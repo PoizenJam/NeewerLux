@@ -556,6 +556,10 @@ def main():
         check(abs(got["bpm"] - 128) < 0.3 and got["name"] == "Web Song" and got["secs"] >= 1, "analysis in the dialog: %s" % got)
         spin(200)
         view.grab().save(os.path.join(rig.workdir, "webui_song.png"))
+        title = js(page, """const cv = document.getElementById('songCanvas'), r = cv.getBoundingClientRect(), s = songAnalysis.sections[0];
+                            cv.dispatchEvent(new MouseEvent('mousemove', {bubbles: true, clientX: r.left + (s.start_ms + s.end_ms) / 2 * r.width / songAnalysis.duration_ms, clientY: r.top + 5}));
+                            cv.title""")
+        check(title.startswith(json.loads(js(page, "JSON.stringify(songAnalysis.sections[0].label)")) + "\n") and "Level" in title, "hovering the song names the section: %r" % title)
         js(page, "songScale(0.5); document.getElementById('songStyle').value = 'Neon'; songStyleNote(); songDraft()")
         waitFor(page, "!!(tl && tl.render && tl.original === null && (tl.seq.sections || []).length && document.getElementById('tlModal').classList.contains('open'))", "the draft in the editor", timeout=15)
         seq = json.loads(js(page, "JSON.stringify(tl.seq)"))
@@ -565,6 +569,10 @@ def main():
         check(js(page, "document.getElementById('songModal').classList.contains('open')") is False, "the song dialog closes")
         spin(200)
         view.grab().save(os.path.join(rig.workdir, "webui_draft.png"))
+        title = js(page, """const cv = document.getElementById('tlCanvas'), r = cv.getBoundingClientRect(), m = tlMetrics(), s = tl.seq.sections[0];
+                            cv.dispatchEvent(new MouseEvent('mousemove', {bubbles: true, clientX: r.left + tlX((s.start_ms + s.end_ms) / 2), clientY: r.top + 4}));
+                            cv.title""")
+        check(title.startswith(seq["sections"][0]["label"] + "\n"), "hovering a section in the editor names it: %r" % title)
         # Change tempo: move and stretch the cues
         old = seq["tempo"]["bpm"]
         page.runJavaScript("window.prompt = () => '%s'; window.confirm = () => true" % (old * 2))

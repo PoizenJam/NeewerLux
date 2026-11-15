@@ -243,7 +243,7 @@ Response:
 | `{"action": "editor", "targets": ["@rim", "1;2"]}` | What a timeline editor needs: `lights` in sweep order (`index`, `id`, `name`, `role`, `side`, `depth`, `height`, `simulated`), `targets` (the light IDs each given target drives now), `choices` (target suggestions with labels), `animations` and `presets` (count) |
 | `{"action": "render", "name": "...", "step_ms": 50, "start_ms": 0, "end_ms": 60000}` | What each light would do, without playing: per-light colour changes and the cue list |
 | `{"action": "render", "name": "...", "format": "png", "width": 1600}` | The same as an image strip (`image/png`). Needs the desktop window; without it the reply is an error and the JSON render still works. |
-| `{"action": "analyze", "path": "C:\\Music\\Song.mp3"}` | Analyse a song file on the NeewerLux computer (WAV, FLAC, MP3, OGG, AIFF; needs the audio extras): `duration_ms`, `bpm`, `offset_ms` (first beat), `confidence` (the share of the song whose own tempo agrees; `null` when `bpm` was given), `beats` and `bars` (ms; bars start on each bar's first beat), `energy` (0 to 1 every `energy_step_ms`, 250), `waveform` (1200 peaks, 0 to 1), `sections` (`start_ms`, `end_ms`, `energy`, `level` 1 to 3, a suggested `label`) and `song` (the file name). Optional `"bpm"` and `"offset_ms"` replace the estimates. Assumes a steady tempo. |
+| `{"action": "analyze", "path": "C:\\Music\\Song.mp3"}` | Analyse a song file on the NeewerLux computer (WAV, FLAC, MP3, OGG, AIFF; needs the audio extras): `duration_ms`, `bpm`, `offset_ms` (first beat), `confidence` (the share of the song whose own tempo agrees; `null` when `bpm` was given), `beats` and `bars` (ms; bars start on each bar's first beat), `energy` (0 to 1 every `energy_step_ms`, 250), `waveform` (1200 peaks, 0 to 1), `sections` (`start_ms`, `end_ms`, `energy`, `level` 1 to 3, a suggested `label`: `Intro`, `Groove`, `Build`, `Drop`, `Breakdown` or `Outro`, see SEQUENCE_FORMAT.md) and `song` (the file name). Optional `"bpm"` and `"offset_ms"` replace the estimates. Assumes a steady tempo. |
 | `{"action": "draft", "analysis": {...}, "style": "Concert", "name": "My Song"}` | A first-draft sequence from an analysis (the `analyze` reply, or `"path"` to a song file instead): `{"sequence", "flashes", "warnings"}`, not saved unless `"save": true` (and `"overwrite": true` to replace one). Styles: `Subtle`, `Concert`, `Neon` (see SEQUENCE_FORMAT.md). Optional `"bpm"` and `"offset_ms"` (a bar's first beat) correct the tempo, moving sections to the nearest bar; `"artist"` and `"song"` are copied in. |
 
 The sequence format, targets, render output and timing rules are in [SEQUENCE_FORMAT.md](SEQUENCE_FORMAT.md).
@@ -251,6 +251,18 @@ The sequence format, targets, render output and timing rules are in [SEQUENCE_FO
 ### POST /NeewerLux/song
 
 The song file itself as the body (any `Content-Type`, up to 200 MB), for clients that don't share a disk with NeewerLux (the web dashboard uses it): `POST /NeewerLux/song?name=My%20Song.mp3`. `name` gives the format by its extension and the `song` name; optional `bpm` and `offset_ms` as in `analyze`. The reply is the same as the sequence `analyze` action. The file is analysed from a temporary copy that is removed afterwards; nothing is kept.
+
+From PowerShell, build JSON bodies with `ConvertTo-Json` rather than by hand: a Windows path written straight into a JSON string needs every backslash doubled (`C:\\Music\\Song.mp3`), and a single backslash gets `400 Invalid \escape`. Forward slashes (`C:/Music/Song.mp3`) also work.
+
+```powershell
+$body = @{ action = "analyze"; path = "C:\Music\Song.mp3" } | ConvertTo-Json
+$a = Invoke-RestMethod -Method Post -Uri http://localhost:8080/NeewerLux/sequence -ContentType application/json -Body $body
+$body = @{ action = "draft"; analysis = $a; style = "Concert"; name = "Song"; save = $true } | ConvertTo-Json -Depth 6
+Invoke-RestMethod -Method Post -Uri http://localhost:8080/NeewerLux/sequence -ContentType application/json -Body $body
+
+# Upload instead, when the file is on another computer
+Invoke-RestMethod -Method Post -Uri "http://localhost:8080/NeewerLux/song?name=Song.mp3" -InFile "C:\Music\Song.mp3"
+```
 
 ### POST /NeewerLux/sound
 

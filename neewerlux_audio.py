@@ -578,17 +578,27 @@ def _sections(feats, fps, bars, durationMs, energy, energyStep):
     secs = [_section(a, b, energy, energyStep) for a, b in zip(cuts[:-1], cuts[1:])]
     # intensity: loudness and busyness (onsets) together, so a loud pad without drums still
     # reads as a quiet passage
-    busy = []
+    busy, kick, trend = [], [], []
     for sec in secs:
         i, j = int(sec["start_ms"] * fps / 1000.0), max(int(sec["start_ms"] * fps / 1000.0) + 1, int(sec["end_ms"] * fps / 1000.0))
         busy.append(float(np.mean(feats["flux"][i:j])))
+        kick.append(float(np.mean(feats["lowflux"][i:j])))
+        a, b = int(sec["start_ms"] // energyStep), max(int(sec["start_ms"] // energyStep) + 3, int(sec["end_ms"] // energyStep))
+        e = energy[a:b]
+        third = max(1, len(e) // 3)
+        trend.append(float(np.mean(e[-third:]) - np.mean(e[:third])) if len(e) else 0.0)
     def rel(vals):
         lo, hi = min(vals), max(vals)
         return [(v - lo) / (hi - lo) if hi > lo else 0.5 for v in vals]
-    for sec, e, b in zip(secs, rel([sec["energy"] for sec in secs]), rel(busy)):
+    # kick against the song's typical section, so one pounding section doesn't make the rest look empty
+    typical = float(np.median(kick)) or 1e-9
+    for sec, e, b, k, t in zip(secs, rel([sec["energy"] for sec in secs]), rel(busy), [min(2.0, v / typical) for v in kick], trend):
         intensity = 0.5 * e + 0.5 * b
         sec["level"] = 1 if intensity < 0.34 else 3 if intensity > 0.66 else 2
+        sec["_kick"], sec["_trend"] = k, t
     _labelSections(secs)
+    for sec in secs:
+        del sec["_kick"], sec["_trend"]
     return secs
 
 
@@ -598,23 +608,36 @@ def _section(a, b, energy, energyStep):
     return {"start_ms": int(a), "end_ms": int(b), "energy": round(float(np.mean(vals)) if len(vals) else 0.0, 3)}
 
 
+SECTION_LABELS = ("Intro", "Groove", "Build", "Drop", "Breakdown", "Outro")
+
+
 def _labelSections(secs):
-    """Suggested names from the energy levels; only a starting point for a person to rename."""
+    """Suggested names from what changes between sections, not loudness alone: the Intro runs
+    until the beat comes in, a Breakdown loses the kick and bass, a Build rises into something
+    fuller, a Drop brings the kick back after a Breakdown or Build; everything else with a beat is
+    a Groove. Only a starting point."""
+    n = len(secs)
     for k, s in enumerate(secs):
-        nxt = secs[k + 1]["level"] if k + 1 < len(secs) else None
-        prv = secs[k - 1]["level"] if k > 0 else None
-        if k == 0 and len(secs) > 1 and s["level"] < 3:
+        prev = secs[k - 1] if k else None
+        nxt = secs[k + 1] if k + 1 < n else None
+        kick, trend = s["_kick"], s["_trend"]  # kick: 1 = as much as the song's typical section
+        if k == 0 and n > 1 and (kick < 0.7 or s["level"] < 3):
             s["label"] = "Intro"
-        elif k == len(secs) - 1 and len(secs) > 1 and s["level"] < 3:
+        elif k == n - 1 and n > 1 and (kick < 0.7 or s["level"] < 3 or trend < -0.15):
             s["label"] = "Outro"
-        elif s["level"] == 3:
-            s["label"] = "Chorus"
-        elif nxt == 3 and s["level"] == 2:
+        elif prev is not None and prev["label"] == "Intro" and kick < 0.7:
+            s["label"] = "Intro"  # the intro goes on, still without much beat
+        elif kick < 0.5 and (prev is None or prev["_kick"] - kick > 0.3):
+            s["label"] = "Breakdown"
+        elif nxt is not None and ((trend > 0.1 and nxt["_kick"] > kick + 0.25) or
+                                  (nxt["level"] > s["level"] and (trend > 0.05 or (prev is not None and prev["label"] == "Breakdown")))):
             s["label"] = "Build"
-        elif s["level"] == 1 and prv == 3:
-            s["label"] = "Break"
+        elif prev is not None and prev["label"] in ("Breakdown", "Build") and kick >= 0.8:
+            s["label"] = "Drop"
+        elif kick < 0.5:
+            s["label"] = "Breakdown"
         else:
-            s["label"] = "Verse"
+            s["label"] = "Groove"
 
 
 def _initComOnThisThread():

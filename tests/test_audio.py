@@ -520,7 +520,12 @@ def t_songAnalysis():
     chorus, quiet = bounds[1] + 8 * 4 * period, bounds[2] + 4 * 4 * period  # middle of the first chorus, of the break
     check(levelAt(chorus) == 3 and levelAt(quiet) <= 2 and levelAt(1000) == 1,
           "levels: chorus %d, drumless break %d, intro %d" % (levelAt(chorus), levelAt(quiet), levelAt(1000)))
-    check(a["sections"][0]["label"] == "Intro" and a["sections"][-1]["label"] == "Outro", str([s["label"] for s in a["sections"]]))
+    def labelAt(ms):
+        return next(s["label"] for s in a["sections"] if s["start_ms"] <= ms < s["end_ms"])
+    middle = lambda i: (bounds[i - 1] if i else 0) + ((bounds[i] if i < len(bounds) else a["duration_ms"]) - (bounds[i - 1] if i else 0)) / 2
+    labels = [labelAt(middle(i)) for i in range(6)]
+    check(labels == ["Intro", "Groove", "Groove", "Breakdown", "Drop", "Outro"], "named by what changes: %s" % labels)
+    check(all(s["label"] in au.SECTION_LABELS for s in a["sections"]), "only the documented names")
     check(all(0 <= v <= 1 for v in a["energy"]) and len(a["energy"]) == math.ceil(a["duration_ms"] / 250) or
           abs(len(a["energy"]) - a["duration_ms"] / 250) <= 1, "energy every 250 ms")
     check(len(a["waveform"]) == au.SONG_WAVEFORM_POINTS and max(a["waveform"]) == 1.0, "waveform")

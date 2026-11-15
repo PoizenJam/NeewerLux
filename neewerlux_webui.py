@@ -946,7 +946,7 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
     <div class="modal" style="width:min(920px, 95vw)">
         <h3 style="margin-top:0;color:var(--accent)">Draft a sequence from a song</h3>
         <div class="toolbar">Song <input type="file" id="songFile" accept=".wav,.flac,.mp3,.ogg,.aiff,.aif" onchange="songUpload(this.files[0])" title="WAV, FLAC, MP3, OGG or AIFF"></div>
-        <canvas id="songCanvas" style="width:100%;height:170px;display:block;background:#1a1a1e;border-radius:4px"></canvas>
+        <canvas id="songCanvas" style="width:100%;height:170px;display:block;background:#1a1a1e;border-radius:4px" onmousemove="songHover(event)"></canvas>
         <div id="songInfo" class="tl-hint">Choose a song file to analyse.</div>
         <div class="toolbar">
             Tempo <input type="number" id="songBpm" min="30" max="300" step="0.01" style="width:90px" oninput="songDraw()"> BPM
@@ -2446,7 +2446,7 @@ function tlDraw() {
         const colour = TL_SECTION_COLOURS[sec.level] || TL_SECTION_COLOURS[2];
         ctx.fillStyle = colour; ctx.fillRect(xa, 1, xb - xa - 1, secH - 2);
         if (tlX(a) >= labelW) { ctx.fillStyle = colour; for (let yy = rulerH; yy < H; yy += 6) ctx.fillRect(tlX(a), yy, 1, 3); }
-        if (xb - xa > 30) { ctx.save(); ctx.beginPath(); ctx.rect(xa, 0, xb - xa - 4, secH); ctx.clip(); ctx.fillStyle = '#f0f0f5'; ctx.fillText(sec.label || '', xa + 4, secH / 2); ctx.restore(); }
+        if (ctx.measureText(sec.label || '').width + 8 <= xb - xa) { ctx.fillStyle = '#f0f0f5'; ctx.fillText(sec.label || '', xa + 4, secH / 2); }  // whole names only; hover shows the rest
     });
     const xEnd = tlX(dur);
     if (xEnd < W) { ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(Math.max(labelW, xEnd), rulerH, W - Math.max(labelW, xEnd), H - rulerH); }
@@ -2622,6 +2622,13 @@ function tlSetSel(sel) {
         const d = tl.drag;
         if (!d) {
             if (ev.target !== cv) return;
+            const m = tlMetrics();
+            if (y < m.secH && x >= m.labelW) {
+                const sec = tlSectionAt(tl.seq.sections, tlMs(x));
+                cv.style.cursor = 'default';
+                cv.title = sec ? tlDescribeSection(sec) : '';
+                return;
+            }
             const hit = tlHitAt(x, y);
             cv.style.cursor = hit ? (hit.kind === 'end' ? 'ew-resize' : hit.kind === 'fade' ? 'col-resize' : 'grab') : 'default';
             cv.title = hit ? tlFmt(tl.seq.cues[hit.i].at_ms || 0, true) + '  ' + (tl.seq.cues[hit.i].target || '*') + '\n' + tlDescribe(tl.seq.cues[hit.i]) : '';
@@ -2855,6 +2862,12 @@ function tlDurationEdited() {
     tlChanged();
 }
 const TL_SECTION_COLOURS = {1: '#466ea0', 2: '#96783c', 3: '#be4678'};  // by energy level, as on the desktop
+const TL_LEVEL_NAMES = {1: 'quiet', 2: 'medium', 3: 'loud'};
+function tlSectionAt(sections, ms) { return (sections || []).find(s => (+s.start_ms || 0) <= ms && ms < (+s.end_ms || 0)) || null; }
+function tlDescribeSection(sec) {
+    const a = +sec.start_ms || 0, b = +sec.end_ms || 0, lv = +sec.level || 2;
+    return (sec.label || 'Section') + '\n' + tlFmt(a) + ' to ' + tlFmt(b) + ' (' + tlFmt(b - a) + ')\nLevel ' + lv + ' (' + (TL_LEVEL_NAMES[lv] || '') + ')';
+}
 
 // ---- draft from a song
 const SONG_STYLE_NOTES = {Subtle: 'Gentle colour changes between sections, arriving on their first beat. No pulses.',
@@ -2896,6 +2909,12 @@ function songSetAnalysis(d) {
     document.getElementById('songDraftBtn').disabled = false;
     songDraw();
 }
+function songHover(ev) {
+    const cv = document.getElementById('songCanvas'), a = songAnalysis;
+    if (!a) { cv.title = ''; return; }
+    const r = cv.getBoundingClientRect(), sec = tlSectionAt(a.sections, (ev.clientX - r.left) * a.duration_ms / r.width);
+    cv.title = sec ? tlDescribeSection(sec) : '';
+}
 function songScale(f) { const el = document.getElementById('songBpm'); el.value = Math.round(+el.value * f * 100) / 100; songDraw(); }
 function songDraw() {
     const cv = document.getElementById('songCanvas'), dpr = window.devicePixelRatio || 1;
@@ -2911,7 +2930,7 @@ function songDraw() {
     a.sections.forEach(sec => {
         ctx.fillStyle = TL_SECTION_COLOURS[sec.level] || TL_SECTION_COLOURS[2];
         ctx.fillRect(x(sec.start_ms), 0, x(sec.end_ms) - x(sec.start_ms) - 1, band);
-        ctx.fillStyle = '#f0f0f5'; ctx.fillText(sec.label || '', x(sec.start_ms) + 3, band / 2);
+        if (ctx.measureText(sec.label || '').width + 6 <= x(sec.end_ms) - x(sec.start_ms)) { ctx.fillStyle = '#f0f0f5'; ctx.fillText(sec.label || '', x(sec.start_ms) + 3, band / 2); }
     });
     const top = band + 4, mid = top + (H - top) / 2, half = (H - top - 4) / 2;
     ctx.fillStyle = '#5a5a69';

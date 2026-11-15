@@ -38,6 +38,19 @@ SNAP_CHOICES = [("No snap", 0), ("10 ms", 10), ("50 ms", 50), ("100 ms", 100), (
                 ("500 ms", 500), ("1 s", 1000), ("Beat", -1), ("Half beat", -2), ("Bar (4 beats)", -4)]
 UNDO_LIMIT = 200
 SECTION_COLOURS = {1: QColor(70, 110, 160), 2: QColor(150, 120, 60), 3: QColor(190, 70, 120)}  # by energy level
+LEVEL_NAMES = {1: "quiet", 2: "medium", 3: "loud"}
+
+
+def sectionAt(sections, ms):
+    return next((s for s in sections or [] if isinstance(s, dict) and s.get("start_ms", 0) <= ms < s.get("end_ms", 0)), None)
+
+
+def describeSection(sec):
+    """A section's name, times and level, for tooltips."""
+    a, b = int(sec.get("start_ms", 0)), int(sec.get("end_ms", 0))
+    level = int(sec.get("level", 2))
+    return "%s\n%s to %s (%s)\nLevel %d (%s)" % (sec.get("label") or "Section", fmtTime(a), fmtTime(b), fmtTime(b - a),
+                                                  level, LEVEL_NAMES.get(level, ""))
 
 
 # ============================================================================
@@ -335,9 +348,10 @@ class TimelineView(QWidget):
             if self.xFor(a) >= labelW:
                 p.setPen(QPen(colour, 1, Qt.DashLine))
                 p.drawLine(QPointF(self.xFor(a), rulerH), QPointF(self.xFor(a), H))
-            if xb - xa > fm.height() * 2:
+            label = str(sec.get("label", ""))
+            if fm.horizontalAdvance(label) + 8 <= xb - xa:  # whole names only; hover shows the rest
                 p.setPen(QColor(240, 240, 245))
-                p.drawText(QRectF(xa + 4, 0, xb - xa - 8, secH), Qt.AlignLeft | Qt.AlignVCenter, str(sec.get("label", "")))
+                p.drawText(QRectF(xa + 4, 0, xb - xa - 8, secH), Qt.AlignLeft | Qt.AlignVCenter, label)
 
         # past the end of the sequence
         xEnd = self.xFor(duration)
@@ -505,6 +519,12 @@ class TimelineView(QWidget):
         ed = self.editor
         d = self._drag
         if d is None:
+            fm = QFontMetrics(self.font())
+            if pos.y() < self.sectionsH(fm) and pos.x() >= self.metrics()[3]:
+                sec = sectionAt(ed.seq.get("sections"), self.msFor(pos.x()))
+                self.unsetCursor()
+                self.setToolTip(describeSection(sec) if sec else "")
+                return
             hit = self.hitAt(pos)
             if hit and hit[1] == "end":
                 self.setCursor(Qt.SizeHorCursor)
@@ -697,6 +717,13 @@ class SongView(QWidget):
         self.bpm, self.offsetMs = 0.0, 0
         self.setMinimumHeight(150)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.setMouseTracking(True)
+
+    def mouseMoveEvent(self, event):
+        a = self.analysis
+        x = event.position().x() if hasattr(event, "position") else event.x()
+        sec = sectionAt(a["sections"], x * a["duration_ms"] / max(1, self.width())) if a else None
+        self.setToolTip(describeSection(sec) if sec else "")
 
     def setAnalysis(self, analysis, bpm=None, offsetMs=None):
         self.analysis = analysis
@@ -718,12 +745,15 @@ class SongView(QWidget):
         dur = max(1, a["duration_ms"])
         xFor = lambda ms: ms * W / dur
         bandH = 16
+        fm = QFontMetrics(self.font())
         for sec in a["sections"]:
             colour = SECTION_COLOURS.get(sec.get("level", 2), SECTION_COLOURS[2])
             xa, xb = xFor(sec["start_ms"]), xFor(sec["end_ms"])
             p.fillRect(QRectF(xa, 0, xb - xa - 1, bandH), colour)
-            p.setPen(QColor(240, 240, 245))
-            p.drawText(QRectF(xa + 3, 0, max(0, xb - xa - 6), bandH), Qt.AlignLeft | Qt.AlignVCenter, sec.get("label", ""))
+            label = sec.get("label", "")
+            if fm.horizontalAdvance(label) + 6 <= xb - xa:  # whole names only; hover shows the rest
+                p.setPen(QColor(240, 240, 245))
+                p.drawText(QRectF(xa + 3, 0, xb - xa - 6, bandH), Qt.AlignLeft | Qt.AlignVCenter, label)
         top, mid = bandH + 4, bandH + 4 + (H - bandH - 4) / 2
         half = (H - bandH - 8) / 2
         wave = a["waveform"]

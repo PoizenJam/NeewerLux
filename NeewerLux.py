@@ -109,7 +109,7 @@ except Exception as e:
 
 # IMPORT THE GUI ITSELF
 try:
-    from neewerlux_ui import Ui_MainWindow, SpinBoxWithButtons, hideSpinArrows
+    from neewerlux_ui import Ui_MainWindow, SpinBoxWithButtons, hideSpinArrows, adjustableColumns, fitColumnsToWidgets, widePopup
     from neewerlux_theme import getThemeQSS
     from neewerlux_webui import getWebDashboardHTML
 except Exception as e:
@@ -853,12 +853,8 @@ try: # try to load the GUI
             table.setSelectionMode(QAbstractItemView.SingleSelection)
             table.setEditTriggers(QAbstractItemView.NoEditTriggers)
             table.setAlternatingRowColors(True)
-            hdr = table.horizontalHeader()
-            hdr.setStretchLastSection(True)
-            hdr.setSectionResizeMode(0, QHeaderView.Fixed)
+            adjustableColumns(table, fixed=(0,))
             table.setColumnWidth(0, 32)
-            for col in range(1, 6):
-                hdr.setSectionResizeMode(col, QHeaderView.Stretch)
             mainLay.addWidget(table, 2)
 
             # === TOOLBAR ===
@@ -1101,6 +1097,10 @@ try: # try to load the GUI
                 table.setRowCount(len(entries))
                 for i, e in enumerate(entries):
                     _setTableRow(i, e)
+                if not table.property("fitted"):  # fit once; widths the user drags stay after that
+                    for col in range(1, table.columnCount()):
+                        table.resizeColumnToContents(col)
+                    table.setProperty("fitted", True)
                 _updateTargetGuardrails()
 
             def _updateTargetGuardrails():
@@ -1870,7 +1870,7 @@ try: # try to load the GUI
             target = QComboBox()
             target.setEditable(True)
             target.addItems(self.SOUND_TARGETS)
-            target.view().setMinimumWidth(target.view().sizeHintForColumn(0) + 24)  # the list is wider than the cell
+            widePopup(target)
             target.setEditText(part.get("target", "@all"))
             self._soundTargetShown(target)
             drive = QComboBox()
@@ -1889,6 +1889,9 @@ try: # try to load the GUI
                               "Steps on the beat: the next palette colour on each beat\n"
                               "Follows the sound: low, bassy sound picks the first colours, bright sound the last")
             colour.setCurrentIndex(max(0, colour.findData(part.get("colour", 0))))
+            for combo in (drive, colour):
+                combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+                widePopup(combo)
             chase = QCheckBox()
             chase.setChecked(bool(part.get("chase", False)))
             chase.setToolTip("Step through these lights one at a time on the beat")
@@ -1900,6 +1903,7 @@ try: # try to load the GUI
             for col, w in enumerate((target, drive, colour, chase, remove)):
                 table.setCellWidget(row, col, w)
             table.setRowHeight(row, 36)  # the theme pads combo boxes; less clips the text
+            fitColumnsToWidgets(table, (1, 2, 3))
             target.lineEdit().editingFinished.connect(self.soundPartsEdited)
             target.lineEdit().editingFinished.connect(lambda w=target: self._soundTargetShown(w))
             target.activated.connect(lambda i: self.soundPartsEdited())

@@ -45,7 +45,7 @@ def _colorForCCT(temp, bri):
     return QColor(int(r * factor), int(g * factor), int(b * factor))
 
 
-from neewerlux_ui import SpinBoxWithButtons, hideSpinArrows
+from neewerlux_ui import SpinBoxWithButtons, hideSpinArrows, adjustableColumns
 
 try:
     from neewerlux_ui import GradientSlider
@@ -144,12 +144,8 @@ class AnimationEditorDialog(QDialog):
         self._table.setSelectionMode(QAbstractItemView.SingleSelection)
         self._table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self._table.setAlternatingRowColors(True)
-        hdr = self._table.horizontalHeader()
-        hdr.setStretchLastSection(True)
-        hdr.setSectionResizeMode(0, QHeaderView.Fixed)
+        adjustableColumns(self._table, fixed=(0,))
         self._table.setColumnWidth(0, 32)
-        for col in range(1, 7):
-            hdr.setSectionResizeMode(col, QHeaderView.Stretch)
         self._table.selectionModel().selectionChanged.connect(self._onRowSelected)
         vLay.addWidget(self._table, 2)
 
@@ -406,6 +402,10 @@ class AnimationEditorDialog(QDialog):
         self._table.setRowCount(len(self._keyframes))
         for i, kf in enumerate(self._keyframes):
             self._setTableRow(i, kf)
+        if not self._table.property("fitted"):  # fit once; widths the user drags stay after that
+            for col in range(1, self._table.columnCount()):
+                self._table.resizeColumnToContents(col)
+            self._table.setProperty("fitted", True)
 
     def _setTableRow(self, row, kf):
         """Set one table row from a keyframe dict, showing the currently selected light."""

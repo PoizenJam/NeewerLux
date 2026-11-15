@@ -299,6 +299,13 @@ def main():
         check(ed.bpmSpin.value() == 90 and ed.seq["cues"][1]["at_ms"] == int(round(500 + 2000 * 120 / 90)), "cues follow the new tempo: %s" % ed.seq["cues"][1]["at_ms"])
         ed.undo()
         check(ed.bpmSpin.value() == 120 and ed.seq["cues"][1]["at_ms"] == 2500 and ed.durationSpin.value() == 20.5, "undo puts the tempo and cues back")
+        from PySide6.QtTest import QTest
+        from PySide6.QtCore import QPoint
+        fm = tl.QFontMetrics(ed.view.font())
+        QTest.mouseMove(ed.view, QPoint(int(ed.view.xFor(2000)), 3))
+        pump(50)
+        check(ed.view.sectionsH(fm) > 0 and ed.view.toolTip().startswith("A\n") and "Level 1 (quiet)" in ed.view.toolTip(),
+              "hovering a section names it: %r" % ed.view.toolTip())
         ed.applyTempo(140, False)
         check(ed.seq["tempo"] == {"bpm": 140, "offset_ms": 500} and ed.seq["cues"][1]["at_ms"] == 2500, "tempo only, cues stay")
         ed.view.update()
@@ -334,6 +341,12 @@ def main():
         check(dlg.nameEdit.text() == "Test Song" and dlg.view.analysis is not None, "named after the song, drawn")
         dlg.grab().save(os.path.join(rig.workdir, "song_dialog.png"))
         RESULTS.append(("INFO", "screenshot", os.path.join(rig.workdir, "song_dialog.png")))
+        from PySide6.QtTest import QTest
+        from PySide6.QtCore import QPoint
+        sec = dlg.view.analysis["sections"][-1]
+        QTest.mouseMove(dlg.view, QPoint(int((sec["start_ms"] + sec["end_ms"]) / 2 * dlg.view.width() / dlg.view.analysis["duration_ms"]), 8))
+        pump(50)
+        check(dlg.view.toolTip().startswith(sec["label"] + "\n"), "hovering the song names the section: %r" % dlg.view.toolTip())
         dlg.halfButton.click()
         half = dlg.bpmSpin.value()
         check(abs(half - 64) < 0.2 and dlg.view.bpm == half, "x 1/2 halves the tempo and redraws the grid: %s" % half)

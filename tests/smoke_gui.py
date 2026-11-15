@@ -56,6 +56,17 @@ def checkWorkerUsesGuiThread(nl, app, win):
     print("worker to GUI on signals: PASS")
 
 
+def fixedTables(widget):
+    """Tables in widget whose columns the user can't drag (none Interactive)."""
+    from PySide6.QtWidgets import QTableWidget, QHeaderView
+    bad = []
+    for t in widget.findChildren(QTableWidget):
+        hdr = t.horizontalHeader()
+        if not any(hdr.sectionResizeMode(c) == QHeaderView.Interactive for c in range(t.columnCount())):
+            bad.append(t.objectName() or "%d-column table" % t.columnCount())
+    return bad
+
+
 def checkSoundTab(nl, app, win, rig):
     """1.4.0: the Sound tab starts, tunes, edits, saves and stops a sound mode, live."""
     if nl.audio.np is None:
@@ -117,6 +128,12 @@ def checkSoundTab(nl, app, win, rig):
     app.processEvents()
     lightsCol = win.soundPartsTable.columnWidth(0)
     assert lightsCol >= 180, "the Lights column has room for a target: %d px" % lightsCol
+    colour = win.soundPartsTable.cellWidget(0, 2)
+    fm = colour.fontMetrics()
+    widest = max(fm.horizontalAdvance(colour.itemText(i)) for i in range(colour.count()))
+    assert win.soundPartsTable.columnWidth(2) >= widest + 20, "the Colour column fits 'Steps on the beat': %d < %d" % (win.soundPartsTable.columnWidth(2), widest + 20)
+    assert colour.view().minimumWidth() >= widest, "its list opens wide enough to read"
+    assert not fixedTables(win), "every table's columns can be dragged: %s" % fixedTables(win)
     shot = os.path.join(rig.workdir, "sound_tab.png")
     win.grab().save(shot)
     win.soundPartsTable.grab().save(os.path.join(rig.workdir, "sound_parts.png"))
@@ -347,6 +364,7 @@ def main():
     def inspect(dlg):
         seen.append(dlg.windowTitle())
         native.extend(nativeSpins(dlg))
+        assert not fixedTables(dlg), "%s: every table's columns can be dragged: %s" % (dlg.windowTitle(), fixedTables(dlg))
         if dlg.windowTitle().startswith("Edit Preset"):
             sound = [c for c in dlg.findChildren(QComboBox) if c.findData("Pulse") >= 0]
             assert sound and sound[0].itemData(0) == "", "the preset editor offers a sound mode per light"
@@ -362,6 +380,7 @@ def main():
     ed = AnimationEditorDialog(win, {"name": "Spin", "loop": True, "keyframes": [
         {"hold_ms": 100, "fade_ms": 0, "lights": {"*": {"mode": "HSI", "hue": 0, "sat": 100, "bri": 50}}}]}, "Spin")
     native.extend(nativeSpins(ed))
+    assert not fixedTables(ed), "animation editor: every table's columns can be dragged"
     ed.close()
     native.extend(nativeSpins(SequenceSettingsDialog({"name": "x"}, 8, win)))
     from neewerlux_timeline import SequenceEditor
