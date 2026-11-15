@@ -1285,6 +1285,21 @@ def t_flashGuardRedFlashes(rig):
         rig.post("/NeewerLux/animate", {"action": "delete", "name": red["name"]})
 
 
+def t_shippedAnimationTags(rig):
+    """1.4.0: every shipped animation is tagged with one energy and one feel (draft styles pick
+    by them), and tags must be a list of words."""
+    nl = rig.nl
+    for name, anim in sorted(nl.savedAnimations.items()):
+        if name.startswith("Harness "):
+            continue
+        tags = anim.get("tags", [])
+        check(len([t for t in tags if t in ("calm", "lively", "intense")]) == 1 and len([t for t in tags if t in ("smooth", "punchy", "hard")]) == 1,
+              "%s: one energy and one feel tag: %s" % (name, tags))
+    check(nl.show.animationErrors({"tags": "loud", "keyframes": []}), "tags must be a list")
+    listed = rig.post("/NeewerLux/animate", {"action": "list"})["animations"]
+    check(all("tags" in a for a in listed), "the list includes tags")
+
+
 def t_shippedContentUnderFlashLimit(rig):
     """No shipped animation (at 1x speed, as the GUI, URLs and the dashboard play them by
     default) or sequence flashes more than 3 times a second, before the guard."""
@@ -1605,6 +1620,67 @@ def t_offWinsDuringShows(rig):
     check(w and w[0][1] == 129 and any(d[1] == 134 for d in w), "On brings it back into the sequence: %s" % [d[1] for d in w])
     check(_layers(rig)[RIM] == "show", "back on the show layer")
     rig.post("/NeewerLux/sequence", {"action": "stop"})
+
+
+def t_animationFlashRates(rig):
+    """1.4.0: the animation lists show each animation's flash rate at the speed it would play;
+    shipped ones are within the limit, and a strobing user animation says it's over it."""
+    nl = rig.nl
+    r = rig.post("/NeewerLux/animate", {"action": "flash_rates", "speed": 1})
+    worst = max(max(v["flashes"], v["red"]) for v in r["rates"].values())
+    check(r["success"] and len(r["rates"]) == len(nl.savedAnimations) and worst <= 3, "shipped animations within the limit: worst %.1f" % worst)
+    nl.savedAnimations["Test Strobe"] = {"name": "Test Strobe", "loop": True, "keyframes": [
+        {"hold_ms": 80, "fade_ms": 0, "lights": {"*": {"mode": "CCT", "temp": 56, "bri": 100}}},
+        {"hold_ms": 80, "fade_ms": 0, "lights": {"*": {"mode": "CCT", "temp": 56, "bri": 0}}}]}
+    try:
+        rate = rig.post("/NeewerLux/animate", {"action": "flash_rates", "speed": 1})["rates"]["Test Strobe"]
+        check(rate["flashes"] > 3 and "over the limit" in rate["text"], "a strobe is over the limit: %s" % rate)
+        slow = rig.post("/NeewerLux/animate", {"action": "flash_rates", "speed": 0.25})["rates"]["Test Strobe"]
+        check(slow["flashes"] < rate["flashes"] and slow["flashes"] <= 3 and "over" not in slow["text"], "slower, fewer flashes: %s" % slow)
+    finally:
+        del nl.savedAnimations["Test Strobe"]
+
+
+def t_soundCues(rig):
+    """1.4.0: a sound cue in a sequence hands its lights to a sound mode (with values changed
+    for the cue) for its length, inside the sequence (no fades in or out of it); capture runs
+    while the sequence plays and stops when it ends; renders mark its lights "sound"."""
+    nl = rig.nl
+    seq = {"format": 1, "name": "Sound Cue", "duration_ms": 3600, "cues": [
+        {"at_ms": 0, "target": "@rim", "state": {"mode": "CCT", "temp": 33, "bri": 40}},
+        {"at_ms": 600, "duration_ms": 2000, "target": "@rim", "sound": {"mode": "Kick Blink", "palette": "Neon", "ceiling": 90}},
+        {"at_ms": 2600, "target": "@rim", "state": {"mode": "CCT", "temp": 45, "bri": 50}}]}
+    bad = rig.post("/NeewerLux/sequence", {"action": "validate", "sequence": dict(seq, cues=[
+        {"at_ms": 0, "target": "@rim", "sound": {"mode": "Hard Chase"}},
+        {"at_ms": 0, "duration_ms": 500, "target": "@rim", "sound": {"mode": "No Such Mode"}},
+        {"at_ms": 0, "duration_ms": 500, "target": "@rim", "sound": {"mode": "Pulse", "floor": 500}},
+        {"at_ms": 0, "duration_ms": 500, "target": "@rim", "sound": "Pulse", "state": {"mode": "CCT", "temp": 40, "bri": 9}}])})
+    errs = " | ".join(bad.get("errors", []))
+    check(not bad["success"] and "cue 0: 'duration_ms'" in errs and "no sound mode named 'No Such Mode'" in errs and "cue 2:" in errs
+          and "cue 3: needs exactly one of 'clip', 'state' or 'sound'" in errs, "sound cues are checked: %s" % errs)
+    r = rig.post("/NeewerLux/sequence", {"action": "render", "sequence": seq, "step_ms": 100})
+    rim = r["changes"][[l["id"] for l in r["lights"]][RIM]]
+    sources = {c[4] for c in rim if 700 <= c[0] < 2500}
+    check(r["success"] and "sound" in {c[4] for c in rim} and any(c["kind"] == "sound" and c["what"] == "sound: Kick Blink" for c in r["cues"]),
+          "a render marks the sound cue's light: %s %s" % (sources, r["cues"]))
+    if _needsNumpy(rig):
+        return
+    _soundSignal(nl)
+    t0 = time.monotonic()
+    check(rig.post("/NeewerLux/sequence", {"action": "play", "sequence": seq})["success"], "it plays")
+    time.sleep(0.4)
+    check(nl.audioEngine.running, "capture runs while a sequence with sound cues plays")
+    time.sleep(2.0)
+    w = [(t - t0, d) for t, d in writesFor(rig, RIM, t0)]
+    during = [d for t, d in w if 0.9 < t < 2.4]
+    check(any(d[1] == 134 for d in during) and len({tuple(d) for d in during}) >= 3,
+          "the rim follows the sound mode during the cue: %s" % [(round(t, 2), d[1:6]) for t, d in w][:12])
+    check(any(d[1] == 135 and d[4] == 33 for t, d in w if t < 0.6), "and the state cue before it")
+    time.sleep(1.6)
+    w = [(t - t0, d) for t, d in writesFor(rig, RIM, t0)]
+    check(any(d[1] == 135 and d[4] == 45 for t, d in w if 2.6 < t < 3.6), "and the state cue after it")
+    time.sleep(0.8)
+    check(not nl.audioEngine.running, "capture stops when the sequence ends (nothing else listens)")
 
 
 def t_soundHandsBackToBase(rig):
@@ -2026,7 +2102,7 @@ TESTS = [t_maxBrightnessHTTP, t_maxBrightnessAnimationAndSequence, t_minBrightne
          t_fadesOnlyBetweenItems,
          t_addSimulatedRig, t_compositorWakesOnlyWhenDue, t_handBackToRunningLayerFades,
          t_soundModeHTTP, t_soundUnderShowAndEffects, t_soundRespectsLimitsAndLocks, t_soundUnavailable, t_soundModeFilesHTTP,
-         t_offWinsDuringShows, t_soundHandsBackToBase, t_manualWriteReleasesSound, t_presetFadeTakesLightsFromSound, t_soundOnSomeLights,
+         t_offWinsDuringShows, t_animationFlashRates, t_shippedAnimationTags, t_soundCues, t_soundHandsBackToBase, t_manualWriteReleasesSound, t_presetFadeTakesLightsFromSound, t_soundOnSomeLights,
          t_presetSounds, t_paletteLibrary, t_songDrafts, t_songHTTP]
 
 

@@ -1,6 +1,7 @@
 {
   "name": "Neon Nights",
   "description": "Cyberpunk-style magenta and cyan with opposing light pairs",
+  "tags": ["lively", "smooth", "colourful", "neon", "chase"],
   "loop": true,
   "keyframes": [
     {

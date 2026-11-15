@@ -1,6 +1,7 @@
 {
   "name": "Lava Lamp",
   "description": "Deep saturated colors slowly morphing like a lava lamp",
+  "tags": ["lively", "smooth", "colourful"],
   "loop": true,
   "keyframes": [
     {

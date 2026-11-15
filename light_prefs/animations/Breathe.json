@@ -1,6 +1,7 @@
 {
   "name": "Breathe",
   "description": "Smooth continuous warm brightness pulse",
+  "tags": ["lively", "smooth", "white"],
   "loop": true,
   "keyframes": [
     {

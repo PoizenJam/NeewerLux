@@ -1,6 +1,7 @@
 {
   "name": "Golden Hour",
   "description": "Warm golden photography light with gentle variation",
+  "tags": ["lively", "smooth", "warm"],
   "loop": true,
   "keyframes": [
     {"hold_ms": 2000, "fade_ms": 3000, "lights": {"*": {"mode": "HSI", "hue": 35, "sat": 85, "bri": 90}}},

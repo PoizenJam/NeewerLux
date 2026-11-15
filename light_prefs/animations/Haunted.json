@@ -1,6 +1,7 @@
 {
   "name": "Haunted",
   "description": "Creepy greens and purples with sudden flickers",
+  "tags": ["lively", "punchy", "colourful"],
   "loop": true,
   "keyframes": [
     {"hold_ms": 2000, "fade_ms": 2000, "lights": {"*": {"mode": "HSI", "hue": 120, "sat": 70, "bri": 15}}},

@@ -1,6 +1,7 @@
 {
   "name": "Campfire",
   "description": "Multi-light flickering campfire with staggered warm tones",
+  "tags": ["intense", "smooth", "warm", "chase"],
   "loop": true,
   "keyframes": [
     {

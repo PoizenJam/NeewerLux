@@ -1,6 +1,7 @@
 {
   "name": "Romance",
   "description": "Warm amber and soft pink glow for intimate ambiance",
+  "tags": ["calm", "smooth", "warm", "moody"],
   "loop": true,
   "keyframes": [
     {"hold_ms": 3000, "fade_ms": 4000, "lights": {"*": {"mode": "HSI", "hue": 15, "sat": 70, "bri": 45}}},

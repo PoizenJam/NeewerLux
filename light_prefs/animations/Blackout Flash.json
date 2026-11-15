@@ -1,6 +1,7 @@
 {
   "name": "Blackout Flash",
   "description": "Dramatic blackout with sudden bright reveal",
+  "tags": ["lively", "punchy", "cool"],
   "loop": true,
   "keyframes": [
     {

@@ -44,6 +44,7 @@ class _FillColumn(QWidget):
         return self.minimumSizeHint().height()
 
 
+SOUND_CUE_DEFAULT_MS = 8000  # a new sound cue's length
 SNAP_CHOICES = [("No snap", 0), ("10 ms", 10), ("50 ms", 50), ("100 ms", 100), ("250 ms", 250),
                 ("500 ms", 500), ("1 s", 1000), ("Beat", -1), ("Half beat", -2), ("Bar (4 beats)", -4)]
 UNDO_LIMIT = 200
@@ -79,7 +80,12 @@ def newSequence(name="New Sequence"):
 
 
 def cueKind(cue):
-    return "clip" if "clip" in cue else "state"
+    return "sound" if "sound" in cue else "clip" if "clip" in cue else "state"
+
+
+def soundName(cue):
+    spec = cue.get("sound")
+    return spec if isinstance(spec, str) else (spec or {}).get("mode", "")
 
 
 def rescaleTempo(seq, newBpm):
@@ -152,7 +158,7 @@ def cueSpans(seq, lightCues):
         c = cues[i]
         start = int(c.get("at_ms", 0))
         dur = int(c.get("duration_ms") or 0)
-        if cueKind(c) == "clip" or dur > 0:
+        if cueKind(c) in ("clip", "sound") or dur > 0:
             spans[i] = (start, start + max(1, dur), False)
         else:
             nxt = duration
@@ -188,6 +194,8 @@ def colourAt(changes, t):
 
 
 def describeCue(cue):
+    if cueKind(cue) == "sound":
+        return "Sound: " + soundName(cue)
     if cueKind(cue) == "clip":
         c = cue.get("clip")
         fit = c.get("fit", "stretch") if isinstance(c, dict) else "stretch"
@@ -395,7 +403,8 @@ class TimelineView(QWidget):
                     continue
                 top, h = y + 3, rowH - bandH - 8
                 rgb = cueColour(cue)
-                base = QColor(*[int(v) for v in rgb]) if rgb else QColor(70, 95, 140)
+                sound = cueKind(cue) == "sound"
+                base = QColor(*[int(v) for v in rgb]) if rgb else QColor(35, 120, 120) if sound else QColor(70, 95, 140)
                 body = QRectF(max(labelW, xa), top, max(2.0, min(W, xb) - max(labelW, xa)), h)
                 if holdTail:
                     # solid head (the fade, or a short marker), faded tail while it holds
@@ -408,6 +417,8 @@ class TimelineView(QWidget):
                     p.fillRect(head, base)
                 else:
                     p.fillRect(body, base)
+                    if sound:  # follows live sound: hatched (teal, like sound-driven lights on the Stage)
+                        p.fillRect(body, QBrush(QColor(255, 255, 255, 60), Qt.BDiagPattern))
                     fade = int(cue.get("state", {}).get("fade_ms") or 0) if cueKind(cue) == "state" else 0
                 if fade and cueKind(cue) == "state":
                     xf = self.xFor(start + fade)
@@ -626,6 +637,7 @@ class TimelineView(QWidget):
         if row is not None and row >= 0:
             actions[menu.addAction("Add colour cue here")] = lambda: ed.addCue("state", row, at)
             actions[menu.addAction("Add clip cue here")] = lambda: ed.addCue("clip", row, at)
+            actions[menu.addAction("Add sound cue here")] = lambda: ed.addCue("sound", row, at)
             if ed.clipboard:
                 actions[menu.addAction("Paste here")] = lambda: ed.paste(at)
         if not actions:
@@ -1091,9 +1103,11 @@ class SequenceEditor(QWidget):
         trans.addSpacing(16)
         self.addColourButton = QPushButton("+ Colour cue")
         self.addClipButton = QPushButton("+ Clip cue")
+        self.addSoundButton = QPushButton("+ Sound cue")
+        self.addSoundButton.setToolTip("Hand the selected track's lights to a sound mode for a while (live sound, while the sequence plays)")
         self.undoButton = QPushButton("Undo")
         self.redoButton = QPushButton("Redo")
-        for b in (self.addColourButton, self.addClipButton, self.undoButton, self.redoButton):
+        for b in (self.addColourButton, self.addClipButton, self.addSoundButton, self.undoButton, self.redoButton):
             trans.addWidget(b)
         root.addLayout(trans)
 
@@ -1169,6 +1183,7 @@ class SequenceEditor(QWidget):
         self.sendCheck.toggled.connect(self._sendToggled)
         self.addColourButton.clicked.connect(lambda: self.addCue("state", self._selectedTrackRow(), self.snap(self.playhead)))
         self.addClipButton.clicked.connect(lambda: self.addCue("clip", self._selectedTrackRow(), self.snap(self.playhead)))
+        self.addSoundButton.clicked.connect(lambda: self.addCue("sound", self._selectedTrackRow(), self.snap(self.playhead)))
         self.undoButton.clicked.connect(self.undo)
         self.redoButton.clicked.connect(self.redo)
         for keys, fn in ((QKeySequence.Undo, self.undo), (QKeySequence.Redo, self.redo),
@@ -1227,6 +1242,7 @@ class SequenceEditor(QWidget):
         self.pMatches.setWordWrap(True)
         form.addRow("", self.pMatches)
         self.pKind = QComboBox(); self.pKind.addItem("Colour", "state"); self.pKind.addItem("Clip (animation)", "clip")
+        self.pKind.addItem("Sound mode", "sound")
         form.addRow("Type", self.pKind)
         self.pMode = QComboBox(); self.pMode.addItems(["HSI", "CCT"])
         form.addRow("Mode", self.pMode)
@@ -1237,6 +1253,8 @@ class SequenceEditor(QWidget):
         self.pFade = SpinBoxWithButtons(); self.pFade.setRange(0, 600000); self.pFade.setSingleStep(100); self.pFade.setSuffix(" ms")
         self.pSwatch = QLabel(); self.pSwatch.setFixedHeight(16)
         self.pClip = QComboBox()
+        self.pSound = QComboBox()
+        self.pSound.setToolTip("The sound mode these lights follow for the cue's length (live sound, while the sequence plays)")
         self.pFit = QComboBox(); self.pFit.addItem("Stretch to fit", "stretch"); self.pFit.addItem("Loop", "loop")
         self.pSpeed = DoubleSpinBoxWithButtons(); self.pSpeed.setRange(0.05, 20); self.pSpeed.setSingleStep(0.1); self.pSpeed.setValue(1)
         self.pClipBri = SpinBoxWithButtons(); self.pClipBri.setRange(0, 100); self.pClipBri.setSuffix(" %"); self.pClipBri.setValue(100)
@@ -1245,7 +1263,7 @@ class SequenceEditor(QWidget):
         self._rows = {}
         for key, label, w in (("hue", "Hue", self.pHue), ("sat", "Saturation", self.pSat), ("temp", "Colour temp", self.pTemp),
                               ("bri", "Brightness", self.pBri), ("fade", "Fade in", self.pFade), ("swatch", "", self.pSwatch),
-                              ("clip", "Animation", self.pClip), ("fit", "Fit", self.pFit), ("speed", "Speed", self.pSpeed),
+                              ("clip", "Animation", self.pClip), ("sound", "Sound mode", self.pSound), ("fit", "Fit", self.pFit), ("speed", "Speed", self.pSpeed),
                               ("clipbri", "Brightness", self.pClipBri), ("duration", "Length", self.pDuration), ("label", "Label", self.pLabel)):
             form.addRow(label, w)
             self._rows[key] = (form.labelForField(w), w)
@@ -1271,7 +1289,7 @@ class SequenceEditor(QWidget):
             w.valueChanged.connect(self._propChanged)
         for w in (self.pHue, self.pSat, self.pTemp, self.pBri, self.pFade, self.pClipBri, self.pDuration):
             w.valueChanged.connect(self._propChanged)
-        for w in (self.pKind, self.pMode, self.pClip, self.pFit):
+        for w in (self.pKind, self.pMode, self.pClip, self.pSound, self.pFit):
             w.currentIndexChanged.connect(self._propChanged)
         self.pTarget.lineEdit().editingFinished.connect(self._propChanged)
         self.pTarget.activated.connect(self._targetPicked)
@@ -1317,7 +1335,7 @@ class SequenceEditor(QWidget):
             names = {l["index"]: l["name"] for l in self.host.lights()}
             self.pMatches.setText(("Drives: " + ", ".join(names.get(i, "?") for i in matched)) if matched else "Matches no light right now")
             kind = cueKind(cue)
-            self.pKind.setCurrentIndex(0 if kind == "state" else 1)
+            self.pKind.setCurrentIndex(self.pKind.findData(kind))
             self.pDuration.setValue(int(cue.get("duration_ms") or 0))
             self.pLabel.setText(str(cue.get("label", "")))
             if kind == "state":
@@ -1334,6 +1352,12 @@ class SequenceEditor(QWidget):
                 self._showRows({"mode", "hue", "sat", "bri", "fade", "swatch", "duration", "label"} if mode == "HSI"
                                else {"mode", "temp", "bri", "fade", "swatch", "duration", "label"})
                 self._rows["duration"][0].setText("Length (0 = hold)")
+            elif kind == "sound":
+                self.pSound.clear()
+                self.pSound.addItems(self.host.soundModeNames())
+                self.pSound.setCurrentText(soundName(cue))
+                self._showRows({"sound", "duration", "label"})
+                self._rows["duration"][0].setText("Length")
             else:
                 c = cue.get("clip")
                 c = {"name": c} if isinstance(c, str) else (c or {})
@@ -1367,6 +1391,7 @@ class SequenceEditor(QWidget):
         dur = self.pDuration.value()
         if kind == "state":
             cue.pop("clip", None)
+            cue.pop("sound", None)
             mode = self.pMode.currentText()
             st = {"mode": mode, "bri": self.pBri.value()}
             if mode == "HSI":
@@ -1380,8 +1405,17 @@ class SequenceEditor(QWidget):
                 cue["duration_ms"] = dur
             else:
                 cue.pop("duration_ms", None)
+        elif kind == "sound":
+            cue.pop("state", None)
+            cue.pop("clip", None)
+            spec = cue.get("sound") if isinstance(cue.get("sound"), dict) else {}
+            # the mode's own values changed for this cue (palette and so on) stay
+            spec = dict(spec, mode=self.pSound.currentText() or (self.host.soundModeNames() or [""])[0])
+            cue["sound"] = spec
+            cue["duration_ms"] = max(1, dur or SOUND_CUE_DEFAULT_MS)
         else:
             cue.pop("state", None)
+            cue.pop("sound", None)
             name = self.pClip.currentText() or (self.host.animationNames() or [""])[0]
             clip = {"name": name, "fit": self.pFit.currentData()}
             if self.pSpeed.value() != 1:
@@ -1394,7 +1428,7 @@ class SequenceEditor(QWidget):
             return
         self.pushUndo()
         self.seq["cues"][i] = cue
-        kindChanged = (kind == "clip") != ("clip" in json.loads(old))
+        kindChanged = kind != cueKind(json.loads(old))
         self.changed()
         if kindChanged:
             self._loadProperties()
@@ -1553,6 +1587,9 @@ class SequenceEditor(QWidget):
         if kind == "clip":
             names = self.host.animationNames()
             cue = {"at_ms": at, "duration_ms": 4000, "target": target, "clip": {"name": names[0] if names else "", "fit": "stretch"}}
+        elif kind == "sound":
+            names = self.host.soundModeNames()
+            cue = {"at_ms": at, "duration_ms": SOUND_CUE_DEFAULT_MS, "target": target, "sound": {"mode": names[0] if names else ""}}
         else:
             # start from the colour the light has at that point, so a new cue is an easy tweak
             st = {"mode": "HSI", "hue": 0, "sat": 100, "bri": 80}

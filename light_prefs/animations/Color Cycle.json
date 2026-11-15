@@ -1,6 +1,7 @@
 {
   "name": "Color Cycle",
   "description": "Continuous hue rotation through the spectrum",
+  "tags": ["lively", "smooth", "rainbow", "neon"],
   "loop": true,
   "keyframes": [
     {

@@ -1,6 +1,7 @@
 {
   "name": "Color Wash",
   "description": "Slow continuous transitions through warm and cool tones",
+  "tags": ["lively", "smooth", "colourful"],
   "loop": true,
   "keyframes": [
     {

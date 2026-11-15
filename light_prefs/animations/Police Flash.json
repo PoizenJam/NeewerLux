@@ -1,6 +1,7 @@
 {
   "name": "Police Flash",
   "description": "Alternating red/blue flash across lights",
+  "tags": ["intense", "hard", "colourful", "chase"],
   "loop": true,
   "keyframes": [
     {

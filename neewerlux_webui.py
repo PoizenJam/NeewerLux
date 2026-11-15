@@ -605,7 +605,7 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
             <div class="control-group">
                 <label>Speed / Rate / Brightness</label>
                 <div style="display:flex;gap:6px">
-                    <select id="animSpeed"><option>0.25x</option><option>0.5x</option><option selected>1x</option><option>1.5x</option><option>2x</option><option>3x</option></select>
+                    <select id="animSpeed" onchange="animShowFlashRates()"><option>0.25x</option><option>0.5x</option><option selected>1x</option><option>1.5x</option><option>2x</option><option>3x</option></select>
                     <input type="number" id="animRate" value="5" min="1" max="30" style="width:60px" title="Updates/sec">
                     <input type="number" id="animBri" value="100" min="5" max="100" style="width:60px" title="Brightness %">
                 </div>
@@ -988,6 +988,7 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
             <span style="flex:1"></span>
             <button class="btn small" onclick="tlAddCue('state')">+ Colour cue</button>
             <button class="btn small" onclick="tlAddCue('clip')">+ Clip cue</button>
+            <button class="btn small" onclick="tlAddCue('sound')" title="Hand the selected track's lights to a sound mode for a while (live sound, while the sequence plays)">+ Sound cue</button>
             <button class="btn small" onclick="tlUndo()">Undo</button>
             <button class="btn small" onclick="tlRedo()">Redo</button>
         </div>
@@ -1321,7 +1322,10 @@ function loadAnimationsJSON(data) {
             const item = document.createElement('div');
             item.className = 'anim-item';
             if (selectedAnim === a.name) item.classList.add('selected');
-            item.innerHTML = '<strong>' + a.name + '</strong>' + (a.description ? ' <span style="color:var(--muted);font-size:11px">' + a.description + '</span>' : '') + ' <span style="float:right;color:var(--muted);font-size:11px">' + a.frames + 'f' + (a.loop?' ↻':'') + '</span>';
+            item.dataset.name = a.name;
+            if ((a.tags || []).length) item.title = 'Tags: ' + a.tags.join(', ');
+            item.innerHTML = '<strong>' + a.name + '</strong>' + (a.description ? ' <span style="color:var(--muted);font-size:11px">' + a.description + '</span>' : '') + ' <span style="float:right;color:var(--muted);font-size:11px">' + a.frames + 'f' + (a.loop?' ↻':'') + '</span>'
+                + '<span class="anim-flash" style="display:block;font-size:11px;color:var(--muted)"></span>';
             item.onclick = () => {
                 document.querySelectorAll('.anim-item').forEach(i => i.classList.remove('selected'));
                 item.classList.add('selected');
@@ -1339,6 +1343,28 @@ function loadAnimationsJSON(data) {
         document.getElementById('selectedAnimLabel').textContent = 'Selected: ' + selectedAnim;
     }
     if (!window._animsLoadedOnce) { logMsg('Loaded ' + anims.length + ' animation(s)', 'ok'); window._animsLoadedOnce = true; }
+    animShowFlashRates();
+}
+
+// each animation's flash rate at the chosen speed, under its name; over the limit in red
+let animFlashRates = {speed: null, rates: {}};
+async function animShowFlashRates() {
+    const speed = +document.getElementById('animSpeed').value.replace('x', '') || 1;
+    if (animFlashRates.speed !== speed) {
+        try {
+            const r = await fetch('/NeewerLux/animate', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                                  body: JSON.stringify({action: 'flash_rates', speed: speed})});
+            const d = await r.json();
+            if (!d.success) return;
+            animFlashRates = {speed: speed, rates: d.rates, limit: d.limit};
+        } catch (e) { return; }
+    }
+    document.querySelectorAll('#animList .anim-item').forEach(item => {
+        const rate = animFlashRates.rates[item.dataset.name], el = item.querySelector('.anim-flash');
+        if (!rate || !el) return;
+        el.textContent = rate.text;
+        el.style.color = Math.max(rate.flashes, rate.red) > animFlashRates.limit ? 'var(--red)' : '';
+    });
 }
 
 async function loadAnimations() {
@@ -2236,7 +2262,8 @@ function tlSnapMs(ms) {
     const base = snap < 0 ? (+document.getElementById('tlBeatOffset').value || 0) : 0;
     return Math.max(0, Math.round(base + Math.round((ms - base) / step) * step));
 }
-function tlKind(c) { return 'clip' in c ? 'clip' : 'state'; }
+function tlKind(c) { return 'sound' in c ? 'sound' : 'clip' in c ? 'clip' : 'state'; }
+function tlSoundName(c) { return typeof c.sound === 'string' ? c.sound : (c.sound || {}).mode || ''; }
 function tlClipName(c) { return typeof c.clip === 'string' ? c.clip : (c.clip || {}).name || ''; }
 function tlFmt(ms, precise) {
     ms = Math.max(0, Math.round(ms));
@@ -2244,6 +2271,7 @@ function tlFmt(ms, precise) {
     return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0') + (precise ? '.' + String(ms % 1000).padStart(3, '0') : '');
 }
 function tlDescribe(c) {
+    if (tlKind(c) === 'sound') return 'Sound: ' + tlSoundName(c);
     if (tlKind(c) === 'clip') { const fit = typeof c.clip === 'object' && c.clip.fit ? c.clip.fit : 'stretch'; return tlClipName(c) + ' (' + fit + ')'; }
     const st = c.state || {};
     let t = st.mode === 'CCT' ? ((st.temp || 56) * 100) + 'K ' + (st.bri != null ? st.bri : 100) + '%' : 'H' + (st.hue || 0) + ' S' + (st.sat != null ? st.sat : 100) + ' ' + (st.bri != null ? st.bri : 100) + '%';
@@ -2276,7 +2304,7 @@ function tlSpans(seq, idxs) {
     const spans = {};
     order.forEach((i, pos) => {
         const c = cues[i], start = +c.at_ms || 0, d = +c.duration_ms || 0;
-        if (tlKind(c) === 'clip' || d > 0) spans[i] = [start, start + Math.max(1, d), false];
+        if (tlKind(c) === 'clip' || tlKind(c) === 'sound' || d > 0) spans[i] = [start, start + Math.max(1, d), false];
         else {
             let nxt = dur;
             for (const j of order.slice(pos + 1)) { if ((+cues[j].at_ms || 0) > start) { nxt = +cues[j].at_ms || 0; break; } }
@@ -2468,7 +2496,8 @@ function tlDraw() {
             const xa = tlX(start), xb = tlX(end);
             if (xb < labelW || xa > W) return;
             const top = y + 3, h = rowH - bandH - 8;
-            const base = tlCueColour(c) || 'rgb(70,95,140)';
+            const sound = tlKind(c) === 'sound';
+            const base = tlCueColour(c) || (sound ? 'rgb(35,120,120)' : 'rgb(70,95,140)');
             const L = Math.max(labelW, xa), R = Math.min(W, xb);
             const fade = tlKind(c) === 'state' ? (+(c.state || {}).fade_ms || 0) : 0;
             const xh = Math.min(xb, Math.max(xa + 8, tlX(start + fade)));
@@ -2477,6 +2506,12 @@ function tlDraw() {
                 ctx.fillStyle = base; ctx.fillRect(L, top, Math.max(2, Math.min(W, xh) - L), h);
             } else {
                 ctx.fillStyle = base; ctx.fillRect(L, top, Math.max(2, R - L), h);
+                if (sound) {  // follows live sound: hatched (teal, like sound-driven lights on the Stage)
+                    ctx.save(); ctx.beginPath(); ctx.rect(L, top, Math.max(2, R - L), h); ctx.clip();
+                    ctx.strokeStyle = 'rgba(255,255,255,.22)'; ctx.lineWidth = 1;
+                    for (let hx = L - h; hx < R; hx += 7) { ctx.beginPath(); ctx.moveTo(hx, top + h); ctx.lineTo(hx + h, top); ctx.stroke(); }
+                    ctx.restore();
+                }
             }
             if (fade) {
                 const xf = tlX(start + fade);
@@ -2678,7 +2713,7 @@ function tlSetSel(sel) {
             items.push({label: 'Duplicate', fn: tlDuplicate}, {label: 'Copy', fn: tlCopy}, {label: 'Delete', fn: tlDelete}, '-');
         }
         if (row != null && row >= 0) {
-            items.push({label: 'Add colour cue here', fn: () => tlAddCueAt('state', row, at)}, {label: 'Add clip cue here', fn: () => tlAddCueAt('clip', row, at)});
+            items.push({label: 'Add colour cue here', fn: () => tlAddCueAt('state', row, at)}, {label: 'Add clip cue here', fn: () => tlAddCueAt('clip', row, at)}, {label: 'Add sound cue here', fn: () => tlAddCueAt('sound', row, at)});
             if (tl.clipboard.length) items.push({label: 'Paste here', fn: () => tlPaste(at)});
         }
         if (items.length) showMenu(ev, items); else ev.preventDefault();
@@ -2710,6 +2745,7 @@ function tlSelectedRow() {
     const r = tl.tracks.findIndex(t => t.id != null && t.id === ids[0]);
     return r >= 0 ? r : null;
 }
+const TL_SOUND_CUE_MS = 8000;  // a new sound cue's length
 function tlAddCue(kind) { tlAddCueAt(kind, tlSelectedRow(), tlSnapMs(tl.playhead)); }
 function tlAddCueAt(kind, row, at) {
     const track = row != null && row >= 0 ? tl.tracks[row] : null;
@@ -2719,6 +2755,9 @@ function tlAddCueAt(kind, row, at) {
     if (kind === 'clip') {
         const names = (tl.info && tl.info.animations) || [];
         cue = {at_ms: at, duration_ms: 4000, target: target, clip: {name: names[0] || '', fit: 'stretch'}};
+    } else if (kind === 'sound') {
+        const names = (tl.info && tl.info.sound_modes) || [];
+        cue = {at_ms: at, duration_ms: TL_SOUND_CUE_MS, target: target, sound: {mode: names[0] || ''}};
     } else {
         // start from the light's colour at that point, so a new cue is an easy tweak
         let st = {mode: 'HSI', hue: 0, sat: 100, bri: 80};
@@ -2791,7 +2830,7 @@ function tlProps() {
         + '<label>Start (s)</label><input type="number" id="tpStart" step="0.1" min="0" value="' + ((+c.at_ms || 0) / 1000) + '">'
         + '<label>Lights</label><input type="text" id="tpTarget" list="tpTargets" value="' + esc(c.target == null ? '*' : c.target) + '" title="An ID, a name, @key/@fill/@rim/@background/@practical, @left/@right, @all or *, several joined with ;"><datalist id="tpTargets">' + choices + '</datalist>'
         + '<span></span><span style="color:var(--muted)">' + (ids.length ? 'Drives: ' + esc(names.join(', ')) : 'Matches no light right now') + '</span>'
-        + '<label>Type</label><select id="tpKind"><option value="state"' + (kind === 'state' ? ' selected' : '') + '>Colour</option><option value="clip"' + (kind === 'clip' ? ' selected' : '') + '>Clip (animation)</option></select>';
+        + '<label>Type</label><select id="tpKind"><option value="state"' + (kind === 'state' ? ' selected' : '') + '>Colour</option><option value="clip"' + (kind === 'clip' ? ' selected' : '') + '>Clip (animation)</option><option value="sound"' + (kind === 'sound' ? ' selected' : '') + '>Sound mode</option></select>';
     if (kind === 'state') {
         const mode = st.mode || 'HSI';
         html += '<label>Mode</label><select id="tpMode"><option' + (mode === 'HSI' ? ' selected' : '') + '>HSI</option><option' + (mode === 'CCT' ? ' selected' : '') + '>CCT</option></select>';
@@ -2802,6 +2841,11 @@ function tlProps() {
             + '<span></span><span style="display:block;height:16px;border:1px solid #555;background:' + tlCueColour(c) + '"></span>'
             + '<label>Length (ms)</label><input type="number" id="tpDur" min="0" step="100" value="' + (+c.duration_ms || 0) + '" title="0 holds until a later cue changes the light; a length ends it and the light goes back">'
             + '<span></span><span style="color:var(--muted)">0 = hold until the next cue</span>';
+    } else if (kind === 'sound') {
+        const modes = (tl.info && tl.info.sound_modes) || [];
+        html += '<label>Sound mode</label><select id="tpSound" title="The sound mode these lights follow for the cue\'s length (live sound, while the sequence plays)">'
+            + modes.map(n => '<option' + (n.toLowerCase() === tlSoundName(c).toLowerCase() ? ' selected' : '') + '>' + esc(n) + '</option>').join('') + '</select>'
+            + '<label>Length (ms)</label><input type="number" id="tpDur" min="1" step="100" value="' + (+c.duration_ms || TL_SOUND_CUE_MS) + '">';
     } else {
         const anims = (tl.info && tl.info.animations) || [];
         html += '<label>Animation</label><select id="tpClip">' + anims.map(n => '<option' + (n.toLowerCase() === (clip.name || '').toLowerCase() ? ' selected' : '') + '>' + esc(n) + '</option>').join('') + '</select>'
@@ -2833,6 +2877,12 @@ function tlPropChanged(ev) {
         if (fade) st.fade_ms = fade;
         c.state = st;
         if (dur && wasState) c.duration_ms = dur;
+    } else if (kind === 'sound') {
+        // the mode's own values changed for this cue (palette and so on) stay
+        const spec = typeof prev.sound === 'object' && prev.sound ? JSON.parse(JSON.stringify(prev.sound)) : {};
+        spec.mode = g('tpSound') ? g('tpSound').value : (((tl.info && tl.info.sound_modes) || [])[0] || '');
+        c.sound = spec;
+        c.duration_ms = Math.max(1, tlKind(prev) === 'sound' ? (dur || TL_SOUND_CUE_MS) : TL_SOUND_CUE_MS);
     } else {
         const anims = (tl.info && tl.info.animations) || [];
         const clip = {name: g('tpClip') ? g('tpClip').value : (anims[0] || ''), fit: g('tpFit') ? g('tpFit').value : 'stretch'};

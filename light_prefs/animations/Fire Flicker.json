@@ -1,6 +1,7 @@
 {
   "name": "Fire Flicker",
   "description": "Warm flickering tones simulating firelight",
+  "tags": ["intense", "smooth", "warm"],
   "loop": true,
   "keyframes": [
     {

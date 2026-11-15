@@ -88,7 +88,7 @@ An animation is a list of keyframes. Each keyframe holds a colour for some time,
 
 Playback settings: speed (0.25x to 4x), update rate during fades (1 to 30 per second, default 5), brightness scaling (applied at playback, the file is unchanged), looping, and whether to return the lights to their previous state when the animation ends. With parallel writes on, every light is updated at once rather than one after another, which keeps fades smooth with several lights; turn it off if your Bluetooth adapter struggles.
 
-New animations can start from one of six templates, or be built in the animation editor, which works on keyframes as a table with a live colour preview and a JSON tab for direct editing. Animation files are JSON in `light_prefs/animations` and target lights by name, number, MAC address, or `*` for all of them.
+New animations can start from one of six templates, or be built in the animation editor, which works on keyframes as a table with a live colour preview and a JSON tab for direct editing. Animation files are JSON in `light_prefs/animations` and target lights by name, number, MAC address, or `*` for all of them. An animation can carry `tags`: the shipped ones have an energy (calm, lively, intense), a feel (smooth, punchy, hard) and colour words, as sound modes do. The animation lists show each animation's flash rate at the chosen speed, in red when it's over the 3-a-second limit (the flash guard then slows it).
 
 ### Light roles and brightness limits
 

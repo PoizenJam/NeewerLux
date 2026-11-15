@@ -80,6 +80,28 @@ def fixedTables(widget):
     return bad
 
 
+def checkFlashRates(nl, app, win):
+    """The Animations list shows each animation's flash rate at the chosen speed, over the limit in red."""
+    nl.savedAnimations["Test Strobe"] = {"name": "Test Strobe", "loop": True, "keyframes": [
+        {"hold_ms": 80, "fade_ms": 0, "lights": {"*": {"mode": "CCT", "temp": 56, "bri": 100}}},
+        {"hold_ms": 80, "fade_ms": 0, "lights": {"*": {"mode": "CCT", "temp": 56, "bri": 0}}}]}
+    try:
+        win.animSpeedCombo.setCurrentText("1x")
+        win.animRefreshList()
+        items = {win.animList.item(r).data(nl.Qt.UserRole): win.animList.item(r) for r in range(win.animList.count())}
+        strobe, calm = items["Test Strobe"], items[sorted(n for n in items if n and n != "Test Strobe")[0]]
+        assert "over the limit" in strobe.text() and strobe.foreground().color().red() > 200, strobe.text()
+        assert "flashes/s" in calm.text() or "no flashes" in calm.text(), calm.text()
+        win.animSpeedCombo.setCurrentText("0.25x")
+        app.processEvents()
+        assert "over the limit" not in items["Test Strobe"].text(), "the rate follows the speed: " + items["Test Strobe"].text()
+        win.animSpeedCombo.setCurrentText("1x")
+    finally:
+        del nl.savedAnimations["Test Strobe"]
+        win.animRefreshList()
+    print("Animation flash rates: PASS")
+
+
 def checkSoundTab(nl, app, win, rig):
     """1.4.0: the Sound tab starts, tunes, edits, saves and stops a sound mode, live."""
     if nl.audio.np is None:
@@ -214,6 +236,7 @@ def main():
     app.processEvents()
     checkWorkerUsesGuiThread(nl, app, win)
     checkSoundTab(nl, app, win, rig)
+    checkFlashRates(nl, app, win)
 
     # Sequences panel and status timer
     nl.savedSequences["Smoke"] = {"format": 1, "name": "Smoke", "duration_ms": 1500,

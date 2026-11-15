@@ -1,6 +1,7 @@
 {
   "name": "Thunderstorm",
   "description": "Dark moody blue with sudden bright lightning flashes",
+  "tags": ["intense", "punchy", "cool"],
   "loop": true,
   "keyframes": [
     {

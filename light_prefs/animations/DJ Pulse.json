@@ -1,6 +1,7 @@
 {
   "name": "DJ Pulse",
   "description": "Fast rhythmic color alternation inspired by DJ booth lighting",
+  "tags": ["intense", "hard", "rainbow", "neon", "chase"],
   "loop": true,
   "keyframes": [
     {

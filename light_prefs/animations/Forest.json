@@ -1,6 +1,7 @@
 {
   "name": "Forest",
   "description": "Dappled greens and warm earth tones like sunlight through a canopy",
+  "tags": ["lively", "smooth", "colourful"],
   "loop": true,
   "keyframes": [
     {"hold_ms": 2000, "fade_ms": 3000, "lights": {"*": {"mode": "HSI", "hue": 110, "sat": 60, "bri": 50}}},

@@ -362,6 +362,9 @@ def animationErrors(anim):
     """Problems that would make parts of an animation silently do nothing: a light entry
     without a mode, or with a mode lights don't understand. Scenes can be "ANM" or "SCENE"."""
     errors = []
+    tags = anim.get("tags", [])
+    if not isinstance(tags, list) or not all(isinstance(t, str) and t.strip() for t in tags):
+        errors.append("\"tags\" must be a list of words")
     for i, kf in enumerate(anim.get("keyframes", []) or []):
         if not isinstance(kf, dict):
             errors.append("keyframe %d isn't an object" % (i + 1))
@@ -672,7 +675,7 @@ class SequenceClock:
 
 class Cue:
     __slots__ = ("index", "at", "dur", "target", "kind", "clipName", "fit", "brightness",
-                 "speed", "state", "fade", "raw")
+                 "speed", "state", "fade", "soundMode", "raw")
 
 
 class Sequence:
@@ -684,8 +687,9 @@ class SequencePlayer:
     parallel = True
     revert = True
 
-    def __init__(self, seq, resolver, clipLookup, baseCmd):
+    def __init__(self, seq, resolver, clipLookup, baseCmd, features=None):
         self.seq = seq
+        self.features = features or (lambda: None)  # live sound analysis, for sound cues
         self.fadeInMs = seq.fadeInMs     # from the file; the play request can override both
         self.fadeOutMs = seq.handbackMs
         self.name = seq.name
@@ -701,6 +705,9 @@ class SequencePlayer:
         self._tickCache = {}
         self._fromCache = {}
         self.timelines = {}
+        self.soundPlayers = {}    # sound cue index -> SoundPlayer on that cue's lights
+        self._soundFrames = {}    # sound cue index -> its output this frame (while it plays)
+        self._soundActive = set()
         for cue in seq.cues:
             if cue.kind == "clip":
                 anim = clipLookup(cue.clipName)
@@ -727,6 +734,8 @@ class SequencePlayer:
                         if k not in keys:
                             keys.append(k)
                 self.clipMaps[cue.index] = buildKeyMap(keys, self.resolver, targetIdx)
+            if cue.kind == "sound" and cue.soundMode is not None:
+                self.soundPlayers[cue.index] = SoundPlayer(cue.soundMode, self.resolver, self.features, targetIdx)
             for idx in targetIdx:
                 self.lightCues.setdefault(idx, []).append(cue)
         for idx in self.lightCues:
@@ -784,6 +793,14 @@ class SequencePlayer:
                 if v is None:
                     continue  # the clip doesn't use this light; look further back
                 return v
+            if cue.kind == "sound":
+                # this frame's output while it plays; its last output for a fade that follows it
+                sp = self.soundPlayers.get(cue.index)
+                frame = self._soundFrames.get(cue.index) if cue.index in self._soundActive else (sp.lastOut if sp else None)
+                v = (frame or {}).get(idx)
+                if v is None:
+                    continue
+                return dict(v)
             target = cue.state
             if cue.fade > 0 and pos < cue.at + cue.fade:
                 frm = self._fromState(cue, idx)
@@ -817,6 +834,7 @@ class SequencePlayer:
             self.lastOut = {}
             return {}, False
         self._tickCache = {}
+        self._runSoundCues(pos, nowMs)
         out = {}
         for idx in self.lightCues:
             v = self._evalLight(idx, pos)
@@ -824,6 +842,24 @@ class SequencePlayer:
                 out[idx] = v
         self.lastOut = out
         return out, False
+
+    def _runSoundCues(self, pos, nowMs):
+        """Step the sound cues playing at pos (each starts afresh when the playhead enters it)."""
+        self._soundFrames = {}
+        for cue in self.seq.cues:
+            sp = self.soundPlayers.get(cue.index)
+            if sp is None:
+                continue
+            if cue.at <= pos < cue.at + cue.dur:
+                if cue.index not in self._soundActive:
+                    self._soundActive.add(cue.index)
+                    sp.start(nowMs)
+                self._soundFrames[cue.index] = sp.frame(nowMs)[0]
+            else:
+                self._soundActive.discard(cue.index)
+
+    def hasSoundCues(self):
+        return bool(self.soundPlayers)
 
     def nextChange(self, nowMs):
         """When the next frame can differ (monotonic ms), or None while paused. Cue onsets and
@@ -861,6 +897,11 @@ class SequencePlayer:
                     continue
                 # the first frame of the cue's grid that samples the clip at or after its change
                 k = math.ceil(n * scale / self.frameMs - 1e-9)
+            elif cue.kind == "sound":
+                sp = self.soundPlayers.get(cue.index)
+                if sp is not None:
+                    nxt = min(nxt, pos + sp.frameMs)  # live: frames at the mode's rate
+                continue
             elif cue.fade > 0 and pos < cue.at + cue.fade:
                 k = 0
             else:
@@ -872,6 +913,30 @@ class SequencePlayer:
     def describe(self, nowMs):
         return {"type": "sequence", "name": self.name, "state": self.state,
                 "position_ms": int(self.position(nowMs)), "duration_ms": int(self.seq.duration)}
+
+
+def animationFlashRate(anim, speed=1.0):
+    """An animation's worst flashes in any second, played on its own at speed (looped, as
+    the Animations tab plays it): {"flashes", "red"}, the worst over its lights, before the
+    flash guard. Firmware scenes can't be measured and count as steady."""
+    tl = AnimationTimeline(anim, speed=speed, fps=FLASH_CHECK_FPS, loop=True, legacy=False)
+    loopMs = tl.d0 if tl.d0 > 0 else 1000
+    endMs = int(min(60000, max(6000, loopMs * 3)))
+    samples = {}
+    for k in range(int(endMs * FLASH_CHECK_FPS / 1000)):
+        tau = k * 1000.0 / FLASH_CHECK_FPS
+        state, _, _ = tl.frameAt(tau)
+        for key, cmd in state.items():
+            if cmd.get("mode") in ("HSI", "CCT"):
+                samples.setdefault(key, []).append((tau / 1000.0, cmd))
+    worst = {"flashes": 0.0, "red": 0.0}
+    for smp in samples.values():
+        r = analyzeFlashes(smp)
+        worst = {"flashes": max(worst["flashes"], r["flashes"]), "red": max(worst["red"], r["red"])}
+    return worst
+
+
+FLASH_CHECK_FPS = 30  # frames a second when measuring an animation's flash rate
 
 
 # ============================================================================
@@ -894,8 +959,12 @@ def _num(v, name, lo, hi, errors, where, default=None, integer=True):
     return n
 
 
-def parseSequence(data, clipExists, defaultFps=DEFAULT_SEQUENCE_FPS, resolveTarget=None):
+def parseSequence(data, clipExists, defaultFps=DEFAULT_SEQUENCE_FPS, resolveTarget=None, soundLookup=None):
     """Validate a sequence dict. Returns (Sequence or None, errors, warnings).
+
+    soundLookup(spec) gives a sound cue's mode: (SoundMode or None, errors), from its "sound"
+    object ({"mode": name, plus any values to change}). Without it sound cues are checked
+    for shape only and play nothing.
 
     Error messages name the cue and field so a generator can fix them. Keys this
     version doesn't use (tempo, palette, sections, notes, per-cue palette) are kept
@@ -952,16 +1021,28 @@ def parseSequence(data, clipExists, defaultFps=DEFAULT_SEQUENCE_FPS, resolveTarg
         cue.index, cue.raw = i, rc
         cue.at = _num(rc.get("at_ms"), "at_ms", 0, None, errors, where, default=0)
         cue.target = str(rc.get("target", "*")).strip() or "*"
-        cue.state, cue.clipName, cue.fade = None, None, 0
+        cue.state, cue.clipName, cue.fade, cue.soundMode = None, None, 0, None
         cue.fit, cue.brightness, cue.speed = "stretch", 100, 1.0
-        hasClip, hasState = "clip" in rc, "state" in rc
-        if hasClip == hasState:
-            errors.append(where + ": needs exactly one of 'clip' or 'state'")
+        hasClip, hasState, hasSound = "clip" in rc, "state" in rc, "sound" in rc
+        if hasClip + hasState + hasSound != 1:
+            errors.append(where + ": needs exactly one of 'clip', 'state' or 'sound'")
             continue
         if seq.duration is not None and cue.at >= seq.duration:
             warnings.append(where + ": at_ms " + str(cue.at) + " is past the end of the sequence, it will never play")
 
-        if hasClip:
+        if hasSound:
+            cue.kind = "sound"
+            spec = rc["sound"]
+            if isinstance(spec, str):
+                spec = {"mode": spec}
+            if not isinstance(spec, dict) or not str(spec.get("mode", "")).strip():
+                errors.append(where + ": 'sound' needs a 'mode' (a sound mode name)")
+                continue
+            if soundLookup is not None:
+                cue.soundMode, soundErrors = soundLookup(spec)
+                errors.extend(where + ": " + e for e in soundErrors)
+            cue.dur = _num(rc.get("duration_ms"), "duration_ms", 1, None, errors, where)
+        elif hasClip:
             cue.kind = "clip"
             clip = rc["clip"]
             if isinstance(clip, str):

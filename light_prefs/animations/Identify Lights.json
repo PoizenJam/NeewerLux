@@ -1,4 +1,4 @@
-{"name":"Identify Lights","description":"CCT utility: each light blinks N times matching its ID (1-4)","loop":false,"keyframes":[
+{"name":"Identify Lights","description":"CCT utility: each light blinks N times matching its ID (1-4)","tags":["intense","hard","white","chase"],"loop":false,"keyframes":[
 {"hold_ms":500,"fade_ms":0,"lights":{"*":{"mode":"CCT","temp":56,"bri":5}}},
 {"hold_ms":400,"fade_ms":0,"lights":{"1":{"mode":"CCT","temp":56,"bri":100},"2":{"mode":"CCT","temp":56,"bri":5},"3":{"mode":"CCT","temp":56,"bri":5},"4":{"mode":"CCT","temp":56,"bri":5}}},
 {"hold_ms":400,"fade_ms":0,"lights":{"*":{"mode":"CCT","temp":56,"bri":5}}},

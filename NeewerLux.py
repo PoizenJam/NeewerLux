@@ -1419,7 +1419,28 @@ try: # try to load the GUI
                     label += "  [" + str(kfCount) + " frames]"
                     item = QListWidgetItem(label)
                     item.setData(Qt.UserRole, name)
+                    item.setData(Qt.UserRole + 1, label)
+                    if savedAnimations[name].get("tags"):
+                        item.setToolTip("Tags: " + ", ".join(savedAnimations[name]["tags"]))
                     self.animList.addItem(item)
+            self.animShowFlashRates()
+
+        def animShowFlashRates(self, *args):
+            """Each animation's flash rate at the chosen speed after its name; over the limit in red."""
+            try:
+                speed = float(self.animSpeedCombo.currentText().replace("x", ""))
+            except ValueError:
+                return
+            rates = animationFlashRates(speed)
+            for row in range(self.animList.count()):
+                item = self.animList.item(row)
+                name = item.data(Qt.UserRole)
+                if name not in rates:
+                    continue
+                rate = rates[name]
+                item.setText(item.data(Qt.UserRole + 1) + "  " + flashRateText(rate))
+                over = max(rate["flashes"], rate["red"]) > show.FLASH_LIMIT_PER_SECOND
+                item.setForeground(QColor(255, 120, 110) if over else self.animList.palette().text().color())
 
         # ================================================================
         # SEQUENCE PANEL HANDLERS
@@ -2526,6 +2547,7 @@ try: # try to load the GUI
 
             # ANIMATION TAB CONNECTIONS
             self.animPlayButton.clicked.connect(self.animPlay)
+            self.animSpeedCombo.currentTextChanged.connect(self.animShowFlashRates)
             self.animStopButton.clicked.connect(self.animStop)
             self.animNewButton.clicked.connect(self.animNew)
             self.animEditButton.clicked.connect(self.animEdit)
@@ -7537,7 +7559,9 @@ class _ShowHooks:
         if info["event"] == "end":
             printDebugString(info["kind"].capitalize() + " '" + info["name"] + "' stopped on the " + info["layer"] + " layer (" + info.get("reason", "") + ")")
             if info["layer"] == "sound" and info.get("reason") == "manual":
-                audioEngine.stop()  # a preset or slider took over one of its lights
+                _releaseCapture()  # a preset or slider took over one of its lights
+            elif info["kind"] == "sequence":
+                _releaseCapture()  # its sound cues no longer listen
         elif info["event"] in ("queued", "pause", "resume"):
             printDebugString(info["kind"].capitalize() + " '" + info["name"] + "' " + info["event"] + (" on the " + info["layer"] + " layer" if info["event"] == "queued" else ""))
 
@@ -7813,7 +7837,36 @@ def draftFromSong(body):
 def buildSequence(data):
     """Validate a sequence dict. Returns (parsed or None, errors, warnings)."""
     return show.parseSequence(data, lambda n: resolveAnimationName(n) is not None,
-                              defaultFps=seqFrameRate, resolveTarget=_showResolve)
+                              defaultFps=seqFrameRate, resolveTarget=_showResolve, soundLookup=_soundCueMode)
+
+
+def _soundCueMode(spec):
+    """A sequence sound cue's mode: a saved sound mode with the cue's values changed (a palette
+    can be given by name). Returns (SoundMode or None, errors)."""
+    resolved = resolveSoundModeName(str(spec.get("mode", "")))
+    if resolved is None:
+        return None, ["no sound mode named " + repr(spec.get("mode"))]
+    mode, errors, _ = buildSoundMode(savedSoundModes[resolved])
+    params = {k: v for k, v in spec.items() if k != "mode"}
+    params, paletteError = _paletteByName(params)
+    if paletteError:
+        return None, [paletteError]
+    if mode is not None and params:
+        mode, errors = show.soundModeWithParams(mode, params, seqFrameRate)
+    return mode, errors
+
+
+def _captureNeeded():
+    """Whether anything still listens: the sound layer, or a sequence with sound cues."""
+    if showEngine is None:
+        return False
+    return any(p is not None and (isinstance(p, show.SoundPlayer) or (isinstance(p, show.SequencePlayer) and p.hasSoundCues()))
+               for p in showEngine.layers.values())
+
+
+def _releaseCapture():
+    if not _captureNeeded():
+        audioEngine.stop()
 
 
 def _sequenceBaseCommand(lightIdx):
@@ -7841,7 +7894,9 @@ def startSequence(nameOrData, startMs=0, fadeIn=None, fadeOut=None):
     if seq is None:
         return {"success": False, "errors": errors, "warnings": seqWarnings}
     player = show.SequencePlayer(seq, _showResolve, lambda n: savedAnimations.get(resolveAnimationName(n)),
-                                 _sequenceBaseCommand)
+                                 _sequenceBaseCommand, audioEngine.features)
+    if player.hasSoundCues() and soundAvailable()[0]:
+        audioEngine.start(soundDevice)  # its sound cues listen while it plays
     if _fadeValue(fadeIn) is not None:
         player.fadeInMs = _fadeValue(fadeIn)
     if _fadeValue(fadeOut) is not None:
@@ -7901,6 +7956,9 @@ class SequenceEditorHost:
     def animationNames(self):
         return sorted(savedAnimations.keys(), key=str.lower)
 
+    def soundModeNames(self):
+        return sorted(savedSoundModes.keys(), key=str.lower)
+
     def render(self, seq):
         return renderSequence(seq)
 
@@ -7946,8 +8004,10 @@ def renderSequence(nameOrData, stepMs=None, startMs=0, endMs=None):
     if seq is None:
         return {"success": False, "errors": errors, "warnings": seqWarnings}
 
+    # sound cues follow live sound, which a render doesn't have: they show a steady middle
+    # level, and their lights are marked "sound"
     player = show.SequencePlayer(seq, _showResolve, lambda n: savedAnimations.get(resolveAnimationName(n)),
-                                 _sequenceBaseCommand)
+                                 _sequenceBaseCommand, lambda: RENDER_SOUND_FEATURES)
     player.start(0.0, 0)
     try:
         startMs = max(0, int(startMs or 0))
@@ -7972,6 +8032,7 @@ def renderSequence(nameOrData, stepMs=None, startMs=0, endMs=None):
 
     for t in range(startMs, endMs, step):
         out, _ = player.frame(float(t))
+        soundLights = {i for ci in player._soundActive for i in player.cueTargets.get(ci, ())}
         for idx, meta in enumerate(lights):
             cmd = None if meta["locked"] else out.get(idx)
             source = "base"
@@ -7980,7 +8041,7 @@ def renderSequence(nameOrData, stepMs=None, startMs=0, endMs=None):
                 byteVal = commandToByteValue(idx, cmd)
                 if byteVal is not None:
                     shown = show.bytesToCommand(applyBrightnessEnvelope(idx, byteVal))
-                    source = "sequence"
+                    source = "sound" if idx in soundLights else "sequence"
                 else:
                     shown = last.get(idx, (None, shown))[1]  # the CCT-only "ignore" setting leaves the light as it was
             samples.setdefault(idx, []).append((t / 1000.0, shown))
@@ -7994,6 +8055,8 @@ def renderSequence(nameOrData, stepMs=None, startMs=0, endMs=None):
     for cue in seq.cues:
         if cue.kind == "clip":
             what = cue.clipName + " (" + cue.fit + (", " + str(cue.brightness) + "%" if cue.brightness != 100 else "") + ")"
+        elif cue.kind == "sound":
+            what = "sound: " + str(cue.raw["sound"]["mode"] if isinstance(cue.raw["sound"], dict) else cue.raw["sound"])
         else:
             st = cue.state
             what = ("HSI %d/%d/%d" % (st["hue"], st["sat"], st["bri"])) if st["mode"] == "HSI" else ("CCT %dK %d%%" % (st["temp"] * 100, st["bri"]))
@@ -8009,6 +8072,33 @@ def renderSequence(nameOrData, stepMs=None, startMs=0, endMs=None):
     return {"success": True, "sequence": seq.name, "duration_ms": seq.duration, "start_ms": startMs,
             "end_ms": endMs, "step_ms": step, "lights": lights, "changes": changes, "cues": cues,
             "flashes": flashes, "warnings": seqWarnings}
+
+
+_flashRateCache = {}  # (name, speed, animation as JSON) -> flash rates
+
+
+def animationFlashRates(speed=1.0):
+    """{name: {"flashes", "red"}} for every saved animation played on its own at speed (as the
+    Animations tab plays it), before the flash guard. Cached until an animation changes."""
+    out = {}
+    for name, anim in list(savedAnimations.items()):
+        key = (name, float(speed), json.dumps(anim, sort_keys=True))
+        if key not in _flashRateCache:
+            _flashRateCache[key] = show.animationFlashRate(anim, float(speed))
+        out[name] = _flashRateCache[key]
+    return out
+
+
+def flashRateText(rate):
+    """How the animation lists show a flash rate; over the limit says so."""
+    worst = max(rate["flashes"], rate["red"])
+    if worst > show.FLASH_LIMIT_PER_SECOND:
+        return "%.1f flashes/s, over the limit (the flash guard slows it)" % worst
+    return "%.1f flashes/s" % worst if worst > 0 else "no flashes"
+
+
+RENDER_SOUND_FEATURES = {"level": 0.5, "low": 0.5, "mid": 0.5, "high": 0.5, "centroid": 0.5,
+                         "silent": False, "beat": 0, "bpm": 0.0}
 
 
 def animationFlashReport(name, speed=1.0, seconds=None):
@@ -8033,10 +8123,10 @@ def renderSequencePNG(result, width=1600):
     text drawing needs the font system; a headless --http install gets the data only."""
     try:
         from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QRectF, Qt as _Qt
-        from PySide6.QtGui import QImage, QPainter, QColor as _QColor, QGuiApplication, QPen as _QPen
+        from PySide6.QtGui import QImage, QPainter, QColor as _QColor, QGuiApplication, QPen as _QPen, QBrush as _QBrush
     except ImportError:
         from PySide2.QtCore import QBuffer, QByteArray, QIODevice, QRectF, Qt as _Qt
-        from PySide2.QtGui import QImage, QPainter, QColor as _QColor, QGuiApplication, QPen as _QPen
+        from PySide2.QtGui import QImage, QPainter, QColor as _QColor, QGuiApplication, QPen as _QPen, QBrush as _QBrush
     if QGuiApplication.instance() is None:
         raise RuntimeError("the image strip needs the NeewerLux window running; use format json")
 
@@ -8069,7 +8159,10 @@ def renderSequencePNG(result, width=1600):
         for i, (t, colour, bri, mode, source) in enumerate(segs):
             tEnd = segs[i + 1][0] if i + 1 < len(segs) else result["end_ms"]
             fill = _QColor(colour) if colour else _QColor(60, 60, 60)
-            p.fillRect(QRectF(xAt(t), y + 3, max(1.0, xAt(tEnd) - xAt(t)), rowH - 6), fill)
+            box = QRectF(xAt(t), y + 3, max(1.0, xAt(tEnd) - xAt(t)), rowH - 6)
+            p.fillRect(box, fill)
+            if source == "sound":  # follows live sound: hatched, since the colour shown is only typical
+                p.fillRect(box, _QBrush(_QColor(255, 255, 255, 110), _Qt.BDiagPattern))
 
     secs = span / 1000.0
     tick = next((n for n in (1, 2, 5, 10, 15, 30, 60, 120) if secs / n <= 16), 300)
@@ -8412,7 +8505,7 @@ def stopSound(lights=None):
         stopped = True
     else:
         stopped = showEngine.stopLayer(show.LAYER_SOUND) if showEngine is not None else False
-    audioEngine.stop()
+    _releaseCapture()
     return stopped
 
 
@@ -9270,6 +9363,7 @@ class NLPythonServer(BaseHTTPRequestHandler):
                                 modes.add(lp.get("mode", "HSI").upper())
                         animData.append({"name": aName,
                                          "description": aData.get("description", ""),
+                                         "tags": aData.get("tags", []),
                                          "frames": len(aData.get("keyframes", [])),
                                          "loop": aData.get("loop", False),
                                          "modes": sorted(modes)})
@@ -9620,12 +9714,20 @@ class NLPythonServer(BaseHTTPRequestHandler):
                 else:
                     stopAnimation(layerName, clearQueue=bool(body.get("clear_queue", False)))
                 resultData = {"success": True, "action": "stop", "layer": layerName}
+            elif action == "flash_rates":
+                try:
+                    speed = max(0.05, min(20.0, float(body.get("speed", 1))))
+                except (TypeError, ValueError):
+                    speed = 1.0
+                resultData = {"success": True, "speed": speed, "limit": show.FLASH_LIMIT_PER_SECOND,
+                              "rates": {n: dict(r, text=flashRateText(r)) for n, r in animationFlashRates(speed).items()}}
             elif action == "list":
                 animList = []
                 for aName, aData in sorted(savedAnimations.items()):
                     animList.append({
                         "name": aName,
                         "description": aData.get("description", ""),
+                        "tags": aData.get("tags", []),
                         "keyframes": len(aData.get("keyframes", [])),
                         "loop": aData.get("loop", False)
                     })
@@ -9710,7 +9812,7 @@ class NLPythonServer(BaseHTTPRequestHandler):
                 resultData = {"success": True, "action": "editor", "lights": lights,
                               "targets": {str(t): [idOf[i] for i in host.resolveTarget(str(t)) if i in idOf] for t in targets},
                               "choices": [{"label": c[0], "target": c[1]} for c in host.targetChoices()],
-                              "animations": host.animationNames(), "presets": numOfPresets}
+                              "animations": host.animationNames(), "sound_modes": host.soundModeNames(), "presets": numOfPresets}
             elif action == "get":
                 resolved = resolveSequenceName(body.get("name", ""))
                 if resolved is None:

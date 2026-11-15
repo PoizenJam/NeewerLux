@@ -1,6 +1,7 @@
 {
   "name": "Stage Wash",
   "description": "Slow theatrical color transitions with independent light movement",
+  "tags": ["lively", "smooth", "colourful", "neon", "chase"],
   "loop": true,
   "keyframes": [
     {

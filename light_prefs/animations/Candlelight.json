@@ -1,6 +1,7 @@
 {
   "name": "Candlelight",
   "description": "Gentle warm candle flicker with subtle movement",
+  "tags": ["calm", "smooth", "warm"],
   "loop": true,
   "keyframes": [
     {

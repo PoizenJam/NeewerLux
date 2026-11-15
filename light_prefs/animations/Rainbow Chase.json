@@ -1,6 +1,7 @@
 {
   "name": "Rainbow Chase",
   "description": "Continuous staggered color flow across 4 lights",
+  "tags": ["lively", "smooth", "rainbow", "neon", "chase"],
   "loop": true,
   "keyframes": [
     {

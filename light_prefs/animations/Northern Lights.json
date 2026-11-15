@@ -1,6 +1,7 @@
 {
   "name": "Northern Lights",
   "description": "Slow-moving greens and purples like an aurora borealis",
+  "tags": ["lively", "smooth", "colourful", "chase"],
   "loop": true,
   "keyframes": [
     {

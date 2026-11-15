@@ -43,9 +43,10 @@ rejected with an error message naming the cue and field.
 |---|---|---|---|
 | `at_ms` | yes (defaults to 0) | integer, 0 or more | When the cue starts, in ms from the start of the sequence. |
 | `target` | no | string, default `"*"` | Which lights. See Targets. |
-| `state` | one of `state` or `clip` | object | Set a colour, optionally with a fade. |
-| `clip` | one of `state` or `clip` | object or string | Play an existing animation, stretched or looped to fill the cue. |
-| `duration_ms` | clip: yes; state: no | integer | Clip: how long the clip plays (1 or more). State: 0 or omitted means hold until a later cue changes that light; a positive value ends the cue after that long, and the light goes back to the look it had before the cue (or its pre-sequence state). |
+| `state` | one of `state`, `clip` or `sound` | object | Set a colour, optionally with a fade. |
+| `clip` | one of `state`, `clip` or `sound` | object or string | Play an existing animation, stretched or looped to fill the cue. |
+| `sound` | one of `state`, `clip` or `sound` | object or string | Hand the lights to a sound mode for the cue's length: they follow live sound. See Sound cues. |
+| `duration_ms` | clip and sound: yes; state: no | integer | Clip: how long the clip plays (1 or more). Sound: how long the lights follow the sound mode (1 or more). State: 0 or omitted means hold until a later cue changes that light; a positive value ends the cue after that long, and the light goes back to the look it had before the cue (or its pre-sequence state). |
 | `palette` | no | any | Reserved (per-cue palette override). Ignored now. |
 | `label`, `comment` | no | string | Ignored; useful for people reading the file. |
 
@@ -104,6 +105,31 @@ If the target has more lights than the clip has numbers, the numbers repeat (a 2
 clip on 4 lights gives 1, 2, 1, 2). If it has fewer, the extra numbers go unused. A clip
 key that names a specific light (a name, MAC address or `@role`) only applies if that
 light is inside the target.
+
+### Sound cues
+
+A sound cue hands its lights to a sound mode (see SOUND_MODES.md) for its `duration_ms`,
+then lets the next cue take over. `sound` is a mode name, or an object with `mode` (the
+name) and any of the mode's values to change for this cue: `sensitivity`, `range_db`,
+`floor`, `ceiling`, `smoothing`, `curve`, `palette` (a list of colours or a saved
+palette's name), `cycle_s`, `fps` and `parts`.
+
+```json
+{"at_ms": 32000, "duration_ms": 16000, "target": "@rim;@background;@practical", "sound": {"mode": "Hard Chase", "palette": "Neon"}}
+```
+
+The cue plays inside the sequence: no Fade in or Fade back at its edges (as for any cue),
+and a state cue with a fade after it fades from the last thing the sound mode showed. A
+light the cue covers follows the first part of the mode whose target includes it, or else
+the mode's first part, so a mode's parts can still split the cue's lights (bass on the
+background, treble on the rim). While a sequence with sound cues plays, NeewerLux listens
+on the sound device chosen for sound modes, and stops listening when it ends (unless a
+sound mode is playing). The mode keeps itself under 2 flashes a second, and the flash
+guard still applies.
+
+A render can't hear the song, so a sound cue renders as a steady middle level in the
+mode's colours, marked `"sound"` as its source (hatched in the render image and in the
+timeline editors).
 
 ### Which cue wins
 
@@ -211,6 +237,12 @@ renumbered or replaced.
               "fade_ms": {"type": "integer", "minimum": 0}
             }
           },
+          "sound": {
+            "oneOf": [
+              {"type": "string", "minLength": 1},
+              {"type": "object", "required": ["mode"], "properties": {"mode": {"type": "string", "minLength": 1}}}
+            ]
+          },
           "clip": {
             "oneOf": [
               {"type": "string", "minLength": 1},
@@ -229,7 +261,8 @@ renumbered or replaced.
         },
         "oneOf": [
           {"required": ["state"]},
-          {"required": ["clip", "duration_ms"]}
+          {"required": ["clip", "duration_ms"]},
+          {"required": ["sound", "duration_ms"]}
         ]
       }
     }
@@ -237,8 +270,9 @@ renumbered or replaced.
 }
 ```
 
-The validator also checks that each clip names an existing animation, which a schema
-can't, and treats a clip `duration_ms` of 0 as an error.
+The validator also checks that each clip names an existing animation and each sound cue
+an existing sound mode (with values in range), which a schema can't, and treats a clip or
+sound `duration_ms` of 0 as an error.
 
 ### Example
 

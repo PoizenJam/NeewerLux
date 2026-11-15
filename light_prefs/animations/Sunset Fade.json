@@ -1,6 +1,7 @@
 {
   "name": "Sunset Fade",
   "description": "Slow warm-to-cool transition like a sunset into twilight",
+  "tags": ["lively", "smooth", "rainbow"],
   "loop": true,
   "keyframes": [
     {

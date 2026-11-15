@@ -1,6 +1,7 @@
 {
   "name": "Moonlight",
   "description": "Cool blue-white subtle breathing like moonlight through a window",
+  "tags": ["calm", "smooth", "white", "moody"],
   "loop": true,
   "keyframes": [
     {"hold_ms": 3000, "fade_ms": 4000, "lights": {"*": {"mode": "HSI", "hue": 220, "sat": 15, "bri": 35}}},

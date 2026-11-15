@@ -1,6 +1,7 @@
 {
   "name": "Ocean Waves",
   "description": "Slow blue-green undulation simulating ocean light",
+  "tags": ["lively", "smooth", "cool"],
   "loop": true,
   "keyframes": [
     {

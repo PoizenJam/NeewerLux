@@ -1,6 +1,7 @@
 {
   "name": "Rainbow Gradient",
   "description": "Continuous smooth rainbow sweep through the full spectrum",
+  "tags": ["lively", "smooth", "rainbow", "neon"],
   "loop": true,
   "keyframes": [
     {

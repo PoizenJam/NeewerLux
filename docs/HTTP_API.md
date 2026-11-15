@@ -215,7 +215,8 @@ Response:
 | `{"action": "play", "name": "Concert Sweep", "speed": 1.0, "rate": 5, "brightness": 100, "loop": true, "maxLoops": 3, "revert": true}` | Play on the override layer. Optional `"target": "@rim"`, `"parallel": false` (one light at a time, the v1.3.0 path), `"fade_in_ms"` and `"handback_fade_ms"` (override the animation's and the global fades). On the override layer `revert` sets the Global Preferences option. |
 | `{"action": "play", "name": "Heartbeat", "layer": "effect", "mode": "queue", "target": "@rim"}` | Play as an effect (`mode` `queue` or `replace`) or on the `show` layer; `revert` applies to this request only. `"result": "queue_full"` when the effect queue (10) is full. |
 | `{"action": "stop"}` | Stop the override layer; `"layer": "effect"` (with `"clear_queue": true` to empty the queue), `"show"` or `"all"` |
-| `{"action": "list"}` | `{"animations": [{"name", "description", "keyframes", "loop"}], "currently_playing"}` |
+| `{"action": "list"}` | `{"animations": [{"name", "description", "tags", "keyframes", "loop"}], "currently_playing"}` |
+| `{"action": "flash_rates", "speed": 1.5}` | Each animation's worst flashes in any second played on its own at that speed (default 1), before the flash guard: `{"speed", "limit", "rates": {name: {"flashes", "red", "text"}}}`; `text` is what the animation lists show, and says when it's over the limit. Firmware scenes count as steady. |
 | `{"action": "status"}` | `{"running", "animation", "show"}` where `show` is the `status_json` body |
 | `{"action": "create", "animation": {...}}` | Save an animation (same format as the files in `light_prefs/animations`), replacing any of the same name |
 | `{"action": "get", "name": "Heartbeat"}` | The whole animation: `{"animation": {...}}` |

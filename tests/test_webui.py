@@ -442,6 +442,9 @@ def main():
         js(page, "document.getElementById('targetLight').value = '*'")
         check(js(page, "document.getElementById('soundCard').compareDocumentPosition(document.getElementById('animList')) & Node.DOCUMENT_POSITION_FOLLOWING") > 0,
               "the Sound card comes before Animations")
+        waitFor(page, "[...document.querySelectorAll('#animList .anim-flash')].some(e => e.textContent.indexOf('flashes/s') >= 0)", "flash rates in the animation list")
+        js(page, "document.getElementById('animSpeed').value = '3x'; animShowFlashRates()")
+        waitFor(page, "animFlashRates.speed === 3", "flash rates at the chosen speed")
         js(page, "sndStop()")
         until(lambda: nl.showEngine.soundPlayer() is None, "stop")
         js(page, "window.scrollTo(0, 0)")
@@ -487,6 +490,17 @@ def main():
         js(page, "document.getElementById('tpClip').value = 'Heartbeat'; document.getElementById('tpFit').value = 'loop'; document.getElementById('tpDur').value = '3000'; tlPropChanged();")
         cue = json.loads(js(page, "JSON.stringify(tl.seq.cues[tl.seq.cues.length - 1])"))
         check(cue.get("clip") == {"name": "Heartbeat", "fit": "loop"} and cue.get("duration_ms") == 3000, "clip properties: " + str(cue))
+        js(page, "document.getElementById('tpKind').value = 'sound'; tlPropChanged();")
+        js(page, "tl.seq.cues[tl.seq.cues.length - 1].sound.palette = 'Neon'; tlProps(); document.getElementById('tpSound').value = 'Kick Blink'; tlPropChanged();")
+        cue = json.loads(js(page, "JSON.stringify(tl.seq.cues[tl.seq.cues.length - 1])"))
+        check(cue.get("sound") == {"mode": "Kick Blink", "palette": "Neon"} and "clip" not in cue and cue.get("duration_ms") == 8000,
+              "sound cue properties (its palette kept): " + str(cue))
+        check(js(page, "tlDescribe(tl.seq.cues[tl.seq.cues.length - 1])") == "Sound: Kick Blink", "described as a sound cue")
+        js(page, "tlAddCue('sound')")
+        check("sound" in json.loads(js(page, "JSON.stringify(tl.seq.cues[tl.seq.cues.length - 1])")), "+ Sound cue adds one")
+        js(page, "tlUndo()")
+        js(page, "document.getElementById('tpKind').value = 'clip'; tlPropChanged();")
+        js(page, "document.getElementById('tpClip').value = 'Heartbeat'; document.getElementById('tpFit').value = 'loop'; document.getElementById('tpDur').value = '3000'; tlPropChanged();")
         # copy, paste at the playhead, delete
         js(page, "tlCopy(); tlSetPlayhead(33000); tlPaste(tlSnapMs(tl.playhead));")
         check(js(page, "tl.seq.cues[tl.seq.cues.length - 1].at_ms") == 33000, "paste at the playhead")

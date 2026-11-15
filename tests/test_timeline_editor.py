@@ -160,6 +160,26 @@ def main():
         ed.pDuration.setValue(3000)
         pump(80)
         check(ed.seq["cues"][i]["clip"] == {"name": "Heartbeat", "fit": "loop"} and ed.seq["cues"][i]["duration_ms"] == 3000, str(ed.seq["cues"][i]))
+        # a sound cue: lights follow a sound mode for its length; its own values (palette) survive a mode change
+        ed.pKind.setCurrentIndex(ed.pKind.findData("sound"))
+        pump(80)
+        cue = ed.seq["cues"][i]
+        check("sound" in cue and "clip" not in cue and cue["duration_ms"] == 3000 and ed.pSound.isVisible() and not ed.pClip.isVisible(),
+              "switching to a sound cue: " + str(cue))
+        ed.seq["cues"][i]["sound"]["palette"] = "Neon"
+        ed.pSound.setCurrentText("Kick Blink")
+        pump(80)
+        check(ed.seq["cues"][i]["sound"] == {"mode": "Kick Blink", "palette": "Neon"}, "the mode changes, its palette stays: " + str(ed.seq["cues"][i]))
+        check(tl.describeCue(ed.seq["cues"][i]) == "Sound: Kick Blink",
+              "described as a sound cue")
+        n = len(ed.seq["cues"])
+        ed.addSoundButton.click()
+        pump(80)
+        check(len(ed.seq["cues"]) == n + 1 and "sound" in ed.seq["cues"][-1] and ed.seq["cues"][-1]["duration_ms"] == tl.SOUND_CUE_DEFAULT_MS,
+              "+ Sound cue adds one: " + str(ed.seq["cues"][-1]))
+        ed.grab().save(os.path.join(rig.workdir, "editor_sound_cue.png"))
+        ed.undo()
+        pump(50)
 
     def resizeEnd():
         ed = state["ed"]
