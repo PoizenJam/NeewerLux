@@ -430,6 +430,12 @@ def main():
     for w in app.topLevelWidgets():
         if isinstance(w, SequenceEditor):
             assert not tooBig(w), "the sequence editor fits a small screen: %s" % (tooBig(w),)
+            w.resize(1100, 700)
+            w.show()
+            app.processEvents()
+            assert w.stage.height() <= max(w.stage.minimumHeight(), 700 * 0.35) + 1 and w.stage._scale() < 1.0, \
+                "the preview takes at most about a third of the editor's height, shrunk to fit: %d, scale %.2f" % (w.stage.height(), w.stage._scale())
+            w.grab().save(os.path.join(rig.workdir, "editor_small.png"))
             native.extend(nativeSpins(w))
             native.extend(nativeSpins(w._tempoDialog()))
             w.close()

@@ -1648,6 +1648,7 @@ class ShowCompositor:
         self.effectQueue = []
         self.owner = {}       # idx -> layer driving it
         self.baseStates = {}  # idx -> bytes to restore when no layer drives it
+        self.knownBase = {}   # idx -> the last colour set outside the layers (survives Off and On)
         self.lastSent = {}    # idx -> bytes this compositor last queued
         self.lastCmd = {}
         self.mailbox = {}     # idx -> (bytes, parallel)
@@ -1888,6 +1889,8 @@ class ShowCompositor:
         with self.lock:
             off = isinstance(value, (list, tuple)) and len(value) > 3 and (value[0] == 0 or (value[1] == 129 and value[3] == 2))
             power = off or (isinstance(value, (list, tuple)) and len(value) > 1 and value[1] == 129)
+            if not power and isinstance(value, (list, tuple)) and len(value) > 3:
+                self.knownBase[idx] = list(value)
             if off and self.owner.get(idx, 0) > 0:
                 self.poweredOff[idx] = self.ownerPlayer.get(idx)
             elif not off:
@@ -1917,6 +1920,14 @@ class ShowCompositor:
             d()
         self._wake.set()
         return blocked
+
+    def baseFor(self, idx):
+        """The state a light returns to when nothing drives it: its revert target while a layer
+        drives it, otherwise what it shows."""
+        with self.lock:
+            if self.owner.get(idx, 0) > 0 and idx in self.baseStates:
+                return list(self.baseStates[idx])
+            return list(self.knownBase.get(idx) or self.hooks.currentBytes(idx) or []) or None
 
     def _release(self, idx):
         """Forget a light's layer state: it is the base's again, with nothing to fade back."""
@@ -1957,6 +1968,8 @@ class ShowCompositor:
                 if not isinstance(to, (list, tuple)) or len(to) < 4:
                     continue
                 to = list(OFF_BYTES) if to[0] == 0 else list(to)
+                if to[0] != 0:
+                    self.knownBase[idx] = list(to)
                 fade = self.fades.get(idx)
                 driven = self.owner.get(idx, 0) in (LAYER_SOUND, LAYER_SHOW, LAYER_EFFECT, LAYER_OVERRIDE) and not (fade and fade[3] == 0)
                 if driven:
@@ -2044,6 +2057,7 @@ class ShowCompositor:
                 b = self.hooks.encode(idx, cmd)
                 if b is not None:
                     self.baseStates[idx] = list(b)
+                    self.knownBase[idx] = list(b)
         self._status("end", layer, player, reason=reason)
         if layer == LAYER_EFFECT and self.effectQueue and self.layers[LAYER_EFFECT] is None:
             self._beginPlayer(LAYER_EFFECT, self.effectQueue.pop(0), nowMs, player)
@@ -2106,7 +2120,9 @@ class ShowCompositor:
             fade = self.fades.get(idx)
             if win > 0 and prev == 0 and idx not in self.baseStates:
                 # A revert queued moments ago may not have reached the light's stored value yet
-                cur = self.released.pop(idx, None) or self.hooks.currentBytes(idx)
+                # the light's stored value can be a frame a layer sent (after Off and On during a
+                # show it holds the last one), so the last base write wins over it
+                cur = self.released.pop(idx, None) or self.knownBase.get(idx) or self.hooks.currentBytes(idx)
                 if isinstance(cur, (list, tuple)) and len(cur) > 3:
                     self.baseStates[idx] = list(cur)
             # Who drives the light now, against who did (a fade in progress counts as heading for its target)

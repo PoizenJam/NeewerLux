@@ -4699,8 +4699,10 @@ def saveLightPrefs(lightID, deleteFile = False): # save a sidecar file with the 
         exportString = customName + "|" + customTempRange + "|" + onlyCCTMode # the exported string, minus the light last set parameters
 
         if rememberLightsOnExit == True: # if we're supposed to remember the last settings, then add that to the Prefs file
-            if len(availableLights[lightID][3]) > 0: # if we actually have a value stored for this light
-                lastSettingsString = ",".join(map(str, availableLights[lightID][3])) # combine all the elements of the last set params
+            # the light's base state, not a frame a sound mode or show happened to be sending
+            lastSettings = showEngine.baseFor(lightID) if showEngine is not None else availableLights[lightID][3]
+            if lastSettings: # if we actually have a value stored for this light
+                lastSettingsString = ",".join(map(str, lastSettings)) # combine all the elements of the last set params
                 exportString += "|" + lastSettingsString # add it to the exported string
             else: # if we don't have a value stored for this light (nothing has changed yet)
                 exportString += "|" + "120,135,2,100,56,157" # then just give the default (CCT, 5600K, 100%) params

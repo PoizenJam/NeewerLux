@@ -1607,6 +1607,44 @@ def t_offWinsDuringShows(rig):
     rig.post("/NeewerLux/sequence", {"action": "stop"})
 
 
+def t_soundHandsBackToBase(rig):
+    """1.4.0: when the sound layer lets go of a light it returns to the light's base state, even
+    after the light was switched off and on while sound played (the light's stored value then
+    held the last sound frame, so it went back to a sound colour: Robert saw rim and background
+    return to the wrong colour). Saving the lights' settings on exit saves the base, not a frame."""
+    nl = rig.nl
+    if _needsNumpy(rig):
+        return
+    rig.get("light=*&mode=CCT&temp=33&bri=40", 0.5)
+    _soundSignal(nl)
+    rig.post("/NeewerLux/sound", {"action": "start", "mode": "Pulse"})
+    check(_waitLayers(rig, [None, None, "sound", "sound"])[2:] == ["sound", "sound"], "Pulse running")
+    time.sleep(0.5)
+    rig.get("light=3&off", 0.3)
+    rig.get("light=3&on", 0.3)
+    check(_waitLayers(rig, [None, None, "sound", "sound"])[2] == "sound", "the rim follows the sound again after On")
+    time.sleep(0.5)
+    check(nl.showEngine.baseFor(RIM)[1] == 135 and nl.showEngine.baseFor(RIM)[4] == 33,
+          "its base is still the CCT it had: %s" % nl.showEngine.baseFor(RIM))
+    saved = nl.rememberLightsOnExit
+    try:
+        nl.rememberLightsOnExit = True
+        nl.saveLightPrefs(AMB)
+        path = os.path.join(rig.workdir, "light_prefs", nl.availableLights[AMB][0].address.replace(":", ""))
+        with open(path, encoding="utf-8") as f:
+            last = f.read().split("|")[3]
+        check(last.split(",")[1:5] == ["135", "2", "40", "33"], "saving the lights on exit keeps the base, not a sound frame: %s" % last)
+    finally:
+        nl.rememberLightsOnExit = saved
+    t0 = time.monotonic()
+    rig.post("/NeewerLux/sound", {"action": "stop"})
+    _waitLayers(rig, ["base"] * 4)
+    time.sleep(0.8)
+    for idx in (RIM, AMB):
+        w = writesFor(rig, idx, t0)
+        check(w and w[-1][1][1] == 135 and w[-1][1][4] == 33, "light %d goes back to its base: %s" % (idx + 1, [d for _, d in w][-2:]))
+
+
 def t_manualWriteReleasesSound(rig):
     """1.4.0: recalling a preset or moving a slider on a light the sound layer drives takes that
     light out of the sound layer and shows the new state at once; the layer (and its capture)
@@ -1988,7 +2026,7 @@ TESTS = [t_maxBrightnessHTTP, t_maxBrightnessAnimationAndSequence, t_minBrightne
          t_fadesOnlyBetweenItems,
          t_addSimulatedRig, t_compositorWakesOnlyWhenDue, t_handBackToRunningLayerFades,
          t_soundModeHTTP, t_soundUnderShowAndEffects, t_soundRespectsLimitsAndLocks, t_soundUnavailable, t_soundModeFilesHTTP,
-         t_offWinsDuringShows, t_manualWriteReleasesSound, t_presetFadeTakesLightsFromSound, t_soundOnSomeLights,
+         t_offWinsDuringShows, t_soundHandsBackToBase, t_manualWriteReleasesSound, t_presetFadeTakesLightsFromSound, t_soundOnSomeLights,
          t_presetSounds, t_paletteLibrary, t_songDrafts, t_songHTTP]
 
 

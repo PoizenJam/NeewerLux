@@ -34,6 +34,7 @@ except ImportError:
                                    QSplitter, QStackedWidget, QMessageBox, QMenu, QDialog, QDialogButtonBox,
                                    QInputDialog, QSizePolicy, QFrame, QTextEdit, QShortcut, QFileDialog, QScrollArea)
 
+SEQ_PREVIEW_SHARE = 0.35  # most of the sequence editor's height the Stage preview may take
 SNAP_CHOICES = [("No snap", 0), ("10 ms", 10), ("50 ms", 50), ("100 ms", 100), ("250 ms", 250),
                 ("500 ms", 500), ("1 s", 1000), ("Beat", -1), ("Half beat", -2), ("Bar (4 beats)", -4)]
 UNDO_LIMIT = 200
@@ -1184,6 +1185,12 @@ class SequenceEditor(QWidget):
         QTimer.singleShot(0, self.view.zoomToFit)
 
     # --- properties panel ----------------------------------------------------
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        # the preview takes about a third of the window's height, its grid shrinking to fit, so
+        # the tracks keep most of the room
+        self.stage.setMaximumHeight(max(self.stage.minimumHeight(), int(self.height() * SEQ_PREVIEW_SHARE)))
+
     def _buildProperties(self):
         panel = QWidget()
         panel.setMinimumWidth(260)
