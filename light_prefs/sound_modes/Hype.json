@@ -1,0 +1,46 @@
+{
+  "format": 1,
+  "name": "Hype",
+  "description": "Everything at once: a hard chase on the rim, the background blinking with the kick, colours stepping on the beat.",
+  "tags": [
+    "intense",
+    "hard",
+    "chase",
+    "neon"
+  ],
+  "sensitivity": 1.0,
+  "floor": 0,
+  "ceiling": 85,
+  "smoothing": 0.0,
+  "palette": [
+    {
+      "hue": 300,
+      "sat": 95
+    },
+    {
+      "hue": 190,
+      "sat": 95
+    },
+    {
+      "hue": 55,
+      "sat": 95
+    },
+    {
+      "hue": 130,
+      "sat": 90
+    }
+  ],
+  "parts": [
+    {
+      "target": "@rim",
+      "drive": "beat",
+      "colour": "beat",
+      "chase": true
+    },
+    {
+      "target": "@background;@practical",
+      "drive": "low",
+      "colour": "beat"
+    }
+  ]
+}

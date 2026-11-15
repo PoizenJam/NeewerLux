@@ -1,0 +1,32 @@
+{
+  "format": 1,
+  "name": "Stutter",
+  "description": "Hard on and off with the level, in violet and pink, for glitchy and broken beats.",
+  "tags": [
+    "intense",
+    "hard",
+    "neon"
+  ],
+  "sensitivity": 1.0,
+  "floor": 0,
+  "ceiling": 80,
+  "smoothing": 0.0,
+  "range_db": 12,
+  "palette": [
+    {
+      "hue": 285,
+      "sat": 85
+    },
+    {
+      "hue": 315,
+      "sat": 80
+    }
+  ],
+  "parts": [
+    {
+      "target": "@rim;@background;@practical",
+      "drive": "level",
+      "colour": "beat"
+    }
+  ]
+}

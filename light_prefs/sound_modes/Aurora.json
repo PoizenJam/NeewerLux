@@ -1,0 +1,36 @@
+{
+  "format": 1,
+  "name": "Aurora",
+  "description": "Greens, teals and violet drifting like northern lights.",
+  "tags": [
+    "calm",
+    "smooth",
+    "cool"
+  ],
+  "sensitivity": 1.0,
+  "floor": 20,
+  "ceiling": 60,
+  "smoothing": 0.8,
+  "cycle_s": 40,
+  "palette": [
+    {
+      "hue": 140,
+      "sat": 80
+    },
+    {
+      "hue": 170,
+      "sat": 85
+    },
+    {
+      "hue": 270,
+      "sat": 70
+    }
+  ],
+  "parts": [
+    {
+      "target": "@rim;@background;@practical",
+      "drive": "level",
+      "colour": "cycle"
+    }
+  ]
+}

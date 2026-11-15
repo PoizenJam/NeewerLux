@@ -2,6 +2,11 @@
   "format": 1,
   "name": "Colour Drift",
   "description": "Colour follows the brightness of the sound (deep blues for bass-heavy passages, magentas for bright ones); brightness follows the level.",
+  "tags": [
+    "calm",
+    "smooth",
+    "cool"
+  ],
   "sensitivity": 1.0,
   "floor": 15,
   "ceiling": 70,

@@ -46,11 +46,14 @@ def sectionAt(sections, ms):
 
 
 def describeSection(sec):
-    """A section's name, times and level, for tooltips."""
+    """A section's name, times, part and level, for tooltips."""
     a, b = int(sec.get("start_ms", 0)), int(sec.get("end_ms", 0))
     level = int(sec.get("level", 2))
-    return "%s\n%s to %s (%s)\nLevel %d (%s)" % (sec.get("label") or "Section", fmtTime(a), fmtTime(b), fmtTime(b - a),
-                                                  level, LEVEL_NAMES.get(level, ""))
+    part = ("Part %s\n" % sec["group"]) if sec.get("group") else ""
+    if sec.get("ai_label"):
+        part += "Section finder: %s\n" % sec["ai_label"]
+    return "%s\n%s to %s (%s)\n%sLevel %d (%s)" % (sec.get("label") or "Section", fmtTime(a), fmtTime(b), fmtTime(b - a),
+                                                    part, level, LEVEL_NAMES.get(level, ""))
 
 
 # ============================================================================
@@ -918,7 +921,9 @@ class SongDraftDialog(QDialog):
         self.infoLabel.setText("%s long, %g BPM%s, %d sections. If the beat ticks don't match the song, correct the tempo "
                                "(x 1/2 or x 2 for the commonest mistake) and when the first bar falls." % (
                                    fmtTime(result["duration_ms"]), result["bpm"],
-                                   "" if conf is None else " (%d%% of the song agrees)" % round(conf * 100), len(result["sections"])))
+                                   "" if conf is None else " (%d%% of the song agrees)" % round(conf * 100), len(result["sections"]))
+                               + (" Sections from the section finder command." if result.get("sections_from") == "command" else "")
+                               + "".join(" " + w + "." for w in result.get("warnings", [])))
         self.draftButton.setEnabled(True)
 
     def _gridEdited(self, *args):

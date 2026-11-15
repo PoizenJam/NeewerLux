@@ -1,0 +1,29 @@
+{
+  "format": 1,
+  "name": "Daylight Breathe",
+  "description": "White only, 4300 to 5600 K, gently breathing with the level.",
+  "tags": [
+    "calm",
+    "smooth",
+    "white"
+  ],
+  "sensitivity": 1.0,
+  "floor": 30,
+  "ceiling": 65,
+  "smoothing": 0.75,
+  "palette": [
+    {
+      "temp": 4300
+    },
+    {
+      "temp": 5600
+    }
+  ],
+  "parts": [
+    {
+      "target": "@rim;@background;@practical",
+      "drive": "level",
+      "colour": "centroid"
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "format": 1,
+  "name": "Vapor Wash",
+  "description": "Pink, cyan and violet cycling: synthwave and vaporwave colours.",
+  "tags": [
+    "calm",
+    "smooth",
+    "neon",
+    "retro"
+  ],
+  "sensitivity": 1.0,
+  "floor": 20,
+  "ceiling": 65,
+  "smoothing": 0.7,
+  "cycle_s": 30,
+  "palette": [
+    {
+      "hue": 310,
+      "sat": 70
+    },
+    {
+      "hue": 185,
+      "sat": 70
+    },
+    {
+      "hue": 265,
+      "sat": 60
+    }
+  ],
+  "parts": [
+    {
+      "target": "@rim;@background;@practical",
+      "drive": "level",
+      "colour": "cycle"
+    }
+  ]
+}

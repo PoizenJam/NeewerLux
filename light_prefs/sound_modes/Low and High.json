@@ -1,0 +1,36 @@
+{
+  "format": 1,
+  "name": "Low and High",
+  "description": "Bass on the background in purple, treble on the rim and practical lights in cyan.",
+  "tags": [
+    "lively",
+    "smooth",
+    "neon"
+  ],
+  "sensitivity": 1.0,
+  "floor": 10,
+  "ceiling": 75,
+  "smoothing": 0.4,
+  "palette": [
+    {
+      "hue": 275,
+      "sat": 90
+    },
+    {
+      "hue": 185,
+      "sat": 90
+    }
+  ],
+  "parts": [
+    {
+      "target": "@background",
+      "drive": "low",
+      "colour": 0
+    },
+    {
+      "target": "@rim;@practical",
+      "drive": "high",
+      "colour": 1
+    }
+  ]
+}

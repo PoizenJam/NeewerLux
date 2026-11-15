@@ -2,6 +2,11 @@
   "format": 1,
   "name": "Bands",
   "description": "Lows on the background, mids on the rim, highs on the fill (kept pale and gentle, since it lights your face).",
+  "tags": [
+    "lively",
+    "smooth",
+    "colourful"
+  ],
   "sensitivity": 1.0,
   "floor": 10,
   "ceiling": 75,

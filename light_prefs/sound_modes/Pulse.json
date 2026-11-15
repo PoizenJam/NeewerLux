@@ -2,6 +2,11 @@
   "format": 1,
   "name": "Pulse",
   "description": "Brightness follows how loud it is, in one colour, on the rim, background and practical lights (key and fill stay as they are).",
+  "tags": [
+    "lively",
+    "smooth",
+    "moody"
+  ],
   "sensitivity": 1.0,
   "floor": 15,
   "ceiling": 70,

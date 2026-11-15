@@ -1,0 +1,27 @@
+{
+  "format": 1,
+  "name": "Bass Pulse",
+  "description": "Brightness swells with the bass, in deep purple.",
+  "tags": [
+    "lively",
+    "punchy",
+    "moody"
+  ],
+  "sensitivity": 1.0,
+  "floor": 10,
+  "ceiling": 75,
+  "smoothing": 0.3,
+  "palette": [
+    {
+      "hue": 270,
+      "sat": 90
+    }
+  ],
+  "parts": [
+    {
+      "target": "@rim;@background;@practical",
+      "drive": "low",
+      "colour": 0
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "format": 1,
+  "name": "Background Chase",
+  "description": "The background and practical lights chase hard on the beat; the rim follows the level smoothly.",
+  "tags": [
+    "lively",
+    "hard",
+    "chase",
+    "cool"
+  ],
+  "sensitivity": 1.0,
+  "floor": 10,
+  "ceiling": 75,
+  "smoothing": 0.0,
+  "palette": [
+    {
+      "hue": 310,
+      "sat": 90
+    },
+    {
+      "hue": 275,
+      "sat": 90
+    },
+    {
+      "hue": 190,
+      "sat": 90
+    }
+  ],
+  "parts": [
+    {
+      "target": "@background;@practical",
+      "drive": "beat",
+      "colour": "beat",
+      "chase": true,
+      "floor": 0,
+      "ceiling": 80
+    },
+    {
+      "target": "@rim",
+      "drive": "level",
+      "colour": 2,
+      "floor": 15,
+      "ceiling": 60
+    }
+  ]
+}

@@ -1125,7 +1125,7 @@ def draftSequence(analysis, style="Concert", name=None, bpm=None, offsetMs=None)
            "description": "Drafted from the song (" + DRAFT_STYLES[list(_DRAFT).index(key)] + " style, " + ("%g" % round(tempo, 2)) + " BPM)",
            "tempo": {"bpm": round(tempo, 2), "offset_ms": int(round(bars[0] if bars else 0))},
            "sections": [{"start_ms": int(s["start_ms"]), "end_ms": int(s["end_ms"]), "label": s.get("label", ""),
-                         "level": int(s.get("level", 2))} for s in sections],
+                         "level": int(s.get("level", 2)), **({"group": s["group"]} if s.get("group") else {})} for s in sections],
            "cues": sorted(cues, key=lambda c: c["at_ms"])}
     return seq, []
 
@@ -1147,7 +1147,7 @@ ANALYSIS_RANGE_DB = 30.0    # the analysis reads this many dB under the recent p
 
 
 class SoundMode:
-    __slots__ = ("name", "description", "sensitivity", "rangeDb", "floor", "ceiling", "smoothing", "fps", "palette",
+    __slots__ = ("name", "description", "tags", "sensitivity", "rangeDb", "floor", "ceiling", "smoothing", "fps", "palette",
                  "cycleS", "parts", "fadeInMs", "handbackMs", "raw")
 
 
@@ -1202,6 +1202,10 @@ def parseSoundMode(data, defaultFps=DEFAULT_SEQUENCE_FPS, resolveTarget=None):
     if not m.name:
         errors.append("a sound mode needs a name")
     m.description = str(data.get("description", ""))
+    m.tags = data.get("tags", [])
+    if not isinstance(m.tags, list) or not all(isinstance(t, str) and t.strip() for t in m.tags):
+        errors.append("tags must be a list of words")
+        m.tags = []
     m.sensitivity = _modeNum(data, "sensitivity", 1.0, 0.1, 5.0, errors)
     m.rangeDb = _modeNum(data, "range_db", 18.0, 6.0, ANALYSIS_RANGE_DB, errors)
     m.floor = _modeNum(data, "floor", 10, 0, 100, errors, integer=True)
@@ -1434,7 +1438,7 @@ class SoundPlayer:
         self._lastMs = None
         self._lastBeat = None
         self._beats = 0
-        self._counters = {}     # light -> FlashCounter (SOUND_FLASH_LIMIT)
+        self._counters = {}     # light -> (FlashCounter as white, FlashCounter on its colour) (SOUND_FLASH_LIMIT)
         self._sent = {}         # light -> command last output
         self._held = {}         # light -> (command computed, ms it has been the same since)
         self.assign(mode, lights)
@@ -1538,17 +1542,20 @@ class SoundPlayer:
             if _soundClose(prev, cmd) and not (settled and cmd != prev):
                 out[idx] = prev
                 continue
-            counter = self._counters.get(idx)
-            if counter is None:
-                counter = self._counters[idx] = FlashCounter()
-            # judged as if it were white: a CCT-only light shows colours as white, which swings
-            # further in luminance than the colour does
-            red = (flashLevel(cmd) or (0.0, False))[1]
-            level = (cmd["bri"] / 100.0, red)
-            if prev is not None and counter.check(t, level, SOUND_FLASH_LIMIT, SOUND_FLASH_WINDOW_S, paced=True):
+            counters = self._counters.get(idx)
+            if counters is None:
+                counters = self._counters[idx] = (FlashCounter(), FlashCounter())
+            # judged as if it were white (a CCT-only light shows colours as white, which swings
+            # further in luminance than the colour does) and on its real colour (a colour step at
+            # the same brightness, yellow to blue, is a swing white doesn't show)
+            colour = flashLevel(cmd) or (0.0, False)
+            levels = ((cmd["bri"] / 100.0, colour[1]), colour)
+            if prev is not None and any(c.check(t, lv, SOUND_FLASH_LIMIT, SOUND_FLASH_WINDOW_S, paced=True)
+                                        for c, lv in zip(counters, levels)):
                 out[idx] = prev
                 continue
-            counter.add(t, level)
+            for c, lv in zip(counters, levels):
+                c.add(t, lv)
             self._sent[idx] = cmd
         self.lastOut = out
         return dict(out), False

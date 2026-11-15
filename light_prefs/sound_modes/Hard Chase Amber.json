@@ -1,0 +1,37 @@
+{
+  "format": 1,
+  "name": "Hard Chase Amber",
+  "description": "Hard Chase in ambers and golds, like stage lamps.",
+  "tags": [
+    "intense",
+    "hard",
+    "chase",
+    "warm"
+  ],
+  "sensitivity": 1.0,
+  "floor": 0,
+  "ceiling": 80,
+  "smoothing": 0.0,
+  "palette": [
+    {
+      "hue": 30,
+      "sat": 95
+    },
+    {
+      "hue": 45,
+      "sat": 90
+    },
+    {
+      "hue": 60,
+      "sat": 80
+    }
+  ],
+  "parts": [
+    {
+      "target": "@rim;@background;@practical",
+      "drive": "beat",
+      "colour": "beat",
+      "chase": true
+    }
+  ]
+}

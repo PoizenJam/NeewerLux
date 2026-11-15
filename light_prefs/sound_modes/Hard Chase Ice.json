@@ -1,0 +1,37 @@
+{
+  "format": 1,
+  "name": "Hard Chase Ice",
+  "description": "Hard Chase in pale icy blues.",
+  "tags": [
+    "intense",
+    "hard",
+    "chase",
+    "cool"
+  ],
+  "sensitivity": 1.0,
+  "floor": 0,
+  "ceiling": 80,
+  "smoothing": 0.0,
+  "palette": [
+    {
+      "hue": 200,
+      "sat": 60
+    },
+    {
+      "hue": 220,
+      "sat": 35
+    },
+    {
+      "hue": 190,
+      "sat": 20
+    }
+  ],
+  "parts": [
+    {
+      "target": "@rim;@background;@practical",
+      "drive": "beat",
+      "colour": "beat",
+      "chase": true
+    }
+  ]
+}

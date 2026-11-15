@@ -1,0 +1,31 @@
+{
+  "format": 1,
+  "name": "Rock Stage",
+  "description": "Warm amber and cool white, punchy on the hits, the colour changing on the beat, like a rock stage wash.",
+  "tags": [
+    "intense",
+    "punchy",
+    "warm"
+  ],
+  "sensitivity": 1.0,
+  "floor": 10,
+  "ceiling": 80,
+  "smoothing": 0.2,
+  "palette": [
+    {
+      "hue": 35,
+      "sat": 75
+    },
+    {
+      "hue": 210,
+      "sat": 25
+    }
+  ],
+  "parts": [
+    {
+      "target": "@rim;@background;@practical",
+      "drive": "level",
+      "colour": "beat"
+    }
+  ]
+}

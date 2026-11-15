@@ -1,0 +1,36 @@
+{
+  "format": 1,
+  "name": "Ambient",
+  "description": "Teals and blues cycling over a minute and a half, gently following the level.",
+  "tags": [
+    "calm",
+    "smooth",
+    "cool"
+  ],
+  "sensitivity": 1.0,
+  "floor": 20,
+  "ceiling": 50,
+  "smoothing": 0.9,
+  "cycle_s": 90,
+  "palette": [
+    {
+      "hue": 175,
+      "sat": 60
+    },
+    {
+      "hue": 200,
+      "sat": 55
+    },
+    {
+      "hue": 230,
+      "sat": 50
+    }
+  ],
+  "parts": [
+    {
+      "target": "@rim;@background;@practical",
+      "drive": "level",
+      "colour": "cycle"
+    }
+  ]
+}

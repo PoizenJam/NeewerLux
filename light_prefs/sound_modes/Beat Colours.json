@@ -1,0 +1,35 @@
+{
+  "format": 1,
+  "name": "Beat Colours",
+  "description": "Brightness follows the level; the colour steps to the next neon colour on every beat.",
+  "tags": [
+    "lively",
+    "punchy",
+    "neon"
+  ],
+  "sensitivity": 1.0,
+  "floor": 12,
+  "ceiling": 75,
+  "smoothing": 0.4,
+  "palette": [
+    {
+      "hue": 300,
+      "sat": 90
+    },
+    {
+      "hue": 190,
+      "sat": 90
+    },
+    {
+      "hue": 60,
+      "sat": 85
+    }
+  ],
+  "parts": [
+    {
+      "target": "@rim;@background;@practical",
+      "drive": "level",
+      "colour": "beat"
+    }
+  ]
+}

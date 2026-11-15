@@ -1,0 +1,30 @@
+{
+  "format": 1,
+  "name": "Candlelight",
+  "description": "White only, 2700 to 3200 K, dim and slow: a candle-warm room that barely notices the music.",
+  "tags": [
+    "calm",
+    "smooth",
+    "warm",
+    "white"
+  ],
+  "sensitivity": 1.0,
+  "floor": 30,
+  "ceiling": 55,
+  "smoothing": 0.85,
+  "palette": [
+    {
+      "temp": 2700
+    },
+    {
+      "temp": 3200
+    }
+  ],
+  "parts": [
+    {
+      "target": "@rim;@background;@practical",
+      "drive": "level",
+      "colour": "centroid"
+    }
+  ]
+}

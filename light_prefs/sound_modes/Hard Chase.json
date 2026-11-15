@@ -1,0 +1,37 @@
+{
+  "format": 1,
+  "name": "Hard Chase",
+  "description": "Steps through the rim, background and practical lights on the beat, fully on then fully off, changing colour each step.",
+  "tags": [
+    "intense",
+    "hard",
+    "chase",
+    "neon"
+  ],
+  "sensitivity": 1.0,
+  "floor": 0,
+  "ceiling": 80,
+  "smoothing": 0.0,
+  "palette": [
+    {
+      "hue": 300,
+      "sat": 90
+    },
+    {
+      "hue": 190,
+      "sat": 90
+    },
+    {
+      "hue": 60,
+      "sat": 85
+    }
+  ],
+  "parts": [
+    {
+      "target": "@rim;@background;@practical",
+      "drive": "beat",
+      "colour": "beat",
+      "chase": true
+    }
+  ]
+}

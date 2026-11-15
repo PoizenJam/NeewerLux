@@ -39,11 +39,68 @@ light_prefs/sequences/*
 # Likewise only the shipped sound modes
 !light_prefs/sound_modes/
 light_prefs/sound_modes/*
-!light_prefs/sound_modes/Pulse.json
+!light_prefs/sound_modes/Ambient.json
+!light_prefs/sound_modes/Aurora.json
+!light_prefs/sound_modes/Background Chase.json
 !light_prefs/sound_modes/Bands.json
+!light_prefs/sound_modes/Bass Floor.json
+!light_prefs/sound_modes/Bass Pulse.json
+!light_prefs/sound_modes/Beat Blink.json
 !light_prefs/sound_modes/Beat Chase.json
+!light_prefs/sound_modes/Beat Colours.json
+!light_prefs/sound_modes/Boss Fight.json
+!light_prefs/sound_modes/Candlelight.json
+!light_prefs/sound_modes/Club Steps.json
 !light_prefs/sound_modes/Colour Drift.json
+!light_prefs/sound_modes/Cool White Pulse.json
+!light_prefs/sound_modes/Cozy.json
+!light_prefs/sound_modes/Daylight Breathe.json
+!light_prefs/sound_modes/Deep Ocean.json
+!light_prefs/sound_modes/Disco.json
+!light_prefs/sound_modes/Double Pulse.json
+!light_prefs/sound_modes/Eerie.json
+!light_prefs/sound_modes/Ember Pulse.json
+!light_prefs/sound_modes/Firelight.json
+!light_prefs/sound_modes/Forest.json
+!light_prefs/sound_modes/Gold Pulse.json
+!light_prefs/sound_modes/Green Pulse.json
+!light_prefs/sound_modes/Hard Chase Amber.json
+!light_prefs/sound_modes/Hard Chase Cyan.json
+!light_prefs/sound_modes/Hard Chase Ice.json
+!light_prefs/sound_modes/Hard Chase Plus Glow.json
+!light_prefs/sound_modes/Hard Chase Rainbow.json
+!light_prefs/sound_modes/Hard Chase.json
+!light_prefs/sound_modes/Hat Blink.json
+!light_prefs/sound_modes/Heartbeat.json
+!light_prefs/sound_modes/Hype.json
+!light_prefs/sound_modes/Just Chatting.json
+!light_prefs/sound_modes/Kick Blink Duo.json
+!light_prefs/sound_modes/Kick Blink.json
+!light_prefs/sound_modes/Lava Lamp.json
+!light_prefs/sound_modes/Lo-fi.json
+!light_prefs/sound_modes/Low and High.json
+!light_prefs/sound_modes/Metal Hits.json
+!light_prefs/sound_modes/Midnight.json
+!light_prefs/sound_modes/Orange Glow.json
+!light_prefs/sound_modes/Primary Steps.json
+!light_prefs/sound_modes/Pulse.json
+!light_prefs/sound_modes/Punchy Pulse.json
+!light_prefs/sound_modes/Rainbow Steps.json
+!light_prefs/sound_modes/Rock Stage.json
+!light_prefs/sound_modes/Slow Wash.json
+!light_prefs/sound_modes/Soft Pulse.json
+!light_prefs/sound_modes/Split Blink.json
+!light_prefs/sound_modes/Split Drift.json
+!light_prefs/sound_modes/Stutter.json
+!light_prefs/sound_modes/Sunset Drift.json
+!light_prefs/sound_modes/Synthwave Steps.json
+!light_prefs/sound_modes/Three Way.json
+!light_prefs/sound_modes/Treble Sparkle.json
+!light_prefs/sound_modes/Treble Top.json
+!light_prefs/sound_modes/Twilight.json
+!light_prefs/sound_modes/Vapor Wash.json
 !light_prefs/sound_modes/Warm Glow.json
+!light_prefs/sound_modes/White Chase.json
 # and palettes
 !light_prefs/palettes/
 light_prefs/palettes/*

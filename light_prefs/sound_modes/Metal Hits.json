@@ -1,0 +1,38 @@
+{
+  "format": 1,
+  "name": "Metal Hits",
+  "description": "Cold white-blue blinks on every kick, with purple underneath on the background.",
+  "tags": [
+    "intense",
+    "hard",
+    "cool"
+  ],
+  "sensitivity": 1.2,
+  "floor": 0,
+  "ceiling": 85,
+  "smoothing": 0.0,
+  "palette": [
+    {
+      "hue": 215,
+      "sat": 30
+    },
+    {
+      "hue": 270,
+      "sat": 85
+    }
+  ],
+  "parts": [
+    {
+      "target": "@rim;@practical",
+      "drive": "low",
+      "colour": 0
+    },
+    {
+      "target": "@background",
+      "drive": "level",
+      "colour": 1,
+      "floor": 10,
+      "ceiling": 55
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "format": 1,
+  "name": "Hard Chase Rainbow",
+  "description": "Hard Chase whose colour moves round the whole colour wheel over 16 seconds.",
+  "tags": [
+    "intense",
+    "hard",
+    "chase",
+    "rainbow"
+  ],
+  "sensitivity": 1.0,
+  "floor": 0,
+  "ceiling": 80,
+  "smoothing": 0.0,
+  "cycle_s": 16,
+  "palette": [
+    {
+      "hue": 120,
+      "sat": 100
+    },
+    {
+      "hue": 240,
+      "sat": 100
+    },
+    {
+      "hue": 60,
+      "sat": 100
+    }
+  ],
+  "parts": [
+    {
+      "target": "@rim;@background;@practical",
+      "drive": "beat",
+      "colour": "cycle",
+      "chase": true
+    }
+  ]
+}

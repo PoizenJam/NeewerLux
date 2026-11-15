@@ -1,0 +1,28 @@
+{
+  "format": 1,
+  "name": "White Chase",
+  "description": "White only (5600 K): Hard Chase for colour-temperature lights.",
+  "tags": [
+    "intense",
+    "hard",
+    "chase",
+    "white"
+  ],
+  "sensitivity": 1.0,
+  "floor": 0,
+  "ceiling": 80,
+  "smoothing": 0.0,
+  "palette": [
+    {
+      "temp": 5600
+    }
+  ],
+  "parts": [
+    {
+      "target": "@rim;@background;@practical",
+      "drive": "beat",
+      "colour": 0,
+      "chase": true
+    }
+  ]
+}

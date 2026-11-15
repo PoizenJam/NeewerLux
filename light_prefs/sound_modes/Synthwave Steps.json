@@ -1,0 +1,36 @@
+{
+  "format": 1,
+  "name": "Synthwave Steps",
+  "description": "Hot pink, purple and cyan stepping on the beat.",
+  "tags": [
+    "lively",
+    "punchy",
+    "neon",
+    "retro"
+  ],
+  "sensitivity": 1.0,
+  "floor": 12,
+  "ceiling": 75,
+  "smoothing": 0.35,
+  "palette": [
+    {
+      "hue": 310,
+      "sat": 90
+    },
+    {
+      "hue": 275,
+      "sat": 90
+    },
+    {
+      "hue": 190,
+      "sat": 90
+    }
+  ],
+  "parts": [
+    {
+      "target": "@rim;@background;@practical",
+      "drive": "level",
+      "colour": "beat"
+    }
+  ]
+}

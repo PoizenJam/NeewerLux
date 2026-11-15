@@ -1384,6 +1384,14 @@ class Ui_MainWindow(object):
         self.prefsSoundDeviceCombo = QComboBox()
         self.prefsSoundDeviceCombo.setToolTip("What sound modes listen to (the same choice as on the Sound tab; saved at once)")
         shows.addRow("Listen to:", self.prefsSoundDeviceCombo)
+        self.songSectionCommandField = QLineEdit()
+        self.songSectionCommandField.setPlaceholderText("blank: the built-in analysis")
+        self.songSectionCommandField.setToolTip(
+            "Another program to find a song's sections when drafting from a song, such as an AI model\n"
+            "installed separately. {song} is the song's path, {out} a folder it may write into; it answers\n"
+            "with JSON segments (start, end, label). Example: allin1 \"{song}\" -o \"{out}\"\n"
+            "Tempo and beats still come from NeewerLux. Set here only: it runs a program on this computer.")
+        shows.addRow("Song section finder command:", self.songSectionCommandField)
         shows.addRow(QLabel("<br><strong>Your rig</strong>"))
         shows.addRow("Main camera:", self.cameraPositionCombo)
         shows.addRow(cctFallbackRow)

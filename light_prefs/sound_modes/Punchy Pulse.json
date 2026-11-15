@@ -1,0 +1,28 @@
+{
+  "format": 1,
+  "name": "Punchy Pulse",
+  "description": "Pulse with a fast response and a wide range: every hit shows.",
+  "tags": [
+    "intense",
+    "punchy",
+    "cool"
+  ],
+  "sensitivity": 1.0,
+  "floor": 5,
+  "ceiling": 85,
+  "smoothing": 0.15,
+  "range_db": 14,
+  "palette": [
+    {
+      "hue": 190,
+      "sat": 90
+    }
+  ],
+  "parts": [
+    {
+      "target": "@rim;@background;@practical",
+      "drive": "level",
+      "colour": 0
+    }
+  ]
+}

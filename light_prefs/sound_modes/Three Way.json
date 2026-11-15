@@ -1,0 +1,45 @@
+{
+  "format": 1,
+  "name": "Three Way",
+  "description": "Bass on the background, mids on the rim, treble on the practical lights.",
+  "tags": [
+    "lively",
+    "smooth",
+    "colourful"
+  ],
+  "sensitivity": 1.0,
+  "floor": 10,
+  "ceiling": 75,
+  "smoothing": 0.4,
+  "palette": [
+    {
+      "hue": 265,
+      "sat": 90
+    },
+    {
+      "hue": 200,
+      "sat": 90
+    },
+    {
+      "hue": 55,
+      "sat": 80
+    }
+  ],
+  "parts": [
+    {
+      "target": "@background",
+      "drive": "low",
+      "colour": 0
+    },
+    {
+      "target": "@rim",
+      "drive": "mid",
+      "colour": 1
+    },
+    {
+      "target": "@practical",
+      "drive": "high",
+      "colour": 2
+    }
+  ]
+}

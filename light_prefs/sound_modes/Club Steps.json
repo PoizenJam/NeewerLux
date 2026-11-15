@@ -1,0 +1,45 @@
+{
+  "format": 1,
+  "name": "Club Steps",
+  "description": "The background cycles slowly through club colours while the rim steps on the beat.",
+  "tags": [
+    "lively",
+    "punchy",
+    "neon"
+  ],
+  "sensitivity": 1.0,
+  "floor": 10,
+  "ceiling": 80,
+  "smoothing": 0.3,
+  "cycle_s": 24,
+  "palette": [
+    {
+      "hue": 280,
+      "sat": 90
+    },
+    {
+      "hue": 190,
+      "sat": 90
+    },
+    {
+      "hue": 320,
+      "sat": 80
+    },
+    {
+      "hue": 60,
+      "sat": 85
+    }
+  ],
+  "parts": [
+    {
+      "target": "@background;@practical",
+      "drive": "low",
+      "colour": "cycle"
+    },
+    {
+      "target": "@rim",
+      "drive": "beat",
+      "colour": "beat"
+    }
+  ]
+}

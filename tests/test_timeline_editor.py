@@ -346,7 +346,8 @@ def main():
         sec = dlg.view.analysis["sections"][-1]
         QTest.mouseMove(dlg.view, QPoint(int((sec["start_ms"] + sec["end_ms"]) / 2 * dlg.view.width() / dlg.view.analysis["duration_ms"]), 8))
         pump(50)
-        check(dlg.view.toolTip().startswith(sec["label"] + "\n"), "hovering the song names the section: %r" % dlg.view.toolTip())
+        check(dlg.view.toolTip().startswith(sec["label"] + "\n") and "\nPart %s\n" % sec["group"] in dlg.view.toolTip(),
+              "hovering the song names the section and its part: %r" % dlg.view.toolTip())
         dlg.halfButton.click()
         half = dlg.bpmSpin.value()
         check(abs(half - 64) < 0.2 and dlg.view.bpm == half, "x 1/2 halves the tempo and redraws the grid: %s" % half)

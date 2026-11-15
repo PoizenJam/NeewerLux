@@ -1,0 +1,29 @@
+{
+  "format": 1,
+  "name": "Hard Chase Cyan",
+  "description": "Hard Chase in one colour: a single cyan light jumping round the room on the beat.",
+  "tags": [
+    "intense",
+    "hard",
+    "chase",
+    "cool"
+  ],
+  "sensitivity": 1.0,
+  "floor": 0,
+  "ceiling": 80,
+  "smoothing": 0.0,
+  "palette": [
+    {
+      "hue": 190,
+      "sat": 90
+    }
+  ],
+  "parts": [
+    {
+      "target": "@rim;@background;@practical",
+      "drive": "beat",
+      "colour": 0,
+      "chase": true
+    }
+  ]
+}

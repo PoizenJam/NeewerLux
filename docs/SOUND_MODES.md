@@ -19,7 +19,7 @@ A sound mode runs on its own **sound** layer, underneath everything else:
 - Switching a light off works whatever is playing: it takes that light out of the sound layer (or a sequence or effect) until you switch it on again, and the others carry on. A light that is off when a sound mode, sequence or effect takes it is switched on first.
 - Brightness limits, Locked lights and the CCT-only fallback apply as for everything else.
 - Starting a sound mode uses its Fade in (else the global one); stopping it hands the lights back with its Fade back (else the global one). Switching to another mode fades between them the same way.
-- A sound mode keeps each light to at most 2 flashes in any second by itself (the flash guard's limit is 3), so it swells and steps rather than strobes. It judges brightness swings as if the light were white, so a CCT-only light showing a colour as white stays within the limit too.
+- A sound mode keeps each light to at most 2 flashes in any second by itself (the flash guard's limit is 3), so it swells and steps rather than strobes. It judges swings twice, as if the light were white (so a CCT-only light showing a colour as white stays within the limit) and on the light's real colour (so a colour step at the same brightness, yellow to blue, counts too).
 - It writes to a light only when what it shows changes enough to see, at most `fps` times a second.
 
 ## The analysis
@@ -56,6 +56,7 @@ Every 21 ms or so NeewerLux measures:
 | `format` | no | `1` | File format version. |
 | `name` | yes | text | Shown in the lists; also the file name. |
 | `description` | no | text | Shown as a tooltip. |
+| `tags` | no | list of words | What the mode is like, shown under its description and used by draft styles to pick fitting modes. Shipped modes carry one energy (`calm`, `lively`, `intense`) and one feel (`smooth`, `punchy`, `hard`), plus colour words (`neon`, `warm`, `cool`, `white`, `rainbow`, `pastel`, `moody`, `colourful`, `retro`) and `chase` for chases. Any words can be used. |
 | `sensitivity` | no | 0.1 to 5 (1) | Multiplies the analysis values before they're used: above 1 reacts more, below 1 less. |
 | `range_db` | no | 6 to 30 (18) | How far under the loudest recent moment counts as 0, in dB: the smaller, the further the lights swing for the same music. 30 uses the analysis as it is. |
 | `floor` | no | 0 to 100 (10) | Brightness, percent, when the driving value is 0. When the sound stops, every light settles exactly here (a chase's lit light too), easing down at the `smoothing` speed. |
@@ -85,13 +86,84 @@ Palettes can be saved on their own, in `light_prefs/palettes/` (`{"format": 1, "
 
 ## Shipped modes
 
-| Mode | What it does |
-|---|---|
-| Pulse | Brightness follows the level, in one colour, on the rim, background and practical lights. |
-| Bands | Lows on the background, mids on the rim, highs on the fill (pale and gentle, since the fill lights your face). |
-| Beat Chase | Steps through the rim, background and practical lights in sweep order on the beat, changing colour each step. |
-| Colour Drift | Colour follows the centroid (blues for bass-heavy sound, magentas for bright), brightness the level. |
-| Warm Glow | White only, 2900 to 4300 K, for colour-temperature lights: warm and dim when it's quiet, brighter and cooler when it's bright. |
+62 modes ship, in three groups by feel. None drives the key light; Bands touches the fill only with pale, gentle highs. All stay at or under 2 flashes a second on every light, judged on their colours and as if white.
+
+**Hard chases and blinks.** Smoothing 0 and floor 0: lights snap fully on and fully off. Each light still flashes at most twice a second.
+
+| Mode | Tags | What it does |
+|---|---|---|
+| Background Chase | lively, hard, chase, cool | The background and practical lights chase hard on the beat; the rim follows the level smoothly. |
+| Bass Floor | intense, hard, moody | The background slams on and off with the bass; the rim follows the level smoothly. |
+| Beat Blink | intense, hard, neon | Every light on with each beat and off between, the colour stepping on each beat. |
+| Hard Chase | intense, hard, chase, neon | Steps through the rim, background and practical lights on the beat, fully on then fully off, changing colour each step. |
+| Hard Chase Amber | intense, hard, chase, warm | Hard Chase in ambers and golds, like stage lamps. |
+| Hard Chase Cyan | intense, hard, chase, cool | Hard Chase in one colour: a single cyan light jumping round the room on the beat. |
+| Hard Chase Ice | intense, hard, chase, cool | Hard Chase in pale icy blues. |
+| Hard Chase Plus Glow | lively, hard, chase, neon | The rim chases hard on the beat while the background and practical lights glow with the level underneath. |
+| Hard Chase Rainbow | intense, hard, chase, rainbow | Hard Chase whose colour moves round the whole colour wheel over 16 seconds. |
+| Hat Blink | intense, hard, cool | Lights blink with the hi-hats and cymbals: quick and bright on busy tops, dark when they stop. |
+| Hype | intense, hard, chase, neon | Everything at once: a hard chase on the rim, the background blinking with the kick, colours stepping on the beat. |
+| Kick Blink | intense, hard, neon | Every light flashes on with the kick drum and snaps off between kicks, in magenta. |
+| Kick Blink Duo | intense, hard, neon | Kick Blink in two colours: purple on the background, cyan on the rim and practical lights. |
+| Metal Hits | intense, hard, cool | Cold white-blue blinks on every kick, with purple underneath on the background. |
+| Split Blink | intense, hard, neon | The background blinks with the kick, the rim and practical lights with the hi-hats. |
+| Stutter | intense, hard, neon | Hard on and off with the level, in violet and pink, for glitchy and broken beats. |
+| Treble Top | lively, hard, cool | The rim and practical lights snap with the treble over a smooth background wash. |
+| White Chase | intense, hard, chase, white | White only (5600 K): Hard Chase for colour-temperature lights. |
+
+**Chases and pulses.** Quick, punchy movement with some smoothing.
+
+| Mode | Tags | What it does |
+|---|---|---|
+| Bass Pulse | lively, punchy, moody | Brightness swells with the bass, in deep purple. |
+| Beat Chase | lively, punchy, chase, neon | Steps through the rim, background and practical lights in sweep order on the beat, changing colour each step (every other beat above 150 BPM). |
+| Beat Colours | lively, punchy, neon | Brightness follows the level; the colour steps to the next neon colour on every beat. |
+| Boss Fight | intense, punchy, moody | Purple and orange, punchy on loud hits: big and dramatic. |
+| Club Steps | lively, punchy, neon | The background cycles slowly through club colours while the rim steps on the beat. |
+| Disco | intense, punchy, retro | Yellow, magenta and cyan, brightness on the beat and the colour stepping with it. |
+| Double Pulse | lively, punchy, neon | Bass on the background, mids on the rim and practical lights, in two colours. |
+| Eerie | calm, punchy, moody | Sickly greens and a little violet, twitching with the sound: horror and suspense. |
+| Ember Pulse | lively, punchy, warm | Bass swells in deep orange and amber. |
+| Firelight | calm, punchy, warm | Ambers and oranges flickering with the sound, like a fire. |
+| Heartbeat | lively, punchy, pastel | A pink glow that thumps with the kick and relaxes between. |
+| Primary Steps | lively, punchy, colourful | Blue, green and yellow stepping on the beat, brightness with the level. |
+| Punchy Pulse | intense, punchy, cool | Pulse with a fast response and a wide range: every hit shows. |
+| Rainbow Steps | lively, punchy, rainbow | Red-free primaries stepping on the beat: green, blue, yellow. |
+| Rock Stage | intense, punchy, warm | Warm amber and cool white, punchy on the hits, the colour changing on the beat, like a rock stage wash. |
+| Synthwave Steps | lively, punchy, neon, retro | Hot pink, purple and cyan stepping on the beat. |
+| Treble Sparkle | lively, punchy, cool | The rim and practical lights sparkle with the treble while the background follows the bass slowly. |
+
+**Smooth.** Brightness follows the music smoothly: steady pulses, washes, drifts and slow cycles.
+
+| Mode | Tags | What it does |
+|---|---|---|
+| Ambient | calm, smooth, cool | Teals and blues cycling over a minute and a half, gently following the level. |
+| Aurora | calm, smooth, cool | Greens, teals and violet drifting like northern lights. |
+| Bands | lively, smooth, colourful | Lows on the background, mids on the rim, highs on the fill (kept pale and gentle, since it lights your face). |
+| Candlelight | calm, smooth, warm, white | White only, 2700 to 3200 K, dim and slow: a candle-warm room that barely notices the music. |
+| Colour Drift | calm, smooth, cool | Colour follows the brightness of the sound (deep blues for bass-heavy passages, magentas for bright ones); brightness follows the level. |
+| Cool White Pulse | lively, smooth, white, cool | White only at 6500 K, brightness following the level. |
+| Cozy | calm, smooth, warm, pastel | Soft warm amber, low and slow. |
+| Daylight Breathe | calm, smooth, white | White only, 4300 to 5600 K, gently breathing with the level. |
+| Deep Ocean | calm, smooth, cool, moody | Deep blues that shift with the brightness of the sound. |
+| Forest | calm, smooth, cool | Greens that move with the brightness of the sound. |
+| Gold Pulse | lively, smooth, warm | Brightness follows the level in warm gold. |
+| Green Pulse | lively, smooth, cool | Brightness follows the level in green. |
+| Just Chatting | calm, smooth, pastel | Teal and lavender, very gentle: the room moves a little with background music. |
+| Lava Lamp | calm, smooth, warm | Orange and magenta blobs of colour, slowly cycling. |
+| Lo-fi | calm, smooth, pastel, retro | Faded pastels cycling slowly, soft brightness: lo-fi beats and study streams. |
+| Low and High | lively, smooth, neon | Bass on the background in purple, treble on the rim and practical lights in cyan. |
+| Midnight | calm, smooth, moody | Very dim blues, barely moving: the music in the background, not the lights. |
+| Orange Glow | lively, smooth, warm | One warm orange, following the level. |
+| Pulse | lively, smooth, moody | Brightness follows how loud it is, in one colour, on the rim, background and practical lights (key and fill stay as they are). |
+| Slow Wash | calm, smooth, cool | Blues and teals cycling slowly round over a minute, the brightness breathing with the level. |
+| Soft Pulse | calm, smooth, cool | A slow, narrow pulse: the lights breathe with the music rather than jump. |
+| Split Drift | calm, smooth, colourful | The background drifts through cool colours while the rim drifts through warm ones. |
+| Sunset Drift | calm, smooth, warm | Oranges, golds and pinks, warmer for bassy passages and pinker for bright ones. |
+| Three Way | lively, smooth, colourful | Bass on the background, mids on the rim, treble on the practical lights. |
+| Twilight | calm, smooth, moody | Dim purples and blues cycling slowly, for late-night sets. |
+| Vapor Wash | calm, smooth, neon, retro | Pink, cyan and violet cycling: synthwave and vaporwave colours. |
+| Warm Glow | calm, smooth, warm, white | White only, for colour-temperature lights: warm and dim when it's quiet or bass-heavy, a little brighter and cooler when it's bright. |
 
 A second example, the shipped Bands:
 

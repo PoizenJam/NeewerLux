@@ -1,0 +1,35 @@
+{
+  "format": 1,
+  "name": "Eerie",
+  "description": "Sickly greens and a little violet, twitching with the sound: horror and suspense.",
+  "tags": [
+    "calm",
+    "punchy",
+    "moody"
+  ],
+  "sensitivity": 1.3,
+  "floor": 3,
+  "ceiling": 40,
+  "smoothing": 0.15,
+  "palette": [
+    {
+      "hue": 110,
+      "sat": 75
+    },
+    {
+      "hue": 150,
+      "sat": 60
+    },
+    {
+      "hue": 270,
+      "sat": 55
+    }
+  ],
+  "parts": [
+    {
+      "target": "@rim;@background;@practical",
+      "drive": "high",
+      "colour": "centroid"
+    }
+  ]
+}

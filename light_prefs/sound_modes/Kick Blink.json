@@ -1,0 +1,27 @@
+{
+  "format": 1,
+  "name": "Kick Blink",
+  "description": "Every light flashes on with the kick drum and snaps off between kicks, in magenta.",
+  "tags": [
+    "intense",
+    "hard",
+    "neon"
+  ],
+  "sensitivity": 1.2,
+  "floor": 0,
+  "ceiling": 85,
+  "smoothing": 0.0,
+  "palette": [
+    {
+      "hue": 300,
+      "sat": 90
+    }
+  ],
+  "parts": [
+    {
+      "target": "@rim;@background;@practical",
+      "drive": "low",
+      "colour": 0
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "format": 1,
+  "name": "Treble Top",
+  "description": "The rim and practical lights snap with the treble over a smooth background wash.",
+  "tags": [
+    "lively",
+    "hard",
+    "cool"
+  ],
+  "sensitivity": 1.2,
+  "floor": 10,
+  "ceiling": 75,
+  "smoothing": 0.0,
+  "palette": [
+    {
+      "hue": 275,
+      "sat": 90
+    },
+    {
+      "hue": 185,
+      "sat": 90
+    }
+  ],
+  "parts": [
+    {
+      "target": "@rim;@practical",
+      "drive": "high",
+      "colour": 1,
+      "floor": 0,
+      "ceiling": 80
+    },
+    {
+      "target": "@background",
+      "drive": "level",
+      "colour": 0,
+      "floor": 15,
+      "ceiling": 55
+    }
+  ]
+}

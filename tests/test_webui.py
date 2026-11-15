@@ -559,7 +559,7 @@ def main():
         title = js(page, """const cv = document.getElementById('songCanvas'), r = cv.getBoundingClientRect(), s = songAnalysis.sections[0];
                             cv.dispatchEvent(new MouseEvent('mousemove', {bubbles: true, clientX: r.left + (s.start_ms + s.end_ms) / 2 * r.width / songAnalysis.duration_ms, clientY: r.top + 5}));
                             cv.title""")
-        check(title.startswith(json.loads(js(page, "JSON.stringify(songAnalysis.sections[0].label)")) + "\n") and "Level" in title, "hovering the song names the section: %r" % title)
+        check(title.startswith(json.loads(js(page, "JSON.stringify(songAnalysis.sections[0].label)")) + "\n") and "Level" in title and "\nPart A\n" in title, "hovering the song names the section and its part: %r" % title)
         js(page, "songScale(0.5); document.getElementById('songStyle').value = 'Neon'; songStyleNote(); songDraft()")
         waitFor(page, "!!(tl && tl.render && tl.original === null && (tl.seq.sections || []).length && document.getElementById('tlModal').classList.contains('open'))", "the draft in the editor", timeout=15)
         seq = json.loads(js(page, "JSON.stringify(tl.seq)"))

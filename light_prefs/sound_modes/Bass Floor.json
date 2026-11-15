@@ -1,0 +1,40 @@
+{
+  "format": 1,
+  "name": "Bass Floor",
+  "description": "The background slams on and off with the bass; the rim follows the level smoothly.",
+  "tags": [
+    "intense",
+    "hard",
+    "moody"
+  ],
+  "sensitivity": 1.2,
+  "floor": 10,
+  "ceiling": 75,
+  "smoothing": 0.0,
+  "palette": [
+    {
+      "hue": 275,
+      "sat": 90
+    },
+    {
+      "hue": 185,
+      "sat": 90
+    }
+  ],
+  "parts": [
+    {
+      "target": "@background",
+      "drive": "low",
+      "colour": 0,
+      "floor": 0,
+      "ceiling": 85
+    },
+    {
+      "target": "@rim;@practical",
+      "drive": "level",
+      "colour": 1,
+      "floor": 15,
+      "ceiling": 60
+    }
+  ]
+}

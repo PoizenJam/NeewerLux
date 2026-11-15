@@ -1,0 +1,38 @@
+{
+  "format": 1,
+  "name": "Treble Sparkle",
+  "description": "The rim and practical lights sparkle with the treble while the background follows the bass slowly.",
+  "tags": [
+    "lively",
+    "punchy",
+    "cool"
+  ],
+  "sensitivity": 1.0,
+  "floor": 5,
+  "ceiling": 75,
+  "smoothing": 0.2,
+  "palette": [
+    {
+      "hue": 275,
+      "sat": 90
+    },
+    {
+      "hue": 185,
+      "sat": 90
+    }
+  ],
+  "parts": [
+    {
+      "target": "@background",
+      "drive": "low",
+      "colour": 0,
+      "floor": 15,
+      "ceiling": 55
+    },
+    {
+      "target": "@rim;@practical",
+      "drive": "high",
+      "colour": 1
+    }
+  ]
+}

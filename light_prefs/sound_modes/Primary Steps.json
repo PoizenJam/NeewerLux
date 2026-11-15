@@ -1,0 +1,35 @@
+{
+  "format": 1,
+  "name": "Primary Steps",
+  "description": "Blue, green and yellow stepping on the beat, brightness with the level.",
+  "tags": [
+    "lively",
+    "punchy",
+    "colourful"
+  ],
+  "sensitivity": 1.0,
+  "floor": 12,
+  "ceiling": 75,
+  "smoothing": 0.4,
+  "palette": [
+    {
+      "hue": 220,
+      "sat": 100
+    },
+    {
+      "hue": 120,
+      "sat": 90
+    },
+    {
+      "hue": 55,
+      "sat": 100
+    }
+  ],
+  "parts": [
+    {
+      "target": "@rim;@background;@practical",
+      "drive": "level",
+      "colour": "beat"
+    }
+  ]
+}

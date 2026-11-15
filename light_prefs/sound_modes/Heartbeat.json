@@ -1,0 +1,27 @@
+{
+  "format": 1,
+  "name": "Heartbeat",
+  "description": "A pink glow that thumps with the kick and relaxes between.",
+  "tags": [
+    "lively",
+    "punchy",
+    "pastel"
+  ],
+  "sensitivity": 1.0,
+  "floor": 12,
+  "ceiling": 65,
+  "smoothing": 0.25,
+  "palette": [
+    {
+      "hue": 325,
+      "sat": 80
+    }
+  ],
+  "parts": [
+    {
+      "target": "@rim;@background;@practical",
+      "drive": "low",
+      "colour": 0
+    }
+  ]
+}

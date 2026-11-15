@@ -16,7 +16,13 @@ analyzeSong works on a whole song file at once (soundfile decodes it): tempo, be
 bars, an energy curve, a waveform for drawing, and sections, for drafting sequences.
 """
 
+import glob
+import json
 import math
+import os
+import shlex
+import subprocess
+import tempfile
 import threading
 import time
 
@@ -337,6 +343,8 @@ SONG_WAVEFORM_POINTS = 1200
 SECTION_MIN_BARS = 4       # sections are at least this many bars long
 SECTION_MAX_BARS = 32      # longer stretches are split where they change most
 SECTION_NOVELTY_BARS = 4   # bars compared on each side of a possible section boundary
+SECTION_REPEAT_BARS = 8    # bars on each side of a line when looking for blocks of alike bars
+SECTION_GROUP_SIMILARITY = 0.45  # sections at least this alike (timbre and harmony) share a group
 
 
 def songAvailable():
@@ -361,7 +369,8 @@ def loadSong(path):
 
 def _songFrames(x, sr):
     """Per-frame level, band levels, centroid, low-band onset and onset flux for a whole signal,
-    computed in chunks (a long song as one FFT matrix would need gigabytes)."""
+    plus its timbre (24 log band levels, "bands") and harmony (12 pitch classes, "chroma") for
+    finding repeats, computed in chunks (a long song as one FFT matrix would need gigabytes)."""
     hop = max(1, int(round(sr * SONG_HOP_S)))
     n = max(1, (len(x) - FFT_SIZE) // hop + 1) if len(x) >= FFT_SIZE else 1
     pad = np.concatenate([x, np.zeros(FFT_SIZE + hop)])
@@ -372,7 +381,14 @@ def _songFrames(x, sr):
     cmask = (freqs >= 40.0) & (freqs <= 12000.0)
     edges = np.geomspace(40.0, 11000.0, 25)
     bandIdx = np.clip(np.searchsorted(edges, freqs) - 1, -1, 23)
+    bandMap = np.zeros((len(freqs), 24))
+    bandMap[bandIdx >= 0, bandIdx[bandIdx >= 0]] = 1.0
+    chromaMap = np.zeros((len(freqs), 12))
+    pitched = (freqs >= 55.0) & (freqs <= 5000.0)
+    chromaMap[pitched, np.round(12.0 * np.log2(freqs[pitched] / 440.0)).astype(int) % 12] = 1.0
     out = {k: np.zeros(n) for k in ("rms", "low", "mid", "high", "centroid", "flux", "lowflux")}
+    out["bands"] = np.zeros((n, 24), dtype=np.float32)
+    out["chroma"] = np.zeros((n, 12), dtype=np.float32)
     prev = None
     chunk = 2048
     for start in range(0, n, chunk):
@@ -387,13 +403,10 @@ def _songFrames(x, sr):
         tot = np.sum(cp, axis=1)
         cent = np.sum(cp * freqs[cmask][None, :], axis=1) / np.maximum(tot, 1e-20)
         out["centroid"][start:start + m] = np.log2(np.maximum(cent, 40.0) / 40.0) / np.log2(12000.0 / 40.0)
-        bands = np.zeros((m, 24))
-        valid = bandIdx >= 0
-        for b in range(24):
-            sel = valid & (bandIdx == b)
-            if np.any(sel):
-                bands[:, b] = np.sum(power[:, sel], axis=1)
-        logMag = np.log1p(1e4 * bands)
+        logMag = np.log1p(1e4 * (power @ bandMap))
+        out["bands"][start:start + m] = logMag
+        chroma = power @ chromaMap
+        out["chroma"][start:start + m] = chroma / np.maximum(np.sum(chroma, axis=1, keepdims=True), 1e-20)
         if prev is None:
             prev = logMag[:1]
         diff = np.diff(np.vstack([prev, logMag]), axis=0)
@@ -459,11 +472,13 @@ def _combScore(env, fps, bpm):
     return best, bestPhase
 
 
-def analyzeSong(samples, sampleRate, bpm=None, offsetMs=None):
+def analyzeSong(samples, sampleRate, bpm=None, offsetMs=None, segments=None):
     """Analyse a whole mono song. Assumes a steady tempo (most produced music has one).
 
     bpm and offsetMs, when given, are used instead of the estimates (offsetMs: when the first
-    beat falls). Returns {"duration_ms", "bpm", "offset_ms", "confidence", "beats" (ms),
+    beat falls). segments, from another section finder ([{"start_ms", "end_ms", "label"}],
+    externalSections), sets where sections start (moved to the nearest bar line) and gives each
+    section an "ai_label"; the names, levels and groups are still worked out here. Returns {"duration_ms", "bpm", "offset_ms", "confidence", "beats" (ms),
     "bars" (ms of each bar's first beat), "energy" (0 to 1 every SONG_ENERGY_STEP_MS),
     "energy_step_ms", "waveform" (peak 0 to 1 at SONG_WAVEFORM_POINTS points), "sections"
     ([{"start_ms", "end_ms", "energy" 0 to 1, "level" 1 to 3, "label"}])}."""
@@ -521,85 +536,246 @@ def analyzeSong(samples, sampleRate, bpm=None, offsetMs=None):
     peaks = np.max(np.abs(usable.reshape(SONG_WAVEFORM_POINTS, -1)), axis=1)
     waveform = peaks / (np.max(peaks) or 1.0)
 
-    sections = _sections(feats, fps, bars, durationMs, energy, step)
+    sections = _sections(feats, fps, bars, durationMs, energy, step, segments)
     return {"duration_ms": durationMs, "bpm": round(bpm, 2), "offset_ms": int(round(offsetMs)), "confidence": confidence,
             "beats": beats, "bars": bars, "energy": [round(float(v), 3) for v in energy], "energy_step_ms": step,
             "waveform": [round(float(v), 3) for v in waveform], "sections": sections}
 
 
-def _sections(feats, fps, bars, durationMs, energy, energyStep):
-    """Split the song where its sound changes, on bar lines: per bar, loudness, bass, treble,
-    brightness and busyness; a boundary where the bars before and after differ most."""
-    edges = [0] + [b for b in bars if b > 0] + [durationMs]
-    edges = sorted(set(edges))
+SECTION_COMMAND_TIMEOUT_S = 600  # an AI section finder can take minutes per song on a CPU
+
+
+def externalSections(command, path, timeoutS=SECTION_COMMAND_TIMEOUT_S):
+    """Run another section finder on a song: command is its command line, with {song} for the
+    song's path and {out} for a folder it may write into. It's run without a shell (the song
+    path goes in as one argument, never as shell text), in that folder, which is removed
+    afterwards. It answers with JSON on its output or in a .json file in the folder: a list of
+    segments, or an object with "segments", each {"start", "end"} in seconds (or "start_ms",
+    "end_ms") and a "label" (All-In-One's allin1 writes this). Returns (segments sorted by start,
+    as [{"start_ms", "end_ms", "label"}], "") or (None, why it failed)."""
+    try:
+        args = shlex.split(command, posix=os.name != "nt")
+    except ValueError as e:
+        return None, "the section finder command can't be read: " + str(e)
+    if os.name == "nt":
+        args = [a[1:-1] if len(a) >= 2 and a[0] == a[-1] == '"' else a for a in args]
+    if not args:
+        return None, "the section finder command is empty"
+    with tempfile.TemporaryDirectory() as out:
+        args = [a.replace("{song}", path).replace("{out}", out) for a in args]
+        try:
+            run = subprocess.run(args, cwd=out, capture_output=True, text=True, timeout=timeoutS,
+                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))  # no console flashing up over the app
+        except FileNotFoundError:
+            return None, "couldn't run the section finder: no program " + repr(args[0])
+        except subprocess.TimeoutExpired:
+            return None, "the section finder took longer than %d s" % timeoutS
+        if run.returncode:
+            last = (run.stderr or run.stdout or "").strip().splitlines()[-1:] or [""]
+            return None, "the section finder failed (exit code %d): %s" % (run.returncode, last[0][:200])
+        found = []
+        try:
+            found.append(json.loads(run.stdout))
+        except ValueError:
+            pass
+        for name in sorted(glob.glob(os.path.join(out, "**", "*.json"), recursive=True)):
+            try:
+                with open(name, encoding="utf-8") as f:
+                    found.append(json.load(f))
+            except (OSError, ValueError):
+                continue
+    for data in found:
+        segments = _parseSegments(data)
+        if segments:
+            return segments, ""
+    return None, "the section finder gave no segments (a list of {start, end, label}, or an object with \"segments\")"
+
+
+def _parseSegments(data):
+    if isinstance(data, dict):
+        data = data.get("segments")
+    if not isinstance(data, list):
+        return None
+    out = []
+    for seg in data:
+        if not isinstance(seg, dict):
+            return None
+        try:
+            if "start_ms" in seg:
+                a, b = int(seg["start_ms"]), int(seg["end_ms"])
+            else:
+                a, b = int(round(float(seg["start"]) * 1000)), int(round(float(seg["end"]) * 1000))
+        except (KeyError, TypeError, ValueError):
+            return None
+        if b > a:
+            out.append({"start_ms": a, "end_ms": b, "label": str(seg.get("label", ""))})
+    return sorted(out, key=lambda seg: seg["start_ms"]) or None
+
+
+def _cosine(m):
+    """Cosine similarity between the rows of m, each centred on the song's mean first."""
+    m = m - np.mean(m, axis=0)
+    m = m / (np.linalg.norm(m, axis=1, keepdims=True) + 1e-9)
+    return m @ m.T
+
+
+def _sections(feats, fps, bars, durationMs, energy, energyStep, segments=None):
+    """Split the song on bar lines where its sound changes, group the sections that sound alike
+    (the parts that repeat) and name them by how they compare with the rest of the song.
+
+    Two kinds of change are looked for: in loudness, bass, treble, brightness and busyness
+    (the bars before and after a line differ), and in timbre and harmony (the bar-by-bar
+    similarity of the whole song shows a block ending there), which finds a new riff or chord
+    loop at the same loudness."""
+    edges = sorted(set([0] + [b for b in bars if b > 0] + [durationMs]))
     if len(edges) < 3:
-        return [_section(0, durationMs, energy, energyStep)]
-    rows = []
+        sec = _section(0, durationMs, energy, energyStep)
+        sec.update(level=2, label="Groove", group="A")
+        return [sec]
+    rows, timbre, chroma, kick, busy, cent = [], [], [], [], [], []
     for a, b in zip(edges[:-1], edges[1:]):
         i, j = int(a * fps / 1000.0), max(int(a * fps / 1000.0) + 1, int(b * fps / 1000.0))
-        seg = {k: feats[k][i:j] for k in ("rms", "low", "high", "centroid", "flux")}
+        seg = {k: feats[k][i:j] for k in ("rms", "low", "high", "centroid", "flux", "lowflux")}
         rows.append([20.0 * math.log10(max(float(np.sqrt(np.mean(seg["rms"] ** 2))), 1e-9)),
                      20.0 * math.log10(max(float(np.mean(seg["low"])), 1e-9)),
                      20.0 * math.log10(max(float(np.mean(seg["high"])), 1e-9)),
                      float(np.mean(seg["centroid"])) * 30.0,
-                     float(np.mean(seg["flux"])) * 30.0 / (float(np.max(feats["flux"])) or 1.0)])
+                     float(np.mean(seg["flux"])) * 30.0 / (float(np.max(feats["flux"])) or 1.0),
+                     float(np.mean(seg["lowflux"])) * 30.0 / (float(np.max(feats["lowflux"])) or 1.0)])
+        t = np.mean(feats["bands"][i:j], axis=0)
+        timbre.append(t - np.mean(t))  # the shape of the spectrum, not its loudness
+        chroma.append(np.mean(feats["chroma"][i:j], axis=0))
+        kick.append(float(np.mean(seg["lowflux"])))
+        busy.append(float(np.mean(seg["flux"])))
+        cent.append(float(np.mean(seg["centroid"])))
+    nb = len(rows)
     f = np.array(rows)
     f = (f - np.mean(f, axis=0)) / (np.std(f, axis=0) + 1e-9)
-    nb = len(f)
     w = SECTION_NOVELTY_BARS
-    novelty = np.zeros(nb)
+    level = np.zeros(nb)
     for i in range(1, nb):
         a, b = f[max(0, i - w):i], f[i:min(nb, i + w)]
         if len(a) and len(b):
-            novelty[i] = float(np.linalg.norm(np.mean(a, axis=0) - np.mean(b, axis=0)))
+            level[i] = float(np.linalg.norm(np.mean(a, axis=0) - np.mean(b, axis=0)))
+    sim = 0.6 * _cosine(np.array(timbre)) + 0.4 * _cosine(np.array(chroma))
+    # a checkerboard kernel slid down the diagonal scores where one block of alike bars ends and
+    # another begins
+    k = SECTION_REPEAT_BARS
+    signs = np.r_[-np.ones(k), np.ones(k)]
+    taper = np.exp(-0.5 * np.linspace(-1.5, 1.5, 2 * k) ** 2)
+    kernel = np.outer(signs * taper, signs * taper)
+    padded = np.pad(sim, k, mode="edge")
+    block = np.maximum(0.0, [-float(np.sum(padded[i:i + 2 * k, i:i + 2 * k] * kernel)) for i in range(nb)])
+    novelty = level / (np.max(level) or 1.0) + block / (np.max(block) or 1.0)
     # phrases are usually 4 or 8 bars long: favour boundaries on those, counting from the first
     # bar (row 0 is the stretch before it when the first beat isn't at 0)
     first = 1 if edges[1] in bars and edges[0] not in bars else 0
     weighted = novelty * np.array([1.3 if (i - first) % 8 == 0 else 1.15 if (i - first) % 4 == 0 else 1.0 for i in range(nb)])
     threshold = float(np.mean(novelty[1:]) + 0.25 * np.std(novelty[1:])) if nb > 2 else 1e9
     picked = []
-    for i in np.argsort(-weighted):
-        i = int(i)
-        if i < SECTION_MIN_BARS or nb - i < SECTION_MIN_BARS or weighted[i] < threshold:
-            continue
-        if all(abs(i - p) >= SECTION_MIN_BARS for p in picked):
-            picked.append(i)
+    if segments:
+        # another finder's boundaries, on the nearest bar line, at least 2 bars apart
+        for seg in segments[1:]:
+            i = min(range(nb), key=lambda r: abs(edges[r] - seg["start_ms"]))
+            if 2 <= i <= nb - 2 and all(abs(i - p) >= 2 for p in picked):
+                picked.append(i)
+    else:
+        for i in np.argsort(-weighted):
+            i = int(i)
+            if i < SECTION_MIN_BARS or nb - i < SECTION_MIN_BARS or weighted[i] < threshold:
+                continue
+            if all(abs(i - p) >= SECTION_MIN_BARS for p in picked):
+                picked.append(i)
     # a long stretch that changes little is still split, where it changes most (a draft needs
     # somewhere to move)
-    while True:
+    while not segments:
         bounds = [0] + sorted(picked) + [nb]
-        longest = max(zip(bounds[:-1], bounds[1:]), key=lambda ab: ab[1] - ab[0])
-        a, b = longest
+        a, b = max(zip(bounds[:-1], bounds[1:]), key=lambda ab: ab[1] - ab[0])
         if b - a <= SECTION_MAX_BARS:
             break
-        inside = [i for i in range(a + SECTION_MIN_BARS, b - SECTION_MIN_BARS + 1)]
-        picked.append(max(inside, key=lambda i: weighted[i]))
-    cuts = [0] + sorted(edges[i] for i in picked) + [durationMs]
-    secs = [_section(a, b, energy, energyStep) for a, b in zip(cuts[:-1], cuts[1:])]
-    # intensity: loudness and busyness (onsets) together, so a loud pad without drums still
-    # reads as a quiet passage
-    busy, kick, trend = [], [], []
-    for sec in secs:
-        i, j = int(sec["start_ms"] * fps / 1000.0), max(int(sec["start_ms"] * fps / 1000.0) + 1, int(sec["end_ms"] * fps / 1000.0))
-        busy.append(float(np.mean(feats["flux"][i:j])))
-        kick.append(float(np.mean(feats["lowflux"][i:j])))
-        a, b = int(sec["start_ms"] // energyStep), max(int(sec["start_ms"] // energyStep) + 3, int(sec["end_ms"] // energyStep))
-        e = energy[a:b]
-        third = max(1, len(e) // 3)
-        trend.append(float(np.mean(e[-third:]) - np.mean(e[:third])) if len(e) else 0.0)
+        picked.append(max(range(a + SECTION_MIN_BARS, b - SECTION_MIN_BARS + 1), key=lambda i: weighted[i]))
+    spans = list(zip([0] + sorted(picked), sorted(picked) + [nb]))
+    kick, busy, cent = np.array(kick), np.array(busy), np.array(cent)
+    # kick against the song's typical bar, so one pounding stretch doesn't make the rest look empty
+    kick = np.minimum(2.0, kick / (float(np.median(kick)) or 1e-9))
+    loud = f[:, 0]
+    spans = _splitRisers(spans, kick, busy, cent, loud)
+    secs = []
+    for a, b in spans:
+        sec = _section(edges[a], edges[b], energy, energyStep)
+        sec["_bars"] = (a, b)
+        sec["_kick"] = float(np.mean(kick[a:b]))
+        sec["_busy"] = float(np.mean(busy[a:b]))
+        sec["_riser"] = _riser(cent[a:b], busy[a:b], loud[a:b])
+        if segments:
+            mid = (sec["start_ms"] + sec["end_ms"]) / 2
+            sec["ai_label"] = next((seg["label"] for seg in segments if seg["start_ms"] <= mid < seg["end_ms"]), "")
+        secs.append(sec)
     def rel(vals):
         lo, hi = min(vals), max(vals)
         return [(v - lo) / (hi - lo) if hi > lo else 0.5 for v in vals]
-    # kick against the song's typical section, so one pounding section doesn't make the rest look empty
-    typical = float(np.median(kick)) or 1e-9
-    for sec, e, b, k, t in zip(secs, rel([sec["energy"] for sec in secs]), rel(busy), [min(2.0, v / typical) for v in kick], trend):
-        intensity = 0.5 * e + 0.5 * b
-        sec["level"] = 1 if intensity < 0.34 else 3 if intensity > 0.66 else 2
-        sec["_kick"], sec["_trend"] = k, t
+    # intensity: loudness, busyness and kick together, ranked within this song, so a loud pad
+    # without drums still reads as a quiet passage and a song that is loud throughout still has
+    # a peak
+    for sec, e, bz, kk in zip(secs, rel([s["energy"] for s in secs]), rel([s["_busy"] for s in secs]), rel([s["_kick"] for s in secs])):
+        sec["_intensity"] = (e + bz + kk) / 3.0
+        sec["level"] = 1 if sec["_intensity"] < 0.34 else 3 if sec["_intensity"] > 0.66 else 2
+    _groupSections(secs, sim)
     _labelSections(secs)
     for sec in secs:
-        del sec["_kick"], sec["_trend"]
+        for key in [key for key in sec if key.startswith("_")]:
+            del sec[key]
     return secs
+
+
+def _riser(cent, busy, loud):
+    """Whether bars rise into what follows: brighter and busier (or louder) towards the end,
+    as a filter sweep, noise riser or drum roll does."""
+    n = len(cent)
+    if n < 4:
+        return False
+    q = max(1, n // 4)
+    brighter = float(np.mean(cent[-q:]) - np.mean(cent[:q]))
+    busier = float(np.mean(busy[-q:]) / (np.mean(busy[:q]) or 1e-9))
+    louder = float(np.mean(loud[-q:]) - np.mean(loud[:q]))
+    return brighter > 0.03 and (busier > 1.25 or louder > 0.5)
+
+
+def _splitRisers(spans, kick, busy, cent, loud):
+    """A long section whose last bars rise into a fuller one: those bars become their own
+    section (a build often shares its loop with what comes before it)."""
+    out = []
+    for n, (a, b) in enumerate(spans):
+        nxt = spans[n + 1] if n + 1 < len(spans) else None
+        tail = 8 if b - a >= 16 else 4
+        if (nxt is not None and b - a >= tail + SECTION_MIN_BARS and _riser(cent[b - tail:b], busy[b - tail:b], loud[b - tail:b])
+                and not _riser(cent[a:b - tail], busy[a:b - tail], loud[a:b - tail])
+                and np.mean(kick[nxt[0]:nxt[1]]) + np.mean(loud[nxt[0]:nxt[1]]) * 0.1 > np.mean(kick[a:b - tail]) + np.mean(loud[a:b - tail]) * 0.1):
+            out += [(a, b - tail), (b - tail, b)]
+        else:
+            out.append((a, b))
+    return out
+
+
+def _groupSections(secs, sim):
+    """Letter the sections that sound alike (timbre and harmony bar against bar) A, B, C... in
+    the order they first appear: a repeated part gets the same letter each time."""
+    groups = []
+    for sec in secs:
+        a, b = sec["_bars"]
+        best, bestSim = None, SECTION_GROUP_SIMILARITY
+        for g in groups:
+            s = float(np.mean([np.mean(sim[a:b, c:d]) for c, d in (m["_bars"] for m in g)]))
+            if s >= bestSim:
+                best, bestSim = g, s
+        if best is None:
+            groups.append([sec])
+        else:
+            best.append(sec)
+    for n, g in enumerate(groups):
+        letter = chr(ord("A") + n) if n < 26 else "Z%d" % (n - 25)
+        for sec in g:
+            sec["group"] = letter
 
 
 def _section(a, b, energy, energyStep):
@@ -612,32 +788,49 @@ SECTION_LABELS = ("Intro", "Groove", "Build", "Drop", "Breakdown", "Outro")
 
 
 def _labelSections(secs):
-    """Suggested names from what changes between sections, not loudness alone: the Intro runs
-    until the beat comes in, a Breakdown loses the kick and bass, a Build rises into something
-    fuller, a Drop brings the kick back after a Breakdown or Build; everything else with a beat is
-    a Groove. Only a starting point."""
+    """Suggested names from how sections compare within the song, not loudness alone.
+
+    The Drop is the most intense part of the song (a repeated part when it repeats), so even a
+    song that pounds throughout has one; a Breakdown loses the kick; a Build rises into a Drop
+    or into something clearly fuller; the Intro runs from the start until the beat is in and the
+    Outro from where it goes after the last fuller part; everything else with a beat is a
+    Groove. Only a starting point."""
     n = len(secs)
+    top = max(s["_intensity"] for s in secs)
+    for s in secs:
+        s["_drop"] = s["_kick"] >= 0.8 and s["_intensity"] >= top - 0.2
+    # a repeat of a Drop that is a little less intense is still that Drop (a quieter take on the
+    # same loop, such as a verse, is not)
+    dropGroups = {s["group"] for s in secs if s["_drop"]}
+    for s in secs:
+        s["_drop"] = s["_drop"] or (s["_kick"] >= 0.8 and s["group"] in dropGroups and s["_intensity"] >= top - 0.3)
     for k, s in enumerate(secs):
-        prev = secs[k - 1] if k else None
         nxt = secs[k + 1] if k + 1 < n else None
-        kick, trend = s["_kick"], s["_trend"]  # kick: 1 = as much as the song's typical section
-        if k == 0 and n > 1 and (kick < 0.7 or s["level"] < 3):
-            s["label"] = "Intro"
-        elif k == n - 1 and n > 1 and (kick < 0.7 or s["level"] < 3 or trend < -0.15):
-            s["label"] = "Outro"
-        elif prev is not None and prev["label"] == "Intro" and kick < 0.7:
-            s["label"] = "Intro"  # the intro goes on, still without much beat
-        elif kick < 0.5 and (prev is None or prev["_kick"] - kick > 0.3):
-            s["label"] = "Breakdown"
-        elif nxt is not None and ((trend > 0.1 and nxt["_kick"] > kick + 0.25) or
-                                  (nxt["level"] > s["level"] and (trend > 0.05 or (prev is not None and prev["label"] == "Breakdown")))):
-            s["label"] = "Build"
-        elif prev is not None and prev["label"] in ("Breakdown", "Build") and kick >= 0.8:
+        bars = s["_bars"][1] - s["_bars"][0]
+        if (k > 0 and nxt is not None and bars <= 16 and s["_riser"] and
+                (nxt["_drop"] or nxt["_kick"] > s["_kick"] + 0.2 or nxt["_intensity"] > s["_intensity"] + 0.25)):
+            s["label"] = "Build"  # a riser into something fuller, however loud the riser itself is
+        elif s["_drop"]:
             s["label"] = "Drop"
-        elif kick < 0.5:
+        # without a riser, only a short stretch that keeps some beat and leads straight into the
+        # Drop (no beat at all before a Drop is a Breakdown)
+        elif (nxt is not None and nxt["_drop"] and bars <= 8 and s["_kick"] >= 0.5 and nxt["_kick"] > s["_kick"] + 0.3):
+            s["label"] = "Build"
+        elif s["_kick"] < 0.5:
             s["label"] = "Breakdown"
         else:
             s["label"] = "Groove"
+    for k, s in enumerate(secs):
+        # an intro that rises for a while is Intro until its last Build
+        leadsOn = s["label"] == "Build" and k + 1 < n and secs[k + 1]["label"] == "Build"
+        if (s["label"] in ("Build", "Drop") and not leadsOn) or (s["_kick"] >= 0.7 and not (k == 0 and n > 1 and s["level"] < 3)):
+            break
+        s["label"] = "Intro"
+    for k in range(n - 1, 0, -1):
+        s = secs[k]
+        if s["label"] in ("Build", "Drop") or (s["_kick"] >= 0.7 and not (k == n - 1 and s["level"] < 3)):
+            break
+        s["label"] = "Outro"
 
 
 def _initComOnThisThread():

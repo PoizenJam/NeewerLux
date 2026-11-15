@@ -1,0 +1,35 @@
+{
+  "format": 1,
+  "name": "Disco",
+  "description": "Yellow, magenta and cyan, brightness on the beat and the colour stepping with it.",
+  "tags": [
+    "intense",
+    "punchy",
+    "retro"
+  ],
+  "sensitivity": 1.0,
+  "floor": 10,
+  "ceiling": 80,
+  "smoothing": 0.3,
+  "palette": [
+    {
+      "hue": 55,
+      "sat": 95
+    },
+    {
+      "hue": 300,
+      "sat": 90
+    },
+    {
+      "hue": 185,
+      "sat": 90
+    }
+  ],
+  "parts": [
+    {
+      "target": "@rim;@background;@practical",
+      "drive": "beat",
+      "colour": "beat"
+    }
+  ]
+}

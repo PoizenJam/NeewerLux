@@ -1,0 +1,36 @@
+{
+  "format": 1,
+  "name": "Ember Pulse",
+  "description": "Bass swells in deep orange and amber.",
+  "tags": [
+    "lively",
+    "punchy",
+    "warm"
+  ],
+  "sensitivity": 1.0,
+  "floor": 10,
+  "ceiling": 75,
+  "smoothing": 0.3,
+  "palette": [
+    {
+      "hue": 25,
+      "sat": 100
+    },
+    {
+      "hue": 40,
+      "sat": 95
+    }
+  ],
+  "parts": [
+    {
+      "target": "@background",
+      "drive": "low",
+      "colour": 0
+    },
+    {
+      "target": "@rim;@practical",
+      "drive": "low",
+      "colour": 1
+    }
+  ]
+}

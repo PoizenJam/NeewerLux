@@ -2,6 +2,12 @@
   "format": 1,
   "name": "Warm Glow",
   "description": "White only, for colour-temperature lights: warm and dim when it's quiet or bass-heavy, a little brighter and cooler when it's bright.",
+  "tags": [
+    "calm",
+    "smooth",
+    "warm",
+    "white"
+  ],
   "sensitivity": 1.0,
   "floor": 25,
   "ceiling": 60,

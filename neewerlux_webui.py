@@ -561,7 +561,7 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
                 <div class="snd-row"><label>Listen to</label><select id="sndDevice" onchange="sndSetDevice(this.value)" title="What an output plays (loopback), or an input such as a microphone or audio interface"></select>
                     <button class="btn small" onclick="sndDevices()" title="List the audio devices again">Refresh</button></div>
                 <div class="snd-row"><label>Mode</label><select id="sndMode" onchange="sndModeChosen(this.value)"></select></div>
-                <div id="sndDesc" style="color:var(--muted);font-size:11px;margin:2px 0 6px"></div>
+                <div id="sndDesc" style="color:var(--muted);font-size:11px;margin:2px 0 6px;white-space:pre-line"></div>
                 <div class="btn-row">
                     <button class="btn success" onclick="sndStart()" title="Play this mode on the lights it names, replacing whatever sound is playing">&#x25B6; Start</button>
                     <button class="btn" onclick="sndStart(true)" title="Only the lights chosen as Target in the control panel follow this mode; other lights keep following whatever sound they follow">On target lights</button>
@@ -2866,7 +2866,7 @@ const TL_LEVEL_NAMES = {1: 'quiet', 2: 'medium', 3: 'loud'};
 function tlSectionAt(sections, ms) { return (sections || []).find(s => (+s.start_ms || 0) <= ms && ms < (+s.end_ms || 0)) || null; }
 function tlDescribeSection(sec) {
     const a = +sec.start_ms || 0, b = +sec.end_ms || 0, lv = +sec.level || 2;
-    return (sec.label || 'Section') + '\n' + tlFmt(a) + ' to ' + tlFmt(b) + ' (' + tlFmt(b - a) + ')\nLevel ' + lv + ' (' + (TL_LEVEL_NAMES[lv] || '') + ')';
+    return (sec.label || 'Section') + '\n' + tlFmt(a) + ' to ' + tlFmt(b) + ' (' + tlFmt(b - a) + ')\n' + (sec.group ? 'Part ' + sec.group + '\n' : '') + (sec.ai_label ? 'Section finder: ' + sec.ai_label + '\n' : '') + 'Level ' + lv + ' (' + (TL_LEVEL_NAMES[lv] || '') + ')';
 }
 
 // ---- draft from a song
@@ -2905,7 +2905,8 @@ function songSetAnalysis(d) {
     if (!document.getElementById('songName').value.trim()) document.getElementById('songName').value = d.song || '';
     const conf = d.confidence == null ? '' : ' (' + Math.round(d.confidence * 100) + '% of the song agrees)';
     document.getElementById('songInfo').textContent = tlFmt(d.duration_ms) + ' long, ' + d.bpm + ' BPM' + conf + ', ' + d.sections.length +
-        ' sections. If the beat ticks don\'t match the song, correct the tempo (x 1/2 or x 2 for the commonest mistake) and when the first bar falls.';
+        ' sections. If the beat ticks don\'t match the song, correct the tempo (x 1/2 or x 2 for the commonest mistake) and when the first bar falls.' +
+        (d.sections_from === 'command' ? ' Sections from the section finder command.' : '') + (d.warnings || []).map(w => ' ' + w + '.').join('');
     document.getElementById('songDraftBtn').disabled = false;
     songDraw();
 }
@@ -3196,7 +3197,7 @@ function sndLive(params) {
 }
 function sndRender() {
     const d = sndDraft;
-    document.getElementById('sndDesc').textContent = d.description || '';
+    document.getElementById('sndDesc').textContent = (d.description || '') + ((d.tags || []).length ? '\nTags: ' + d.tags.join(', ') : '');
     const defaults = {sensitivity: 1, range_db: 18, floor: 10, ceiling: 75, smoothing: 0.5};
     document.getElementById('sndSliders').innerHTML = SND_SLIDERS.map(([k, label, lo, hi, unit, scale]) => {
         const v = Math.round((d[k] !== undefined ? d[k] : defaults[k]) * scale);

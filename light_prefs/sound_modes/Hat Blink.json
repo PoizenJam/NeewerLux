@@ -1,0 +1,35 @@
+{
+  "format": 1,
+  "name": "Hat Blink",
+  "description": "Lights blink with the hi-hats and cymbals: quick and bright on busy tops, dark when they stop.",
+  "tags": [
+    "intense",
+    "hard",
+    "cool"
+  ],
+  "sensitivity": 1.3,
+  "floor": 0,
+  "ceiling": 75,
+  "smoothing": 0.0,
+  "palette": [
+    {
+      "hue": 200,
+      "sat": 60
+    },
+    {
+      "hue": 220,
+      "sat": 35
+    },
+    {
+      "hue": 190,
+      "sat": 20
+    }
+  ],
+  "parts": [
+    {
+      "target": "@rim;@background;@practical",
+      "drive": "high",
+      "colour": 0
+    }
+  ]
+}

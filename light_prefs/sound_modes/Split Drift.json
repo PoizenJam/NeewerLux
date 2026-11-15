@@ -1,0 +1,47 @@
+{
+  "format": 1,
+  "name": "Split Drift",
+  "description": "The background drifts through cool colours while the rim drifts through warm ones.",
+  "tags": [
+    "calm",
+    "smooth",
+    "colourful"
+  ],
+  "sensitivity": 1.0,
+  "floor": 20,
+  "ceiling": 65,
+  "smoothing": 0.7,
+  "cycle_s": 40,
+  "palette": [
+    {
+      "hue": 30,
+      "sat": 90
+    },
+    {
+      "hue": 45,
+      "sat": 85
+    },
+    {
+      "hue": 290,
+      "sat": 70
+    },
+    {
+      "hue": 315,
+      "sat": 75
+    }
+  ],
+  "parts": [
+    {
+      "target": "@background;@practical",
+      "drive": "level",
+      "colour": "cycle",
+      "floor": 20,
+      "ceiling": 55
+    },
+    {
+      "target": "@rim",
+      "drive": "level",
+      "colour": "centroid"
+    }
+  ]
+}

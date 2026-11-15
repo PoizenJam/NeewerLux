@@ -1779,7 +1779,7 @@ def _songAnalysis(show, bpm, durationMs=96000, offsetMs=250):
     beats, bars = show.songGrid(durationMs, bpm, offsetMs)
     cuts = [0] + bars[2::8] + [durationMs]
     levels = [1, 2, 3, 1, 3, 2, 3, 1, 2, 3, 1, 3, 2, 3, 2, 1] * 4
-    sections = [{"start_ms": a, "end_ms": b, "energy": 0.3 * levels[i], "level": levels[i], "label": "S%d" % i}
+    sections = [{"start_ms": a, "end_ms": b, "energy": 0.3 * levels[i], "level": levels[i], "label": "S%d" % i, "group": "ABAC"[i % 4]}
                 for i, (a, b) in enumerate(zip(cuts[:-1], cuts[1:]))]
     return {"duration_ms": durationMs, "bpm": bpm, "offset_ms": offsetMs, "beats": beats, "bars": bars, "sections": sections}
 
@@ -1802,6 +1802,7 @@ def t_songDrafts(rig):
             fl = r["flashes"]
             check(fl["worst"] <= 2.5 and fl["worstRed"] <= 2.5, "%s at %d BPM: %s flashes a second at worst (red %s)" % (style, bpm, fl["worst"], fl["worstRed"]))
             check(seq["tempo"] == {"bpm": bpm, "offset_ms": a["bars"][0]} and len(seq["sections"]) == len(a["sections"]), "tempo and sections")
+            check([x.get("group") for x in seq["sections"]] == [x["group"] for x in a["sections"]], "parts kept")
     a = _songAnalysis(show, 128)
     concert = show.draftSequence(a, "concert")[0]
     neon = show.draftSequence(a, "Neon")[0]
@@ -1877,6 +1878,21 @@ def t_songHTTP(rig):
         check(not again["success"] and "exists" in again["errors"][0], "saving over needs overwrite: %s" % again["errors"])
         check(not rig.post("/NeewerLux/sequence", {"action": "draft", "analysis": a, "style": "Disco"})["success"], "unknown style")
         rig.post("/NeewerLux/sequence", {"action": "delete", "name": "My Song"})
+        check(a["sections_from"] == "analysis" and a["warnings"] == [], "built-in sections without a finder command")
+        script = os.path.join(d, "finder.py")
+        with open(script, "w") as f:
+            f.write("import json, sys\nprint(json.dumps([{'start': 0, 'end': 5, 'label': 'intro'}, {'start': 5, 'end': 30, 'label': 'chorus'}]))\n")
+        try:
+            nl.songSectionCommand = '"%s" "%s" "{song}"' % (sys.executable, script)
+            got = rig.post("/NeewerLux/sequence", {"action": "analyze", "path": path})
+            check(got["success"] and got["sections_from"] == "command" and any(s.get("ai_label") == "chorus" for s in got["sections"]),
+                  "a finder command sets the sections: %s" % {k: got.get(k) for k in ("sections_from", "warnings", "sections")})
+            nl.songSectionCommand = '"%s" -c "import sys; sys.exit(2)" "{song}"' % sys.executable
+            got = rig.post("/NeewerLux/sequence", {"action": "analyze", "path": path})
+            check(got["success"] and got["sections_from"] == "analysis" and "exit code 2" in got["warnings"][0] and got["sections"],
+                  "a failing finder falls back, with a warning: %s" % got.get("warnings"))
+        finally:
+            nl.songSectionCommand = ""
 
 
 def t_paletteLibrary(rig):

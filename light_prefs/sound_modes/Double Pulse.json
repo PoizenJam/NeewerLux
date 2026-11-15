@@ -1,0 +1,40 @@
+{
+  "format": 1,
+  "name": "Double Pulse",
+  "description": "Bass on the background, mids on the rim and practical lights, in two colours.",
+  "tags": [
+    "lively",
+    "punchy",
+    "neon"
+  ],
+  "sensitivity": 1.0,
+  "floor": 10,
+  "ceiling": 75,
+  "smoothing": 0.35,
+  "palette": [
+    {
+      "hue": 310,
+      "sat": 90
+    },
+    {
+      "hue": 275,
+      "sat": 90
+    },
+    {
+      "hue": 190,
+      "sat": 90
+    }
+  ],
+  "parts": [
+    {
+      "target": "@background",
+      "drive": "low",
+      "colour": 0
+    },
+    {
+      "target": "@rim;@practical",
+      "drive": "mid",
+      "colour": 2
+    }
+  ]
+}

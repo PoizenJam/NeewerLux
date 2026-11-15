@@ -1,0 +1,36 @@
+{
+  "format": 1,
+  "name": "Kick Blink Duo",
+  "description": "Kick Blink in two colours: purple on the background, cyan on the rim and practical lights.",
+  "tags": [
+    "intense",
+    "hard",
+    "neon"
+  ],
+  "sensitivity": 1.2,
+  "floor": 0,
+  "ceiling": 85,
+  "smoothing": 0.0,
+  "palette": [
+    {
+      "hue": 275,
+      "sat": 90
+    },
+    {
+      "hue": 185,
+      "sat": 90
+    }
+  ],
+  "parts": [
+    {
+      "target": "@background",
+      "drive": "low",
+      "colour": 0
+    },
+    {
+      "target": "@rim;@practical",
+      "drive": "low",
+      "colour": 1
+    }
+  ]
+}

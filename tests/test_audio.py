@@ -220,8 +220,16 @@ def play(mode, features):
 
 
 def t_shippedModesValid():
-    names = [m.name for m in shippedModes()]
-    check(names == ["Bands", "Beat Chase", "Colour Drift", "Pulse", "Warm Glow"], "shipped modes: %s" % names)
+    """Every shipped mode is valid (shippedModes checks), the first five are still there, there
+    is plenty of choice, and every mode is tagged with an energy and a feel for draft styles."""
+    modes = shippedModes()
+    names = [m.name for m in modes]
+    check({"Bands", "Beat Chase", "Colour Drift", "Pulse", "Warm Glow"} <= set(names) and len(names) >= 50, "shipped modes: %s" % names)
+    for m in modes:
+        check(len([t for t in m.tags if t in ("calm", "lively", "intense")]) == 1 and
+              len([t for t in m.tags if t in ("smooth", "punchy", "hard")]) == 1, "%s: one energy and one feel tag: %s" % (m.name, m.tags))
+    bad = show.parseSoundMode({"name": "x", "parts": [{"target": "@rim"}], "tags": "loud"})[1]
+    check(any("tags" in e for e in bad), "tags must be a list: %s" % bad)
 
 
 def t_shippedModesUnderFlashLimit():
@@ -239,7 +247,7 @@ def t_shippedModesUnderFlashLimit():
                 if rate > worst:
                     worst, worstAt = rate, "%s, %s, light %d" % (mode.name, name, idx + 1)
                 check(rate <= show.SOUND_FLASH_LIMIT, "%s on %s: light %d flashes %.1f a second" % (mode.name, name, idx + 1, rate))
-    RESULTS.append("    5 modes x %d worst-case signals: at most %.1f flashes a second (%s)" % (len(feats), worst, worstAt))
+    RESULTS.append("    %d modes x %d worst-case signals: at most %.1f flashes a second (%s)" % (len(shippedModes()), len(feats), worst, worstAt))
 
 
 def t_modesMoveWithTheMusic():
@@ -478,7 +486,7 @@ def _syntheticSong(sr=44100, bpm=126.0, offset=0.3, plan=(("intro", 8), ("verse"
     hatLen = int(0.03 * sr)
     hat = rng.standard_normal(hatLen) * np.exp(-np.arange(hatLen) / sr * 150)
     look = {"intro": (0.0, 0.0, 0.0, 0.05), "verse": (0.5, 0.15, 0.0, 0.05), "chorus": (0.9, 0.25, 0.25, 0.08),
-            "break": (0.0, 0.0, 0.0, 0.12), "outro": (0.15, 0.0, 0.0, 0.03)}
+            "break": (0.0, 0.0, 0.0, 0.12), "outro": (0.15, 0.0, 0.0, 0.03), "build": (0.5, 0.15, 0.0, 0.05)}
     bounds, pos = [], offset
     for name, bars in plan:
         kickAmp, bassAmp, hatAmp, padAmp = look[name]
@@ -487,6 +495,11 @@ def _syntheticSong(sr=44100, bpm=126.0, offset=0.3, plan=(("intro", 8), ("verse"
         seg = (t >= start) & (t < end)
         x[seg] += padAmp * (np.sin(2 * np.pi * 220 * t[seg]) + np.sin(2 * np.pi * 277 * t[seg]))
         x[seg] += bassAmp * np.sin(2 * np.pi * 55 * t[seg])
+        if name == "build":
+            # a noise riser over the verse loop: louder and brighter towards the end
+            ramp = ((t[seg] - start) / (end - start)) ** 2
+            noise = rng.standard_normal(int(np.sum(seg)))
+            x[seg] += 0.35 * ramp * np.diff(noise, prepend=0.0)
         for k in range(bars * 4):
             at = int((start + k * beat) * sr)
             if kickAmp:
@@ -524,13 +537,89 @@ def t_songAnalysis():
         return next(s["label"] for s in a["sections"] if s["start_ms"] <= ms < s["end_ms"])
     middle = lambda i: (bounds[i - 1] if i else 0) + ((bounds[i] if i < len(bounds) else a["duration_ms"]) - (bounds[i - 1] if i else 0)) / 2
     labels = [labelAt(middle(i)) for i in range(6)]
-    check(labels == ["Intro", "Groove", "Groove", "Breakdown", "Drop", "Outro"], "named by what changes: %s" % labels)
+    check(labels == ["Intro", "Groove", "Drop", "Breakdown", "Drop", "Outro"], "named by what changes: %s" % labels)
+    groupAt = lambda ms: next(s["group"] for s in a["sections"] if s["start_ms"] <= ms < s["end_ms"])
+    check(groupAt(middle(2)) == groupAt(middle(4)) and a["sections"][0]["group"] == "A" and groupAt(middle(3)) != groupAt(middle(2)),
+          "repeats share a group: %s" % [(s["label"], s["group"]) for s in a["sections"]])
     check(all(s["label"] in au.SECTION_LABELS for s in a["sections"]), "only the documented names")
     check(all(0 <= v <= 1 for v in a["energy"]) and len(a["energy"]) == math.ceil(a["duration_ms"] / 250) or
           abs(len(a["energy"]) - a["duration_ms"] / 250) <= 1, "energy every 250 ms")
     check(len(a["waveform"]) == au.SONG_WAVEFORM_POINTS and max(a["waveform"]) == 1.0, "waveform")
     fixed = au.analyzeSong(x, sr, bpm=63, offsetMs=1234)
     check(fixed["bpm"] == 63 and fixed["offset_ms"] == 1234 % round(60000 / 63) and fixed["confidence"] is None, "given tempo and offset are kept: %s %s" % (fixed["bpm"], fixed["offset_ms"]))
+
+
+def t_songRiser():
+    """A riser over the end of a verse loop, before the chorus, is a Build of its own."""
+    x, sr, bounds = _syntheticSong(plan=(("intro", 8), ("verse", 16), ("build", 8), ("chorus", 16), ("outro", 8)))
+    a = au.analyzeSong(x, sr)
+    mid = (bounds[1] + bounds[2]) / 2
+    sec = next(s for s in a["sections"] if s["start_ms"] <= mid < s["end_ms"])
+    check(sec["label"] == "Build", "the riser is a Build: %s" % [(s["start_ms"], s["label"]) for s in a["sections"]])
+    verse = next(s for s in a["sections"] if s["start_ms"] <= bounds[0] + 2000 < s["end_ms"])
+    check(verse["label"] != "Build", "the verse before it is not")
+
+
+FAKE_FINDER = r"""
+import json, os, sys, time
+song, out, how = sys.argv[1], sys.argv[2], sys.argv[3]
+assert os.path.isfile(song), song
+if how == "slow":
+    time.sleep(5)
+if how == "fail":
+    print("model not found", file=sys.stderr)
+    sys.exit(3)
+segs = [{"start": 0.0, "end": 16.0, "label": "intro"}, {"start": 16.0, "end": 47.0, "label": "verse"},
+        {"start": 47.0, "end": 76.0, "label": "chorus"}, {"start": 76.0, "end": 200.0, "label": "outro"}]
+if how == "stdout":
+    print(json.dumps(segs))
+elif how == "file":
+    os.makedirs(os.path.join(out, "struct"))
+    with open(os.path.join(out, "struct", os.path.splitext(os.path.basename(song))[0] + ".json"), "w") as f:
+        json.dump({"path": song, "bpm": 126, "segments": segs}, f)
+else:
+    print("nothing useful")
+"""
+
+
+def finderCommand(script, how):
+    return '"%s" "%s" "{song}" "{out}" %s' % (sys.executable, script, how)
+
+
+def t_externalSections():
+    """Another section finder: run without a shell (a song path with spaces and quotes arrives
+    as one argument), its segments read from its output or a file it writes, its failures
+    reported; analyzeSong puts sections on the bar nearest its boundaries and keeps its labels."""
+    import tempfile
+    import soundfile
+    x, sr, bounds = _syntheticSong()
+    with tempfile.TemporaryDirectory() as d:
+        script = os.path.join(d, "finder.py")
+        with open(script, "w") as f:
+            f.write(FAKE_FINDER)
+        song = os.path.join(d, "it's a \"song\" & more.wav" if os.name != "nt" else "it's a song & more.wav")
+        soundfile.write(song, x, sr)
+        for how in ("stdout", "file"):
+            segs, why = au.externalSections(finderCommand(script, how), song)
+            check(segs and why == "" and [s["start_ms"] for s in segs] == [0, 16000, 47000, 76000] and segs[2]["label"] == "chorus",
+                  "%s: %s %s" % (how, segs, why))
+        segs, why = au.externalSections(finderCommand(script, "fail"), song)
+        check(segs is None and "exit code 3" in why and "model not found" in why, why)
+        segs, why = au.externalSections(finderCommand(script, "nothing"), song)
+        check(segs is None and "no segments" in why, why)
+        segs, why = au.externalSections(finderCommand(script, "slow"), song, timeoutS=1)
+        check(segs is None and "longer than 1 s" in why, why)
+        segs, why = au.externalSections('"no such program here" "{song}"', song)
+        check(segs is None and "no program" in why, why)
+        segs = au.externalSections(finderCommand(script, "file"), song)[0]
+    a = au.analyzeSong(x, sr, segments=segs)
+    period = 60000.0 / 126.0
+    starts = [s["start_ms"] for s in a["sections"]]
+    check(len(starts) >= 4 and all(any(abs(s - b) <= 4 * period for s in starts) for b in (16000, 47000, 76000)),
+          "sections start on the bars nearest the finder's boundaries: %s" % starts)
+    mid = lambda ms: next(s for s in a["sections"] if s["start_ms"] <= ms < s["end_ms"])
+    check(mid(60000)["ai_label"] == "chorus" and mid(30000)["ai_label"] == "verse" and all(s["label"] in au.SECTION_LABELS for s in a["sections"]),
+          "its labels kept as ai_label, ours as label: %s" % [(s["label"], s["ai_label"]) for s in a["sections"]])
 
 
 def t_songFiles():
@@ -555,7 +644,7 @@ def t_songFiles():
 TESTS = [t_tempoOfClickTracks, t_tempoOfDrumPattern, t_tempoChange, t_bandsAndCentroid, t_silenceAndGaps,
          t_levelIsRelative, t_shippedModesValid, t_shippedModesUnderFlashLimit, t_modesMoveWithTheMusic,
          t_modesAimAtRoles, t_beatChase, t_warmGlowIsWhiteOnly, t_silenceSettlesAtTheFloor, t_modeValidation,
-         t_docExamplesValidate, t_colourCycle, t_voices, t_retryNow, t_silenceMeansFloor, t_songAnalysis, t_songFiles]
+         t_docExamplesValidate, t_colourCycle, t_voices, t_retryNow, t_silenceMeansFloor, t_songAnalysis, t_songRiser, t_externalSections, t_songFiles]
 
 
 def main():

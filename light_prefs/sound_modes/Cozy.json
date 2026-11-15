@@ -1,0 +1,32 @@
+{
+  "format": 1,
+  "name": "Cozy",
+  "description": "Soft warm amber, low and slow.",
+  "tags": [
+    "calm",
+    "smooth",
+    "warm",
+    "pastel"
+  ],
+  "sensitivity": 1.0,
+  "floor": 20,
+  "ceiling": 50,
+  "smoothing": 0.85,
+  "palette": [
+    {
+      "hue": 35,
+      "sat": 60
+    },
+    {
+      "hue": 28,
+      "sat": 70
+    }
+  ],
+  "parts": [
+    {
+      "target": "@rim;@background;@practical",
+      "drive": "level",
+      "colour": "centroid"
+    }
+  ]
+}

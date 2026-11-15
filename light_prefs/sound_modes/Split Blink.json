@@ -1,0 +1,36 @@
+{
+  "format": 1,
+  "name": "Split Blink",
+  "description": "The background blinks with the kick, the rim and practical lights with the hi-hats.",
+  "tags": [
+    "intense",
+    "hard",
+    "neon"
+  ],
+  "sensitivity": 1.2,
+  "floor": 0,
+  "ceiling": 80,
+  "smoothing": 0.0,
+  "palette": [
+    {
+      "hue": 275,
+      "sat": 90
+    },
+    {
+      "hue": 185,
+      "sat": 90
+    }
+  ],
+  "parts": [
+    {
+      "target": "@background",
+      "drive": "low",
+      "colour": 0
+    },
+    {
+      "target": "@rim;@practical",
+      "drive": "high",
+      "colour": 1
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "format": 1,
+  "name": "Lava Lamp",
+  "description": "Orange and magenta blobs of colour, slowly cycling.",
+  "tags": [
+    "calm",
+    "smooth",
+    "warm"
+  ],
+  "sensitivity": 1.0,
+  "floor": 20,
+  "ceiling": 65,
+  "smoothing": 0.85,
+  "cycle_s": 50,
+  "palette": [
+    {
+      "hue": 30,
+      "sat": 100
+    },
+    {
+      "hue": 310,
+      "sat": 85
+    },
+    {
+      "hue": 45,
+      "sat": 95
+    }
+  ],
+  "parts": [
+    {
+      "target": "@rim;@background;@practical",
+      "drive": "level",
+      "colour": "cycle"
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "format": 1,
+  "name": "Beat Blink",
+  "description": "Every light on with each beat and off between, the colour stepping on each beat.",
+  "tags": [
+    "intense",
+    "hard",
+    "neon"
+  ],
+  "sensitivity": 1.0,
+  "floor": 0,
+  "ceiling": 80,
+  "smoothing": 0.0,
+  "palette": [
+    {
+      "hue": 55,
+      "sat": 95
+    },
+    {
+      "hue": 300,
+      "sat": 90
+    },
+    {
+      "hue": 185,
+      "sat": 90
+    }
+  ],
+  "parts": [
+    {
+      "target": "@rim;@background;@practical",
+      "drive": "beat",
+      "colour": "beat"
+    }
+  ]
+}

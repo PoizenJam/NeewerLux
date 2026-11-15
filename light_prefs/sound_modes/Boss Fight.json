@@ -1,0 +1,36 @@
+{
+  "format": 1,
+  "name": "Boss Fight",
+  "description": "Purple and orange, punchy on loud hits: big and dramatic.",
+  "tags": [
+    "intense",
+    "punchy",
+    "moody"
+  ],
+  "sensitivity": 1.0,
+  "floor": 8,
+  "ceiling": 80,
+  "smoothing": 0.2,
+  "palette": [
+    {
+      "hue": 275,
+      "sat": 95
+    },
+    {
+      "hue": 30,
+      "sat": 100
+    }
+  ],
+  "parts": [
+    {
+      "target": "@background",
+      "drive": "low",
+      "colour": 0
+    },
+    {
+      "target": "@rim;@practical",
+      "drive": "level",
+      "colour": 1
+    }
+  ]
+}
