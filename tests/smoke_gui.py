@@ -254,6 +254,26 @@ def checkSoundTab(nl, app, win, rig):
     print("Sound tab: PASS")
 
 
+def checkToolbarWraps(nl, app, win):
+    """The light buttons wrap rather than hold the main window wide: with large fonts their
+    row was 1271 px, past a 1280 x 720 screen once the window's margins were added."""
+    tb = win.findChild(type(win.centralWidget()), "toolbarWidget")
+    row = win.turnOffButton.parentWidget()
+    buttons = [w for w in row.findChildren(type(win.turnOffButton))]
+    together = sum(b.sizeHint().width() for b in buttons)
+    assert tb.minimumSizeHint().width() < together, "the toolbar's minimum (%d) is less than its buttons side by side (%d)" % (
+        tb.minimumSizeHint().width(), together)
+    size = win.size()
+    win.resize(win.minimumSizeHint().width(), size.height())
+    app.processEvents()
+    tops = {b.geometry().top() for b in buttons if b.isVisible()}
+    assert len(tops) > 1 or row.width() >= together, "squeezed, the buttons wrap onto another row: %s" % sorted(tops)
+    assert all(row.rect().contains(b.geometry()) for b in buttons), "every button stays inside the toolbar"
+    win.resize(size)
+    app.processEvents()
+    print("toolbar wraps: PASS")
+
+
 def checkOwnSwatches(nl, app, win):
     """1.4.0: + saves the colour being edited as a swatch, every swatch grid redraws, a click
     on yours picks it, removing one redraws them all; the animation editor has the wheel and
@@ -371,6 +391,7 @@ def main():
     checkFlashRates(nl, app, win)
     checkColourAndPresetFade(nl, app, win)
     checkOwnSwatches(nl, app, win)
+    checkToolbarWraps(nl, app, win)
 
     # Sequences panel and status timer
     nl.savedSequences["Smoke"] = {"format": 1, "name": "Smoke", "duration_ms": 1500,

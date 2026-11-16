@@ -508,6 +508,7 @@ class ColourSwatches(QWidget):
         while self.grid.count():
             w = self.grid.takeAt(0).widget()
             if w is not None:
+                w.hide()  # deleteLater waits for the event loop; until then it would still show
                 w.deleteLater()
         self.buttons, self.userButtons = [], []
         n = 0
@@ -924,29 +925,33 @@ class Ui_MainWindow(object):
         toolbar = QHBoxLayout(toolbarWidget)
         toolbar.setContentsMargins(4, 4, 4, 4)
         toolbar.setSpacing(4)
+        # the light buttons wrap onto a second row when the window is narrow, so their combined
+        # width (over 1200 px with large fonts) never sets the window's minimum
+        lightButtons = QWidget()
+        lightRow = FlowLayout(lightButtons, spacing=4)
 
         self.turnOffButton = QPushButton("Turn Light(s) Off")
         self.turnOffButton.setEnabled(False)
-        toolbar.addWidget(self.turnOffButton)
+        lightRow.addWidget(self.turnOffButton)
         self.turnOnButton = QPushButton("Turn Light(s) On")
         self.turnOnButton.setEnabled(False)
-        toolbar.addWidget(self.turnOnButton)
-        toolbar.addSpacing(10)
+        lightRow.addWidget(self.turnOnButton)
+        lightRow.addSpacing(10)
         self.scanCommandButton = QPushButton("Scan")
-        toolbar.addWidget(self.scanCommandButton)
+        lightRow.addWidget(self.scanCommandButton)
         self.tryConnectButton = QPushButton("Connect")
         self.tryConnectButton.setEnabled(False)
-        toolbar.addWidget(self.tryConnectButton)
-        toolbar.addSpacing(6)
+        lightRow.addWidget(self.tryConnectButton)
+        lightRow.addSpacing(6)
         self.selectAllButton = QPushButton("Select All")
         self.selectAllButton.setToolTip("Select all lights in the table")
-        toolbar.addWidget(self.selectAllButton)
+        lightRow.addWidget(self.selectAllButton)
         self.stageButton = QPushButton("Stage")
         self.stageButton.setToolTip("Open the Stage window: every light's current colour at a glance,\n"
             "including simulated lights, and which layer is driving it")
-        toolbar.addWidget(self.stageButton)
+        lightRow.addWidget(self.stageButton)
 
-        toolbar.addStretch(1)
+        toolbar.addWidget(lightButtons, 1)
 
         self.httpToggleBtn = QPushButton("HTTP: OFF")
         self.httpToggleBtn.setObjectName("httpToggleBtn")
