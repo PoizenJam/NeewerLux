@@ -115,7 +115,7 @@ a:hover { text-decoration: underline; }
 .stage-grid { display:flex; flex-wrap:wrap; gap:12px; }
 .swatches { display:grid; grid-template-columns:repeat(6, 26px); gap:3px; }
 .swatches button { width:26px; height:22px; border:1px solid #666; border-radius:3px; padding:0; cursor:pointer; }
-.swatches button.swatch-add { background:transparent; color:var(--muted); border-style:dashed; font-weight:bold; }
+.swatches button.swatch-add { background:var(--bg3); color:var(--text); border:1px dashed #888; font-weight:bold; font-size:15px; line-height:1; }
 .snd-swatch.pick { cursor:pointer; }
 .stage-tile { position:relative; width:150px; text-align:center; font-size:12px; }
 .stage-box { position:relative; z-index:1; height:84px; border-radius:10px; border:4px solid #5a5a5a; margin-bottom:4px; }

@@ -1312,14 +1312,19 @@ def matchDraftStyle(styles, genres):
     if isinstance(genres, str):
         genres = [g for g in genres.split(",")]
     query = [str(g).strip().lower() for g in (genres or []) if str(g).strip()]
+
+    def words(genre):
+        # "music" says nothing about the style: "electronic music" shouldn't find "chamber music"
+        found = set(genre.replace("-", " ").split())
+        return (found - {"music"}) or found
     best, bestScore = None, 0.0
     for name, style in styles.items():
         score = 0.0
         for i, q in enumerate(query):
-            qWords = set(q.replace("-", " ").split())
+            qWords = words(q)
             fit = 0.0
             for g in style.get("genres", []):
-                gWords = set(g.replace("-", " ").split())
+                gWords = words(g)
                 if g == q:
                     fit = max(fit, 3.0)
                 elif gWords <= qWords or qWords <= gWords:

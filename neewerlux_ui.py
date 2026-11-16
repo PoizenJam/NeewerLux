@@ -473,7 +473,8 @@ def _swatchButton(hue, sat, tip):
     b = QPushButton()
     b.setFixedSize(26, 22)
     b.setToolTip(tip)
-    b.setStyleSheet("QPushButton { background: %s; border: 1px solid #666; border-radius: 3px; padding: 0px; }"
+    # min-height 0: the theme's button min-height would otherwise stretch it past the fixed size
+    b.setStyleSheet("QPushButton { background: %s; border: 1px solid #666; border-radius: 3px; padding: 0px; min-height: 0px; }"
                     % QColor.fromHsv(hue % 360, int(sat * 2.55), 255).name())
     return b
 
@@ -523,6 +524,9 @@ class ColourSwatches(QWidget):
         if self.current is not None:
             self.addButton = QPushButton("+")
             self.addButton.setFixedSize(26, 22)
+            # dashed and empty-looking would read as a transparent swatch: a bold + on the theme's button colour
+            self.addButton.setStyleSheet("QPushButton { padding: 0px; min-height: 0px; border: 1px dashed #888; border-radius: 3px;"
+                                         " font-weight: bold; font-size: 15px; }")
             self.addButton.setToolTip("Save the current colour as a swatch (up to %d of your own)" % SwatchStore.LIMIT)
             self.addButton.clicked.connect(lambda: SWATCH_STORE.add(*self.current()))
             self.grid.addWidget(self.addButton, n // self.columns, n % self.columns)

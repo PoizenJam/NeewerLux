@@ -357,7 +357,7 @@ Styles are JSON files in `light_prefs/draft_styles/`, edited with **Styles...** 
 | `format` | no | 1 |
 | `name` | yes | The style's name. |
 | `description` | no | Shown under the style's name. |
-| `genres` | no | Genres it suits, matched by Pick and `style_for` (exact names count most, then one containing the other, then shared words). |
+| `genres` | no | Genres it suits, matched by Pick and `style_for` (exact names count most, then one containing the other, then shared words; the word "music" is ignored, so `electronic music` matches `electronic`). Generic electronic genres (`electronic`, `edm`, `dance`) pick House. |
 | `palette` | yes | The name of a saved palette (`light_prefs/palettes/`), or a list of colours: all `{"hue", "sat"}` or all `{"temp"}` in Kelvin (3200 to 8500 in a sequence). Each section takes the next colours round it; the fill gets a pale version. |
 | `intensity` | no | `low`, `medium` (default) or `high`: how bright the colour lights get (rim at most 45, 75 or 100%). |
 | `use_animations`, `use_sound_modes` | no | `true` (default) or `false`: whether `animation` and `sound` behaviours may be used. When one can't (turned off, or nothing in its pool qualifies), the section takes the kind's other behaviours, or its default. |

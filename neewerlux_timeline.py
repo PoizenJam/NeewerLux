@@ -1633,7 +1633,7 @@ class SequenceEditor(QWidget):
         self.pBri = SpinBoxWithButtons(); self.pBri.setRange(0, 100); self.pBri.setSuffix(" %")
         self.pFade = SpinBoxWithButtons(); self.pFade.setRange(0, 600000); self.pFade.setSingleStep(100); self.pFade.setSuffix(" ms")
         self.pSwatch = QLabel(); self.pSwatch.setFixedHeight(16)
-        self.pPick = ColourPickRow(lambda: (self.pHue.value(), self.pSat.value()), self._pickColour, columns=6)
+        self.pPick = ColourPickRow(lambda: (self.pHue.value(), self.pSat.value()), self._pickColour, columns=6, rows=4)  # the panel scrolls, so room for the 12 ready colours and 12 of yours
         self.pClip = QComboBox()
         self.pSound = QComboBox()
         self.pSound.setToolTip("The sound mode these lights follow for the cue's length (live sound, while the sequence plays)")

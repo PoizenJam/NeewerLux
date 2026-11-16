@@ -2034,7 +2034,8 @@ def t_draftStyles(rig):
     check(set(listed["sections"]) == set(show.DRAFT_SECTIONS) and len(listed["behaviours"]) == len(show.DRAFT_BEHAVIOURS)
           and "Neon" in listed["palettes"] and "calm" in listed["sound_mode_tags"] and listed["animation_items"], "editor info")
     for genres, want in ((["zydeco"], "Test Style"), (["thrash metal", "metal"], "Metal"), ("deep house", "House"),
-                         ("chill lofi hip hop", "Lo-fi"), (["k-pop"], "Pop"), (["Drum & Bass"], "Drum and Bass"), (["just chatting"], "Just Chatting")):
+                         ("chill lofi hip hop", "Lo-fi"), (["k-pop"], "Pop"), (["Drum & Bass"], "Drum and Bass"), (["just chatting"], "Just Chatting"),
+                         ("EDM", "House"), ("Electronic", "House"), ("electronic music", "House"), ("big room", "House"), (["electronica", "ambient"], "House")):
         got = rig.post("/NeewerLux/sequence", {"action": "style_for", "genres" if isinstance(genres, list) else "genre": genres})
         check(got.get("style") == want, "%s picks %s: %s" % (genres, want, got))
     check(not rig.post("/NeewerLux/sequence", {"action": "style_for", "genre": "qwertyuiop"})["success"], "no match")

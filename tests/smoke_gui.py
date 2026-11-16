@@ -258,8 +258,15 @@ def checkOwnSwatches(nl, app, win):
     for i in range(30):
         SWATCH_STORE.add(i * 7, 60)
     assert len(SWATCH_STORE.items) == SWATCH_STORE.LIMIT, "at most %d" % SWATCH_STORE.LIMIT
+    rows = ed._pickRow.swatches
+    assert rows.buttons[0].height() == 22 and ed._pickRow.scroll.height() >= 2 * 22 + rows.grid.verticalSpacing(), "two full rows show"
     assert ed._pickRow.scroll.height() == ed._pickRow.scroll.maximumHeight() and ed._pickRow.sizeHint().height() <= 50, \
         "a full set of swatches scrolls in the editor rather than growing it"
+    assert not tooBig(win), "the main window still fits %dx%d with a full set of swatches: %s" % (SMALL_SCREEN + (tooBig(win),))
+    b = win.hsiSwatches.buttons[0]
+    assert (b.height(), win.hsiSwatches.addButton.height()) == (22, 22), \
+        "the theme doesn't stretch the swatches or hide the +: %s" % ((b.height(), win.hsiSwatches.addButton.height()),)
+    assert win.hsiSwatches.addButton.text() == "+"
     ed.close()
     dlg.close()
     SWATCH_STORE.replace([])
