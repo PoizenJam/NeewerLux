@@ -946,7 +946,7 @@ def syntheticSoundFeatures(tMs, bpm=120.0, offsetMs=0):
     kick = math.exp(-phase * 7.0)
     hat = math.exp(-abs(phase - 0.5) * 14.0)
     return {"level": 0.45 + 0.45 * kick, "low": 0.15 + 0.8 * kick, "mid": 0.4 + 0.15 * kick, "high": 0.2 + 0.6 * hat,
-            "centroid": 0.35 + 0.3 * hat, "silent": False, "beat": beat, "bpm": float(bpm or 120.0)}
+            "centroid": 0.35 + 0.3 * hat, "silent": False, "beat": beat, "kick": beat, "bpm": float(bpm or 120.0)}
 
 
 def animationFlashRate(anim, speed=1.0):
@@ -1631,13 +1631,16 @@ def draftSequence(analysis, style, name=None, bpm=None, offsetMs=None, animation
 
 
 SOUND_MODE_FORMAT = 1
-SOUND_DRIVES = ("level", "low", "mid", "high", "beat")
+SOUND_DRIVES = ("level", "low", "mid", "high", "beat", "kick")
 SOUND_COLOURS = ("centroid", "beat", "cycle")  # besides a palette index
 SOUND_FLASH_LIMIT = 2       # flashes a second a sound mode allows itself; the flash guard (3) is the backstop
 SOUND_FLASH_WINDOW_S = 1.05 # a little over a second: evenly paced transitions 0.25 s apart would put five
                             # in one closed second on a 50 ms frame grid
 SOUND_CHASE_MAX_BPM = 150   # faster than this, chases step on every other beat
 SOUND_BLINK_MAX_BPM = 120   # faster than this, Beat-driven lights flash on every other beat (one flash per beat at 120 BPM is the 2/s limit)
+SOUND_KICK_GAP_MS = 500     # Kick-driven lights flash at most once in this long (2 a second)
+SOUND_KICK_EVEN_BPM = 115   # faster than this, a Kick flash also waits 1.5 beats, so kicks on every beat
+                            # flash on every other one evenly instead of whenever timing jitter lets one through
 SOUND_ATTACK_MS = 60        # how fast a light rises to a louder value (less with low Smoothing, none at 0)
 SOUND_COLOUR_STEP_MS = 400  # how long a palette step (colour "beat") takes to blend
 SOUND_SETTLE_MS = 300       # a value held this long is written even if under the write deadband,
@@ -1831,6 +1834,7 @@ class _SoundVoice:
         self._stepAt = {}       # part -> ms when the palette step changed
         self._beatEnv = {}      # part -> beat envelope
         self._blinkAt = {}      # part -> when its last Beat flash began
+        self._kickAt = {}       # part -> when its last Kick flash began
 
     def drop(self, lights):
         if self.lights is None:
@@ -1853,7 +1857,7 @@ class _SoundVoice:
             order = resolved[pi]
             lights.sort(key=lambda i: (0, order.index(i)) if i in order else (1, sweep.index(i) if i in sweep else i))
 
-    def frame(self, f, nowMs, dt, blinkBeat, stepBeat, startMs):
+    def frame(self, f, nowMs, dt, blinkBeat, stepBeat, startMs, kickBlink=False):
         mode = self.mode
         # Smoothing 0 is a hard cut both ways: lights snap to each new value
         attack = min(SOUND_ATTACK_MS, mode.smoothing * 4 * SOUND_ATTACK_MS)
@@ -1882,11 +1886,13 @@ class _SoundVoice:
             if stepBeat and (part["chase"] or colour == "beat"):
                 self._step[pi] = self._step.get(pi, 0) + 1
                 self._stepAt[pi] = nowMs
-            if part["drive"] == "beat":
-                # full for half a beat, then falling at the Smoothing speed (gone at once at 0)
-                if blinkBeat:
-                    self._blinkAt[pi] = nowMs
-                held = nowMs - self._blinkAt.get(pi, -1e9) < 30000.0 / (f.get("bpm") or 200.0)
+            if part["drive"] in ("beat", "kick"):
+                # full for half a beat, then falling at the Smoothing speed (gone at once at 0);
+                # Beat flashes on the beat clock, Kick on each kick drum hit heard
+                flashes = self._blinkAt if part["drive"] == "beat" else self._kickAt
+                if blinkBeat if part["drive"] == "beat" else kickBlink:
+                    flashes[pi] = nowMs
+                held = nowMs - flashes.get(pi, -1e9) < 30000.0 / (f.get("bpm") or 200.0)
                 be = 1.0 if held else self._beatEnv.get(pi, 0.0) * (1.0 - down)
                 self._beatEnv[pi] = be
                 drive = be
@@ -1952,6 +1958,8 @@ class SoundPlayer:
         self._lastMs = None
         self._lastBeat = None
         self._beats = 0
+        self._lastKick = None
+        self._kickFlashAt = -1e9
         self._counters = {}     # light -> (FlashCounter as white, FlashCounter on its colour) (SOUND_FLASH_LIMIT)
         self._sent = {}         # light -> command last output
         self._held = {}         # light -> (command computed, ms it has been the same since)
@@ -2044,10 +2052,21 @@ class SoundPlayer:
         # holding back flashes here and there
         stepBeat = newBeat and (f.get("bpm", 0) <= SOUND_CHASE_MAX_BPM or self._beats % 2 == 0)
         blinkBeat = newBeat and (f.get("bpm", 0) <= SOUND_BLINK_MAX_BPM or self._beats % 2 == 0)
+        # kicks come when they come (2-step, broken beats), so they are paced by time instead:
+        # a kick too soon after the last flash is skipped
+        kick = f.get("kick")
+        gap = SOUND_KICK_GAP_MS
+        if f.get("bpm", 0) > SOUND_KICK_EVEN_BPM:
+            gap = max(gap, 1.5 * 60000.0 / f["bpm"])
+        kickBlink = (kick is not None and self._lastKick is not None and kick != self._lastKick
+                     and nowMs - self._kickFlashAt >= gap)
+        self._lastKick = kick
+        if kickBlink:
+            self._kickFlashAt = nowMs
 
         out = {}
         for v in self.voices:
-            out.update(v.frame(f, nowMs, dt, blinkBeat, stepBeat, self.startMs))
+            out.update(v.frame(f, nowMs, dt, blinkBeat, stepBeat, self.startMs, kickBlink))
 
         t = nowMs / 1000.0
         for idx, cmd in out.items():

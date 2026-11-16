@@ -1438,6 +1438,17 @@ class Ui_MainWindow(object):
             self.soundMeters[key] = bar
         self.soundTempoLabel = QLabel("Tempo: -")
         soundRight.addWidget(self.soundTempoLabel)
+        rangeLabel = QLabel("Tempo range (BPM)")
+        rangeLabel.setToolTip("The tempo is only looked for in this range. Narrow it to settle a tempo read at half or\n"
+                              "double speed: 160 to 185 for drum and bass, 115 to 135 for house.")
+        soundRight.addWidget(rangeLabel)
+        rangeGrid = QGridLayout(); rangeGrid.setSpacing(4)
+        self.soundBpmMin = SpinBoxWithButtons(minVal=40, maxVal=240, value=60)
+        self.soundBpmMax = SpinBoxWithButtons(minVal=50, maxVal=250, value=200)
+        for row, (label, box) in enumerate((("Lowest", self.soundBpmMin), ("Highest", self.soundBpmMax))):
+            rangeGrid.addWidget(QLabel(label), row, 0)
+            rangeGrid.addWidget(box, row, 1)
+        soundRight.addLayout(rangeGrid)
         soundRight.addStretch(1)
         soundLay.addWidget(soundRightBox, 1)
         # after Scene: sound is a bed under animations and sequences
@@ -1875,7 +1886,7 @@ copied between installations.</p>
 <tr><td><b>list / list_json</b></td><td>List lights, presets, and animations</td></tr>
 <tr><td><b>animate=Name|...|revert|layer|queue|target</b></td><td>Optional layer (override, effect, show), queue mode (queue, replace) and target such as <code>@rim</code></td></tr>
 <tr><td><b>stop_layer=effect</b></td><td>Stop a layer (<code>effect_all</code> also clears the effect queue; also <code>show</code>, <code>sound</code>, <code>all</code>)</td></tr>
-<tr><td><b>sound=start|Pulse</b></td><td>Start a sound mode (lights following live audio); also <code>mode|Name</code>, <code>stop</code>; add <code>|1;3</code> for some lights only (<code>stop|3</code>)</td></tr>
+<tr><td><b>sound=start|Pulse</b></td><td>Start a sound mode (lights following live audio); also <code>mode|Name</code>, <code>stop</code>; add <code>|1;3</code> for some lights only (<code>stop|3</code>); <code>tempo|160|185</code> sets the tempo range</td></tr>
 <tr><td><b>sequence=play|Name</b></td><td>Play a sequence (<code>play|Name|start|brightness|watchdog</code>); <code>song|Artist|Song</code> finds it by artist and song; also <code>pause</code>, <code>resume</code>, <code>stop</code></td></tr>
 <tr><td><b>status_json</b></td><td>Layers, sequence position, and each light's layer and approximate colour</td></tr>
 </table>

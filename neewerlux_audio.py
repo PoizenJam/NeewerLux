@@ -42,7 +42,9 @@ NORM_RANGE_DB = 30.0       # a value this far under its recent peak reads as 0
 PEAK_HALF_LIFE_S = 3.0     # how fast the normalising peaks forget a loud passage
 TEMPO_WINDOW_S = 6.0       # onset history used for the tempo estimate
 TEMPO_EVERY_S = 0.5
-BPM_MIN, BPM_MAX = 60.0, 200.0
+BPM_MIN, BPM_MAX = 60.0, 200.0  # the default tempo range
+TEMPO_RANGE_LIMITS = (40.0, 250.0)  # how far the tempo range setting can go
+TEMPO_RANGE_MIN_SPAN = 10.0
 BPM_PRIOR = 120.0          # tempos far from this (in octaves) are less likely
 STALE_S = 0.5              # features older than this are treated as no signal
 KICK_BAND = (40.0, 150.0)  # where a kick drum's body is; phase comes from onsets here when there are any
@@ -61,8 +63,23 @@ TRUST_S = 4.0              # a tempo steady this long with kicks is trusted, and
 HOLD_MAX_S = 60.0          # longest a trusted tempo is held with no kicks (a breakdown, not a new song)
 SILENCE_COAST_S = 4.0      # the beat clock keeps time through silence this long, then lets go
 BEAT_SILENCE_GRACE_S = 1.0  # beats still count this long into a silence (gaps between sparse hits)
+KICK_REFRACTORY_S = 0.1    # one kick counted per hit, however many frames its attack spans
+KICK_HIT_SHARE = 0.5       # a kick counted for the Kick drive rises at least this much of a recent strong one
+                           # (a third lets through too many off-beat bass notes; the tracker's own test is looser)
 
 _captureState = None
+
+
+def validTempoRange(lo, hi):
+    """(lo, hi) as floats, or None when not numbers inside TEMPO_RANGE_LIMITS at least
+    TEMPO_RANGE_MIN_SPAN apart."""
+    try:
+        lo, hi = float(lo), float(hi)
+    except (TypeError, ValueError):
+        return None
+    if not (TEMPO_RANGE_LIMITS[0] <= lo and hi <= TEMPO_RANGE_LIMITS[1] and hi - lo >= TEMPO_RANGE_MIN_SPAN):
+        return None
+    return lo, hi
 
 
 def available():
@@ -97,8 +114,9 @@ class Analyzer:
     """Feed it consecutive mono blocks of `hop` samples; each process() returns the features
     as of the end of that block. Times are seconds of audio processed."""
 
-    def __init__(self, sampleRate=SAMPLE_RATE, hop=HOP):
+    def __init__(self, sampleRate=SAMPLE_RATE, hop=HOP, tempoRange=(BPM_MIN, BPM_MAX)):
         self.sr = float(sampleRate)
+        self.bpmMin, self.bpmMax = tempoRange
         self.hop = int(hop)
         self.fps = self.sr / self.hop
         self.window = np.hanning(FFT_SIZE).astype(np.float64)
@@ -125,6 +143,8 @@ class Analyzer:
         self.kickRef = 0.0
         self.kickRefDecay = 0.5 ** (1.0 / (KICK_REF_HALF_LIFE_S * self.fps))
         self.kicksPresent = False
+        self.kickCount = 0
+        self.lastKick = -1.0
         self.trusted = False
         self._steadySince = None
         self._noKickSince = None
@@ -204,6 +224,10 @@ class Analyzer:
         self.kickEnv = np.roll(self.kickEnv, -1)
         self.kickEnv[-1] = kick
         self.kickRef = max(kick, self.kickRef * self.kickRefDecay)
+        if (not self.silent and kick > 0 and kick >= self.kickRef * KICK_HIT_SHARE
+                and self.t - self.lastKick >= KICK_REFRACTORY_S):
+            self.kickCount += 1
+            self.lastKick = self.t
 
         out = {"t": self.t, "rms_db": round(rmsDb, 1), "silent": self.silent}
         for key, value in (("level", rms), ("low", bandRms["low"]), ("mid", bandRms["mid"]), ("high", bandRms["high"])):
@@ -224,6 +248,7 @@ class Analyzer:
             self.lastOnset = self.t
         out["onset"] = self.onsetCount
         out["onset_strength"] = round(min(1.0, strength), 3)
+        out["kick"] = self.kickCount
 
         if self.frames % self._tempoEvery == 0:
             self._estimateTempo()
@@ -287,16 +312,18 @@ class Analyzer:
             f = lag - i
             return float(ac[i] * (1 - f) + ac[i + 1] * f)
         best, bestScore = None, -1e9
-        bpm = BPM_MIN
-        while bpm <= BPM_MAX:
+        lo, hi = self.bpmMin, self.bpmMax
+        prior = min(hi, max(lo, BPM_PRIOR))
+        bpm = lo
+        while bpm <= hi:
             lag = 60.0 * self.fps / bpm
             # the period itself and its double support a tempo. A strong peak at half the period
             # counts against it, but only when twice this tempo is itself a plausible tempo:
             # eighth notes over a 124 BPM beat are not a 248 BPM song
             score = at(lag) + 0.5 * at(2 * lag) + TEMPO_BAR_WEIGHT * at(4 * lag)
-            if 2 * bpm <= BPM_MAX:
+            if 2 * bpm <= hi:
                 score -= 0.35 * max(0.0, at(lag / 2))
-            score *= math.exp(-0.5 * (math.log2(bpm / BPM_PRIOR) / 0.8) ** 2)
+            score *= math.exp(-0.5 * (math.log2(bpm / prior) / 0.8) ** 2)
             if score > bestScore:
                 best, bestScore = bpm, score
             bpm += 0.25
@@ -306,8 +333,8 @@ class Analyzer:
         # step of the search (0.25 BPM is 0.2% at 120, enough to drift a light off the beat)
         top = max(1, min(4, int((n - 2) // (60.0 * self.fps / best))))
         fine, fineScore = best, -1e9
-        b = best - 0.3
-        while b <= best + 0.3:
+        b = max(lo, best - 0.3)
+        while b <= min(hi, best + 0.3):
             lag = 60.0 * self.fps / b
             sc = sum(at(m * lag) for m in range(1, top + 1))
             if sc > fineScore:
@@ -340,6 +367,17 @@ class Analyzer:
             self._steadySince = None
         self.period = 60.0 / self.bpm
         self._alignPhase()
+
+    def setTempoRange(self, lo, hi):
+        """Only look for tempos from lo to hi BPM. A tempo outside it is dropped at once."""
+        self.bpmMin, self.bpmMax = float(lo), float(hi)
+        if self.bpm and not lo <= self.bpm <= hi:
+            self.bpm = 0.0
+            self.period = 0.0
+            self.nextBeat = None
+            self._pendingBpm = None
+            self.trusted = False
+            self._steadySince = None
 
     def _countKicks(self):
         """Kick onsets in the last KICK_WINDOW_S: peaks in the kick band's envelope that are at
@@ -1028,6 +1066,8 @@ class AudioEngine:
     def __init__(self, sourceFactory=None):
         self.sourceFactory = sourceFactory or SoundcardSource
         self.device = ""
+        self.tempoRange = (BPM_MIN, BPM_MAX)
+        self._newRange = None
         self.deviceName = ""
         self.error = ""
         self._thread = None
@@ -1065,6 +1105,11 @@ class AudioEngine:
         with self._lock:
             self._latest = None
 
+    def setTempoRange(self, lo, hi):
+        """Change the tempo range, at once if capturing (applied between blocks, on the capture thread)."""
+        self.tempoRange = (float(lo), float(hi))
+        self._newRange = self.tempoRange
+
     def features(self):
         with self._lock:
             if self._latest is None or time.monotonic() - self._latestAt > STALE_S:
@@ -1078,9 +1123,13 @@ class AudioEngine:
                 with self.sourceFactory(self.device) as src:
                     self.deviceName = src.name
                     self.error = ""
-                    analyzer = Analyzer(src.sampleRate)
+                    analyzer = Analyzer(src.sampleRate, tempoRange=self.tempoRange)
+                    self._newRange = None
                     checkAt = time.monotonic() + 5.0
                     while not self._stop.is_set():
+                        if self._newRange is not None:
+                            analyzer.setTempoRange(*self._newRange)
+                            self._newRange = None
                         f = analyzer.process(src.read())
                         with self._lock:
                             self._latest = f

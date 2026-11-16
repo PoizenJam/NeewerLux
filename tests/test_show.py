@@ -1521,6 +1521,19 @@ def t_soundModeHTTP(rig):
     check(got == ["base"] * 4, "stop hands every light back: %s" % got)
     st = rig.post("/NeewerLux/sound", {"action": "status"})
     check(not st["running"] and not st["capturing"] and st["lastMode"] == "Bands", st)
+    check(st["tempoRange"] == [60, 200], "the default tempo range: %s" % st["tempoRange"])
+    r = rig.post("/NeewerLux/sound", {"action": "tempo_range", "min": 115, "max": 135})
+    check(r["success"] and r["tempo_range"] == [115, 135] and nl.audioEngine.tempoRange == (115.0, 135.0), r)
+    prefs = open(nl.globalPrefsFile, encoding="utf-8").read()
+    check("soundTempoRange=115-135" in prefs, "the tempo range is remembered: %s" % prefs)
+    for bad in ({"min": 100, "max": 105}, {"min": 20, "max": 120}, {"min": "fast"}):
+        r = rig.post("/NeewerLux/sound", dict(bad, action="tempo_range"))
+        check(not r["success"] and r["errors"], "refused %s: %s" % (bad, r))
+    rig.get("sound=tempo|160|185", 0.1)
+    check(rig.getJSON("status_json")["sound"]["tempoRange"] == [160, 185], "sound=tempo over GET")
+    r = rig.post("/NeewerLux/sound", {"action": "tempo_range", "min": 60, "max": 200})
+    prefs = open(nl.globalPrefsFile, encoding="utf-8").read() if os.path.exists(nl.globalPrefsFile) else ""
+    check(r["success"] and "soundTempoRange" not in prefs, "back to the default leaves nothing in the prefs: %s" % prefs)
     check(nl.soundMode == "Bands" and "soundMode=Bands" in open(nl.globalPrefsFile, encoding="utf-8").read(), "the last mode is remembered")
     rig.get("sound=start", 0.3)
     check(rig.post("/NeewerLux/sound", {"action": "status"})["mode"] == "Bands", "sound=start plays the last mode")
@@ -1682,8 +1695,9 @@ def t_soundCues(rig):
     time.sleep(2.0)
     w = [(t - t0, d) for t, d in writesFor(rig, RIM, t0)]
     during = [d for t, d in w if 0.9 < t < 2.4]
-    check(any(d[1] == 134 for d in during) and len({tuple(d) for d in during}) >= 3,
-          "the rim follows the sound mode during the cue: %s" % [(round(t, 2), d[1:6]) for t, d in w][:12])
+    # Kick Blink snaps between dark and the cue's ceiling (90) on each kick
+    check(any(d[1] == 134 and bri(d) == 90 for d in during) and any(d[1] == 134 and bri(d) == 0 for d in during),
+          "the rim follows the sound mode during the cue: %s" % [(round(t, 2), d[1:8]) for t, d in w][:12])
     check(any(d[1] == 135 and d[4] == 33 for t, d in w if t < 0.6), "and the state cue before it")
     time.sleep(1.6)
     w = [(t - t0, d) for t, d in writesFor(rig, RIM, t0)]

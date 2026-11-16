@@ -753,10 +753,75 @@ def t_beatsStopInLongSilence():
         check(min(abs(f - t) for f in fired) <= beat_score.TOLERANCE_S, "beat at %.2f s after the stop missed" % t)
 
 
+def t_tempoRange():
+    """A narrower tempo range settles half- and double-speed readings, and the setting checks
+    its values. Half-time (kick on 1, snare on 3) reads 70 by default and 140 in 120 to 180;
+    drum and bass at 174 reads 87 in 60 to 120. A tempo outside a new range is dropped."""
+    import beat_score
+    x, _ = beat_score.render(beat_score.CASES["halftime"])
+    hop = au.HOP / SR
+    def settled(an):
+        fs = an.analyze(x)
+        return float(np.median([f["bpm"] for f in fs if f["t"] > 12]))
+    check(abs(settled(au.Analyzer()) - 70) < 2, "half-time by default: %.1f" % settled(au.Analyzer()))
+    check(abs(settled(au.Analyzer(tempoRange=(120, 180))) - 140) < 2, "half-time in 120 to 180")
+    d, _ = beat_score.render([beat_score._seg(24, 174, "dnb")])
+    got = float(np.median([f["bpm"] for f in au.Analyzer(tempoRange=(60, 120)).analyze(d) if f["t"] > 12]))
+    check(abs(got - 87) < 2, "drum and bass in 60 to 120: %.1f" % got)
+    check(au.validTempoRange(85, 175) == (85.0, 175.0), "a good range")
+    for bad in ((30, 100), (100, 260), (100, 105), ("x", 120), (None, None)):
+        check(au.validTempoRange(*bad) is None, "refused %s" % (bad,))
+    an = au.Analyzer()
+    an.analyze(x[:int(12 * SR)])
+    check(abs(an.bpm - 70) < 2, "reads 70 first")
+    an.setTempoRange(120, 180)
+    check(an.bpm == 0 and an.nextBeat is None, "a tempo outside the new range is dropped")
+    RESULTS.append("    half-time %.1f by default, %.1f in 120 to 180; drum and bass %.1f in 60 to 120"
+                   % (settled(au.Analyzer()), settled(au.Analyzer(tempoRange=(120, 180))), got))
+
+
+def t_kickDrive():
+    """The analysis counts kick drum hits (not snares or hi-hats), and a part with the Kick drive
+    flashes on them: on 2-step's kick on the "and" of 3 as well as on beat 1, never more than
+    once in SOUND_KICK_GAP_MS, falling back to the floor between."""
+    import beat_score
+    segs = beat_score.CASES["garage"]
+    x, truth = beat_score.render(segs)
+    fs = au.Analyzer().analyze(x)
+    kicks = []
+    for k, (bt, bpm, _) in enumerate(truth):
+        for st, _ in beat_score.PATTERNS["garage"]["kick"]:
+            if st // 4 == k % 4:
+                kicks.append(bt + (st % 4) * 60.0 / bpm / 4)
+    heard, last = [], 0
+    for f in fs:
+        if f["kick"] != last:
+            heard.append(f["t"])
+            last = f["kick"]
+    found = sum(1 for k in kicks if min(abs(h - k) for h in heard) < 0.06)
+    check(found >= 0.9 * len(kicks), "kicks heard: %d of %d" % (found, len(kicks)))
+    check(len(heard) <= 1.1 * len(kicks), "%d kicks counted for %d played (snares or hats counted)" % (len(heard), len(kicks)))
+    mode, errors, _ = show.parseSoundMode({"name": "K", "floor": 0, "ceiling": 100, "smoothing": 0,
+                                            "parts": [{"target": "@rim", "drive": "kick", "colour": 0}]})
+    check(mode is not None, "kick drive validates: %s" % errors)
+    flashes, lit = [], False
+    for t, cmd in play(mode, fs)[ROLES["rim"][0]]:
+        if cmd["bri"] >= 90 and not lit:
+            flashes.append(t)
+        lit = cmd["bri"] >= 90
+    check(len(flashes) >= 0.75 * len(kicks), "flashed %d times for %d kicks" % (len(flashes), len(kicks)))
+    gaps = np.diff(flashes)
+    check(min(gaps) >= show.SOUND_KICK_GAP_MS / 1000.0 - 0.03, "flashes %.0f ms apart" % (min(gaps) * 1000))
+    onKick = sum(1 for t in flashes if min(abs(t - k) for k in kicks) < 0.08)
+    check(onKick >= 0.9 * len(flashes), "flashes on kicks: %d of %d" % (onKick, len(flashes)))
+    RESULTS.append("    2-step: %d of %d kicks heard, %d flashes (all within 80 ms of a kick: %d), at least %.0f ms apart"
+                   % (found, len(kicks), len(flashes), onKick, min(gaps) * 1000))
+
+
 TESTS = [t_tempoOfClickTracks, t_tempoOfDrumPattern, t_tempoChange, t_bandsAndCentroid, t_silenceAndGaps,
          t_levelIsRelative, t_shippedModesValid, t_shippedModesUnderFlashLimit, t_modesMoveWithTheMusic,
          t_modesAimAtRoles, t_beatChase, t_hardModesSnap, t_beatBlinkPaced, t_brightnessCurve, t_warmGlowIsWhiteOnly, t_silenceSettlesAtTheFloor, t_modeValidation,
-         t_docExamplesValidate, t_colourCycle, t_voices, t_retryNow, t_silenceMeansFloor, t_songAnalysis, t_songRiser, t_externalSections, t_songFiles, t_beatScorer, t_beatTracking, t_beatsStopInLongSilence]
+         t_docExamplesValidate, t_colourCycle, t_voices, t_retryNow, t_silenceMeansFloor, t_songAnalysis, t_songRiser, t_externalSections, t_songFiles, t_beatScorer, t_beatTracking, t_beatsStopInLongSilence, t_tempoRange, t_kickDrive]
 
 
 def main():

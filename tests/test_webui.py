@@ -410,9 +410,20 @@ def main():
         js(page, "sndSlider('curve', 15)")
         until(lambda: player.mode.curve == 1.5, "the curve slider to apply live")
         check(js(page, "document.getElementById('snd_curve_v').textContent") == "x1.5", "the curve shows as x1.5")
-        js(page, "sndPartAdd(); sndPart(1, 'target', '@fill'); sndPart(1, 'drive', 'high')")
+        js(page, "sndPartAdd(); sndPart(1, 'target', '@fill'); sndPart(1, 'drive', 'kick')")
+        until(lambda: len(player.mode.parts) == 2 and player.mode.parts[1]["drive"] == "kick", "the Kick drive to apply live")
+        js(page, "sndPart(1, 'drive', 'high')")
         until(lambda: len(player.mode.parts) == 2 and player.mode.parts[1]["target"] == "@fill" and player.mode.parts[1]["drive"] == "high",
               "an added part to apply live")
+        js(page, "document.getElementById('sndBpmMin').value = 160; sndTempoRange('min')")
+        until(lambda: nl.soundTempoRange == (160.0, 200.0), "the tempo range's low end to apply")
+        js(page, "document.getElementById('sndBpmMax').value = 165; sndTempoRange('max')")
+        until(lambda: nl.soundTempoRange == (155.0, 165.0) and nl.audioEngine.tempoRange == (155.0, 165.0),
+              "the low end pushed down to keep 10 BPM between them")
+        waitFor(page, "document.getElementById('sndBpmMin').value === '155'", "the low end shown pushed down")
+        nl.setSoundTempoRange(60, 200)
+        waitFor(page, "document.getElementById('sndBpmMin').value === '60' && document.getElementById('sndBpmMax').value === '200'",
+                "a change from elsewhere shown")
         waitFor(page, "document.getElementById('sndPalPreset').options.length === %d" % (len(nl.savedPalettes) + 1), "the saved palettes")
         js(page, "document.getElementById('sndPalPreset').value = 'Neon'; sndPalPresetChosen('Neon')")
         until(lambda: player.mode.palette == nl.savedPalettes["Neon"], "a saved palette to load live")

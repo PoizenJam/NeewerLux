@@ -388,6 +388,7 @@ eyelineFlash = "same"     # flashes on eye-line lights: "same", "gentler" (1 a s
 handbackFadeMs = 500      # fade when a layer hands a light back (effect ends, sequence reverts, animation stops); 0 = cut
 soundMode = "Pulse"       # the sound mode last started, and the capture device ("" = what the default output plays)
 soundDevice = ""
+soundTempoRange = (audio.BPM_MIN, audio.BPM_MAX)  # the live tempo is looked for only in here (BPM)
 songSectionCommand = ""   # another section finder to run on songs (Global Preferences only: it runs a program)
 songFinderNames = False   # name sections with that finder's labels instead of NeewerLux's
 songSectionCommandOn = True  # off: the built-in analysis, keeping the command for later
@@ -1684,7 +1685,7 @@ try: # try to load the GUI
         SOUND_EDITABLE = ("sensitivity", "range_db", "floor", "ceiling", "smoothing", "curve", "palette", "cycle_s", "parts")
         SOUND_TARGETS = ["@rim;@background;@practical", "@all", "@key", "@fill", "@rim", "@background", "@practical",
                          "@front", "@back", "@left", "@right", "@high", "@low"]
-        SOUND_DRIVES = [("level", "Level"), ("low", "Bass"), ("mid", "Mids"), ("high", "Treble"), ("beat", "Beat")]
+        SOUND_DRIVES = [("level", "Level"), ("low", "Bass"), ("mid", "Mids"), ("high", "Treble"), ("beat", "Beat"), ("kick", "Kick")]
 
         def setupSoundTab(self):
             self.soundShowAvailability()
@@ -1697,6 +1698,10 @@ try: # try to load the GUI
             self.soundDeviceCombo.activated.connect(lambda i: self.soundDeviceChosen(self.soundDeviceCombo))
             self.prefsSoundDeviceCombo.activated.connect(lambda i: self.soundDeviceChosen(self.prefsSoundDeviceCombo))
             self.soundDeviceRefresh.clicked.connect(self.soundRefreshDevices)
+            self.soundBpmMin.setValue(int(round(soundTempoRange[0])))
+            self.soundBpmMax.setValue(int(round(soundTempoRange[1])))
+            self.soundBpmMin.valueChanged.connect(lambda v: self.soundTempoRangeChosen(True))
+            self.soundBpmMax.valueChanged.connect(lambda v: self.soundTempoRangeChosen(False))
             for key, (slider, label) in self.soundSliders.items():
                 slider.valueChanged.connect(lambda v, k=key: self.soundSliderMoved(k, v))
             self.soundPaletteKind.activated.connect(self.soundPaletteKindChosen)
@@ -2107,6 +2112,17 @@ try: # try to load the GUI
                 if other is not combo:
                     other.setCurrentIndex(max(0, other.findData(soundDevice)))
 
+        def soundTempoRangeChosen(self, lowChanged):
+            lo, hi = self.soundBpmMin.value(), self.soundBpmMax.value()
+            gap = int(audio.TEMPO_RANGE_MIN_SPAN)
+            if hi - lo < gap:  # push the other end along rather than refuse the change
+                other = self.soundBpmMax if lowChanged else self.soundBpmMin
+                other.blockSignals(True)
+                other.setValue(lo + gap if lowChanged else hi - gap)
+                other.blockSignals(False)
+                lo, hi = self.soundBpmMin.value(), self.soundBpmMax.value()
+            setSoundTempoRange(lo, hi)
+
         def soundRefreshStatus(self):
             if not self.soundControls.isVisible():
                 return
@@ -2140,6 +2156,11 @@ try: # try to load the GUI
                 bar.setValue(int(round(100 * levels.get(key, 0.0))))
             bpm = levels.get("bpm", 0)
             self.soundTempoLabel.setText("Tempo: %.0f BPM" % bpm if bpm else "Tempo: -")
+            for box, value in ((self.soundBpmMin, st["tempoRange"][0]), (self.soundBpmMax, st["tempoRange"][1])):
+                if not box.hasFocus() and box.value() != int(round(value)):  # changed over HTTP
+                    box.blockSignals(True)
+                    box.setValue(int(round(value)))
+                    box.blockSignals(False)
 
         def seqPlay(self):
             items = self.seqList.selectedItems()
@@ -3509,6 +3530,8 @@ try: # try to load the GUI
                 finalPrefs.append("soundMode=" + soundMode)
             if soundDevice:
                 finalPrefs.append("soundDevice=" + soundDevice)
+            if soundTempoRange != (audio.BPM_MIN, audio.BPM_MAX):  # set on the Sound tab, kept when saving here
+                finalPrefs.append("soundTempoRange=%g-%g" % soundTempoRange)
             songSectionCommand = self.songSectionCommandField.text().strip()
             if songSectionCommand:
                 finalPrefs.append("songSectionCommand=" + songSectionCommand)
@@ -7056,10 +7079,13 @@ def processHTMLCommands(paramsList, loop):
             stopSound()
 
     elif paramsList[3] == "sound":
-        # sound=start|Mode|lights, stop|lights, mode|Mode|lights (lights optional)
+        # sound=start|Mode|lights, stop|lights, mode|Mode|lights (lights optional), tempo|min|max
         soundParts = [p.strip() for p in str(paramsList[2]).split("|")]
         soundVerb = soundParts[0].lower()
-        if soundVerb == "stop":
+        if soundVerb == "tempo":
+            soundVerb = "tempo_range"
+            soundBody = {"min": soundParts[1] if len(soundParts) > 1 else None, "max": soundParts[2] if len(soundParts) > 2 else None}
+        elif soundVerb == "stop":
             soundBody = {"lights": soundParts[1] if len(soundParts) > 1 else None}
         else:
             soundBody = {"mode": soundParts[1] if len(soundParts) > 1 else None, "lights": soundParts[2] if len(soundParts) > 2 else None}
@@ -8836,6 +8862,23 @@ def _rememberSound(**changes):
             printDebugString("Couldn't save the sound settings (" + str(e) + ")")
 
 
+def setSoundTempoRange(lo, hi):
+    """Look for the live tempo only from lo to hi BPM (remembered). A narrower range settles
+    half- and double-speed readings: 160 to 185 for drum and bass, 115 to 135 for house."""
+    global soundTempoRange
+    rng = audio.validTempoRange(lo, hi)
+    if rng is None:
+        return {"success": False, "errors": ["the tempo range must be %g to %g BPM, at least %g apart"
+                                             % (audio.TEMPO_RANGE_LIMITS + (audio.TEMPO_RANGE_MIN_SPAN,))]}
+    soundTempoRange = rng
+    audioEngine.setTempoRange(*rng)
+    try:
+        _updatePrefsFile({"soundTempoRange": None if rng == (audio.BPM_MIN, audio.BPM_MAX) else "%g-%g" % rng})
+    except OSError as e:
+        printDebugString("Couldn't save the tempo range (" + str(e) + ")")
+    return {"success": True, "tempo_range": list(rng)}
+
+
 def startSound(modeName=None, device=None, params=None, fadeIn=None, fadeOut=None, lights=None):
     """Start a sound mode on the sound layer, starting capture if needed. Without lights it
     replaces whatever the layer plays and drives the mode's own targets; with lights (a target
@@ -8965,13 +9008,14 @@ def soundStatus():
     f = audioEngine.features() if audioEngine.running else None
     levels = None
     if f is not None:
-        levels = {k: f[k] for k in ("level", "low", "mid", "high", "centroid", "bpm", "confidence", "beat", "silent", "rms_db")}
+        levels = {k: f[k] for k in ("level", "low", "mid", "high", "centroid", "bpm", "confidence", "beat", "kick", "silent", "rms_db")}
     return {"available": ok, "reason": why, "running": player is not None,
             "mode": player.name if player is not None else None,
             "params": _soundParams(player.mode) if player is not None else None,
             "assignments": _soundAssignments(player) if player is not None else [],
             "lastMode": soundMode, "device": soundDevice, "deviceName": audioEngine.deviceName if audioEngine.running else "",
-            "capturing": audioEngine.running, "error": audioEngine.error, "levels": levels}
+            "capturing": audioEngine.running, "error": audioEngine.error, "levels": levels,
+            "tempoRange": list(soundTempoRange)}
 
 
 def soundAction(action, body):
@@ -8990,6 +9034,8 @@ def soundAction(action, body):
         return setSoundParams(body.get("params"), body.get("mode"))
     if action == "device":
         return setSoundDevice(body.get("device", ""))
+    if action == "tempo_range":
+        return setSoundTempoRange(body.get("min"), body.get("max"))
     if action == "status":
         return dict(soundStatus(), success=True)
     if action == "devices":
@@ -10409,7 +10455,7 @@ def writeHTMLSections(self, theSection, errorMsg = ""):
         self.wfile.write(bytes("<STRONG>sequence=</STRONG> - play|Name, pause, resume or stop a sequence<BR>\n", "utf-8"))
         self.wfile.write(bytes("&nbsp;&nbsp;&nbsp;&nbsp;Example: <EM>http://(server address)/NeewerLux/doAction?sequence=play|Example%20-%20Four%20Light%20Demo</EM><BR>\n", "utf-8"))
         self.wfile.write(bytes("&nbsp;&nbsp;&nbsp;&nbsp;Also <EM>sequence=play|Name|start_ms|brightness|watchdog_ms</EM> and <EM>sequence=song|Artist|Song|start_ms|brightness|watchdog_ms</EM><BR>\n", "utf-8"))
-        self.wfile.write(bytes("<STRONG>sound=</STRONG> - start|Mode, mode|Mode or stop a sound mode (lights following live audio)<BR>\n", "utf-8"))
+        self.wfile.write(bytes("<STRONG>sound=</STRONG> - start|Mode, mode|Mode or stop a sound mode (lights following live audio), or tempo|min|max for the tempo range<BR>\n", "utf-8"))
         self.wfile.write(bytes("<STRONG>status_json</STRONG> - layers, sequence position, and each light's layer and approximate colour<BR>\n", "utf-8"))
         self.wfile.write(bytes("<STRONG>POST /NeewerLux/sequence</STRONG> - list, reload, play, pause, resume, stop, seek, set_position, status, validate, save, render<BR>\n", "utf-8"))
         self.wfile.write(bytes("<STRONG>POST /NeewerLux/sound</STRONG> - start, stop, mode, set, device, devices, status, list, get, save, delete, validate, reload<BR>\n", "utf-8"))
@@ -10507,7 +10553,7 @@ def loadPrefsFile(globalPrefsFile = ""):
            rememberLightsOnExit, acceptable_HTTP_IPs, customKeys, enableTabsOnLaunch, \
            whiteListedMACs, rememberPresetsOnExit, autoReconnectOnDisconnect, livePreview, hideConsoleOnLaunch, minimizeToTrayOnClose, httpAutoStart, httpPort, httpAccessToken, cctFallbackMode, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, \
            envMaxBri, envMinBri, seqFrameRate, effectMaxSeconds, simulatedLights, simulatedCCTOnly, flashGuardEnabled, \
-           cameraPosition, eyelineFlash, handbackFadeMs, fadeInMs, stageView, stageGeometry, soundMode, soundDevice, songSectionCommand, songFinderNames, songSectionCommandOn
+           cameraPosition, eyelineFlash, handbackFadeMs, fadeInMs, stageView, stageGeometry, soundMode, soundDevice, soundTempoRange, songSectionCommand, songFinderNames, songSectionCommandOn
 
     if globalPrefsFile != "":
         printDebugString("Loading global preferences from file...")
@@ -10522,7 +10568,7 @@ def loadPrefsFile(globalPrefsFile = ""):
             "SC_Dec_1_Large", "SC_Inc_1_Large", "SC_Dec_2_Large", "SC_Inc_2_Large", "SC_Dec_3_Large", "SC_Inc_3_Large", \
             "enableTabsOnLaunch", "whiteListedMACs", "rememberPresetsOnExit", "autoReconnectOnDisconnect", "hideConsoleOnLaunch", "minimizeToTrayOnClose", "livePreview", "httpAutoStart", "httpPort", "httpAccessToken", "cctFallbackMode", "enableLogTab", "logToFile", "logHeartbeat", "globalCCTMin", "globalCCTMax", \
             "envMaxBri", "envMinBri", "seqFrameRate", "effectMaxSeconds", "simulatedLights", "simulatedCCTOnly", "flashGuard", \
-            "cameraPosition", "eyelineFlash", "handbackFadeMs", "fadeInMs", "stageView", "stageGeometry", "soundMode", "soundDevice", "songSectionCommand", "songFinderNames", "songSectionCommandOn"]
+            "cameraPosition", "eyelineFlash", "handbackFadeMs", "fadeInMs", "stageView", "stageGeometry", "soundMode", "soundDevice", "soundTempoRange", "songSectionCommand", "songFinderNames", "songSectionCommandOn"]
 
         # KICK OUT ANY PARAMETERS THAT AREN'T IN THE "ACCEPTABLE ARGUMENTS" LIST ABOVE
         # THIS SECTION OF CODE IS *SLIGHTLY* DIFFERENT THAN THE CLI KICK OUT CODE
@@ -10572,6 +10618,7 @@ def loadPrefsFile(globalPrefsFile = ""):
     prefsParser.add_argument("--stageGeometry", default="")
     prefsParser.add_argument("--soundMode", default="Pulse")
     prefsParser.add_argument("--soundDevice", default="")
+    prefsParser.add_argument("--soundTempoRange", default="")
     prefsParser.add_argument("--songSectionCommand", default="")
     prefsParser.add_argument("--songFinderNames", default="0")
     prefsParser.add_argument("--songSectionCommandOn", default="1")
@@ -10660,6 +10707,8 @@ def loadPrefsFile(globalPrefsFile = ""):
     stageGeometry = str(mainPrefs.stageGeometry or "")
     soundMode = str(mainPrefs.soundMode or "Pulse")
     soundDevice = str(mainPrefs.soundDevice or "")
+    soundTempoRange = audio.validTempoRange(*(str(mainPrefs.soundTempoRange).split("-") + ["", ""])[:2]) or (audio.BPM_MIN, audio.BPM_MAX)
+    audioEngine.setTempoRange(*soundTempoRange)
     songSectionCommand = str(mainPrefs.songSectionCommand or "").strip()
     songFinderNames = str(mainPrefs.songFinderNames) == "1"
     songSectionCommandOn = str(mainPrefs.songSectionCommandOn) != "0"

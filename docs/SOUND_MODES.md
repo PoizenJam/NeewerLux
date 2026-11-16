@@ -31,7 +31,12 @@ Every 21 ms or so NeewerLux measures:
 | `level` | 0 to 1 | How loud it is, against the loudest of the last few seconds, on a decibel scale (30 dB below that peak reads as 0). Quiet and loud material both use the whole range; silence is 0. |
 | `low`, `mid`, `high` | 0 to 1 | The same for the bass (below 250 Hz), the middle (250 Hz to 4 kHz) and the treble (above 4 kHz). |
 | `centroid` | 0 to 1 | How bright the sound is: low for bass-heavy sound, high for cymbals and hiss (the spectral centroid, 150 Hz to 6 kHz on a log scale). |
-| beats | | A tempo estimate (60 to 200 BPM) and a beat clock. With a kick drum, the beat follows the kick, so an off-beat bass line, busy hi-hats or a 2-step pattern don't pull it off the beat. A tempo that has held for a few seconds is kept through a breakdown with no kick (up to a minute) and through a stop of up to 4 seconds, where no beats are counted, so the first beat after it lands on time. Longer silence stops the clock. |
+| beats | | A tempo estimate (60 to 200 BPM by default; see Tempo range) and a beat clock. With a kick drum, the beat follows the kick, so an off-beat bass line, busy hi-hats or a 2-step pattern don't pull it off the beat. A tempo that has held for a few seconds is kept through a breakdown with no kick (up to a minute) and through a stop of up to 4 seconds, where no beats are counted, so the first beat after it lands on time. Longer silence stops the clock. |
+| kicks | | Each kick drum hit heard, for the `kick` drive. |
+
+### Tempo range
+
+The tempo is looked for between 60 and 200 BPM unless you narrow it: Tempo range on the Sound tab and the dashboard's Sound card (40 to 250 BPM, at least 10 apart, remembered), `{"action": "tempo_range", "min": 160, "max": 185}` over HTTP or `sound=tempo|160|185`. A narrower range settles a tempo read at half or double speed: 160 to 185 for drum and bass, 115 to 135 for house, 120 to 180 to read half-time dubstep at full speed. It applies at once, and a tempo outside the new range is dropped and found again.
 
 ## The file
 
@@ -74,7 +79,7 @@ Each part:
 | Field | Required | Values | Meaning |
 |---|---|---|---|
 | `target` | yes | light target | Which lights, as anywhere else: `@rim`, `@background.left`, `@back.high`, `1;3`, `@all`, joined with `;`. Listed in sweep order. |
-| `drive` | no | `level` (default), `low`, `mid`, `high`, `beat` | What sets the brightness. `beat` is full for half a beat from each beat, then falls back by `smoothing` (at once at 0); above 120 BPM it flashes on every other beat instead, evenly, since a flash on every beat would pass 2 a second. |
+| `drive` | no | `level` (default), `low`, `mid`, `high`, `beat`, `kick` | What sets the brightness. `beat` is full for half a beat from each beat, then falls back by `smoothing` (at once at 0); above 120 BPM it flashes on every other beat instead, evenly, since a flash on every beat would pass 2 a second. `kick` flashes the same way on each kick drum hit heard rather than on the beat clock: it follows a 2-step or broken-beat kick pattern, and stays dark through a breakdown with no kick, where `beat` keeps flashing on the beat. At most one flash in half a second, and above 115 BPM at most one in 1.5 beats, so a kick on every beat flashes on every other one evenly. A kick is a strong rise in the bass (40 to 150 Hz); with a loud off-beat bass line, some bass notes flash too. |
 | `colour` | no | palette index (0), `cycle`, `beat`, `centroid` | A fixed palette colour; `cycle`: round the palette and back to its first colour over `cycle_s`, blending between colours (a palette of one colour goes once round the colour wheel, keeping its saturation; one white stays put); `beat`: the next palette colour on each step, blended over 0.4 s; `centroid`: a colour along the palette set by the centroid (first entry for bass-heavy sound, last for bright). |
 | `chase` | no | `true` / `false` (false) | Step through the part's lights one at a time on the beat (every other beat above 150 BPM): the current light rises, the others fall back. With `drive` `beat` each step is lit fully (to the ceiling); with any other drive the step is brighter for louder music. In silence the lit light falls to the floor too. |
 | `floor`, `ceiling` | no | 0 to 100 | This part's own brightness range. |

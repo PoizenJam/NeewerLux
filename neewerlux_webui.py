@@ -579,7 +579,10 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
                 </div>
                 <div id="sndStatus" style="padding:6px 0;font-size:12px;color:var(--accent);font-weight:600;text-align:center">Not playing</div>
                 <div id="sndMeters"></div>
-                <div id="sndTempo" style="font-size:12px;color:var(--muted);margin-bottom:6px">Tempo: -</div>
+                <div id="sndTempo" style="font-size:12px;color:var(--muted);margin-bottom:2px">Tempo: -</div>
+                <div class="snd-row" title="The tempo is only looked for in this range. Narrow it to settle a tempo read at half or double speed: 160 to 185 for drum and bass, 115 to 135 for house."><label>Tempo range</label>
+                    <input type="number" id="sndBpmMin" min="40" max="240" value="60" style="width:64px" onchange="sndTempoRange('min')"> to
+                    <input type="number" id="sndBpmMax" min="50" max="250" value="200" style="width:64px" onchange="sndTempoRange('max')"> BPM</div>
                 <div id="sndSliders"></div>
                 <div style="color:var(--muted);font-size:11px;margin:6px 0 2px">Palette: the colours this mode uses. Each group of lights below picks one of them, or moves through them (cycling, on the beat, or with the sound).</div>
                 <div class="snd-row"><label>Palette</label><select id="sndPalKind" onchange="sndPaletteKind(this.value)"><option value="hsi">Colours</option><option value="cct">White (Kelvin)</option></select>
@@ -854,7 +857,8 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
                 <div class="api-code">GET /NeewerLux/doAction?sound=start|Pulse</div>
                 <div class="api-code">GET /NeewerLux/doAction?sound=start|Colour Drift|1;3</div>
                 <div class="api-code">GET /NeewerLux/doAction?sound=stop|3</div>
-                <div class="api-desc">JSON API: start, stop, mode, set, device, devices, status (with live levels and tempo), list, get, save, delete, validate, reload, palettes, save_palette, delete_palette</div>
+                <div class="api-code">GET /NeewerLux/doAction?sound=tempo|160|185</div>
+                <div class="api-desc">JSON API: start, stop, mode, set, device, devices, tempo_range, status (with live levels and tempo), list, get, save, delete, validate, reload, palettes, save_palette, delete_palette</div>
                 <div class="api-code">POST /NeewerLux/sound {"action":"set","params":{"sensitivity":1.5,"palette":"Neon"}}</div>
             </div>
             <div class="api-section">
@@ -3531,7 +3535,7 @@ function tlUpdateStage() {
 let sndDraft = null, sndName = '', sndEditing = 0;
 const SND_SLIDERS = [['sensitivity', 'Sensitivity', 10, 500, '%', 100], ['range_db', 'Range', 6, 30, ' dB', 1],
                      ['floor', 'Floor', 0, 100, '%', 1], ['ceiling', 'Ceiling', 0, 100, '%', 1], ['smoothing', 'Smoothing', 0, 100, '%', 100], ['curve', 'Curve', 10, 30, '', 10]];
-const SND_DRIVES = [['level', 'Level'], ['low', 'Bass'], ['mid', 'Mids'], ['high', 'Treble'], ['beat', 'Beat']];
+const SND_DRIVES = [['level', 'Level'], ['low', 'Bass'], ['mid', 'Mids'], ['high', 'Treble'], ['beat', 'Beat'], ['kick', 'Kick']];
 const SND_METERS = [['level', 'Level'], ['low', 'Bass'], ['mid', 'Mids'], ['high', 'Treble'], ['centroid', 'Brightness of sound']];
 async function sndPost(body) { return postJSON('/NeewerLux/sound', body); }
 function sndPlaying() { const s = lastStatus && lastStatus.sound; return s && s.running ? s.mode : null; }
@@ -3758,6 +3762,13 @@ async function sndDevices() {
     sel.value = current;
 }
 async function sndSetDevice(id) { await sndPost({action: 'device', device: id}); }
+async function sndTempoRange(changed) {
+    const lo = document.getElementById('sndBpmMin'), hi = document.getElementById('sndBpmMax');
+    // push the other end along rather than refuse the change
+    if (+hi.value - +lo.value < 10) { if (changed === 'min') hi.value = +lo.value + 10; else lo.value = +hi.value - 10; }
+    const r = await sndPost({action: 'tempo_range', min: +lo.value, max: +hi.value});
+    if (!r.success) document.getElementById('sndStatus').textContent = 'Tempo range not changed: ' + errText(r);
+}
 function renderSoundStatus() {
     const s = lastStatus && lastStatus.sound;
     if (!s) return;
@@ -3786,6 +3797,10 @@ function renderSoundStatus() {
     document.getElementById('sndMeters').innerHTML = SND_METERS.map(([k, label]) =>
         '<div class="snd-meter"><span>' + label + '</span><div><div style="width:' + Math.round(100 * (lv[k] || 0)) + '%"></div></div></div>').join('');
     document.getElementById('sndTempo').textContent = lv.bpm ? 'Tempo: ' + Math.round(lv.bpm) + ' BPM' : 'Tempo: -';
+    [['sndBpmMin', 0], ['sndBpmMax', 1]].forEach(([id, i]) => {
+        const el = document.getElementById(id);
+        if (s.tempoRange && document.activeElement !== el) el.value = Math.round(s.tempoRange[i]);
+    });
 }
 
 // INIT

@@ -24,7 +24,7 @@
   "parts": [
     {
       "target": "@background",
-      "drive": "low",
+      "drive": "kick",
       "colour": 0
     },
     {

@@ -39,7 +39,7 @@
     },
     {
       "target": "@background;@practical",
-      "drive": "low",
+      "drive": "kick",
       "colour": "beat"
     }
   ]

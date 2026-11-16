@@ -24,12 +24,12 @@
   "parts": [
     {
       "target": "@background",
-      "drive": "low",
+      "drive": "kick",
       "colour": 0
     },
     {
       "target": "@rim;@practical",
-      "drive": "low",
+      "drive": "kick",
       "colour": 1
     }
   ]
