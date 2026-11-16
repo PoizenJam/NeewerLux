@@ -1668,7 +1668,7 @@ def t_soundCues(rig):
     nl = rig.nl
     seq = {"format": 1, "name": "Sound Cue", "duration_ms": 3600, "cues": [
         {"at_ms": 0, "target": "@rim", "state": {"mode": "CCT", "temp": 33, "bri": 40}},
-        {"at_ms": 600, "duration_ms": 2000, "target": "@rim", "sound": {"mode": "Kick Blink", "palette": "Neon", "ceiling": 90}},
+        {"at_ms": 600, "duration_ms": 2000, "target": "@rim", "sound": {"mode": "Pulse", "palette": "Neon", "ceiling": 90}},
         {"at_ms": 2600, "target": "@rim", "state": {"mode": "CCT", "temp": 45, "bri": 50}}]}
     bad = rig.post("/NeewerLux/sequence", {"action": "validate", "sequence": dict(seq, cues=[
         {"at_ms": 0, "target": "@rim", "sound": {"mode": "Hard Chase"}},
@@ -1681,7 +1681,7 @@ def t_soundCues(rig):
     r = rig.post("/NeewerLux/sequence", {"action": "render", "sequence": seq, "step_ms": 100})
     rim = r["changes"][[l["id"] for l in r["lights"]][RIM]]
     sources = {c[4] for c in rim if 700 <= c[0] < 2500}
-    check(r["success"] and "sound" in {c[4] for c in rim} and any(c["kind"] == "sound" and c["what"] == "sound: Kick Blink" for c in r["cues"]),
+    check(r["success"] and "sound" in {c[4] for c in rim} and any(c["kind"] == "sound" and c["what"] == "sound: Pulse" for c in r["cues"]),
           "a render marks the sound cue's light: %s %s" % (sources, r["cues"]))
     shown = {c[1] for c in rim if 700 <= c[0] < 2500}
     check(len(shown) >= 2, "and shows the mode reacting to a beat (renders and editor previews animate): %s" % shown)
@@ -1695,8 +1695,9 @@ def t_soundCues(rig):
     time.sleep(2.0)
     w = [(t - t0, d) for t, d in writesFor(rig, RIM, t0)]
     during = [d for t, d in w if 0.9 < t < 2.4]
-    # Kick Blink snaps between dark and the cue's ceiling (90) on each kick
-    check(any(d[1] == 134 and bri(d) == 90 for d in during) and any(d[1] == 134 and bri(d) == 0 for d in during),
+    # Pulse follows the level, so it moves from the first frame (a beat or kick drive would
+    # wait the few seconds the tracker needs to lock after capture starts with the sequence)
+    check(len({bri(d) for d in during if d[1] == 134}) >= 3,
           "the rim follows the sound mode during the cue: %s" % [(round(t, 2), d[1:8]) for t, d in w][:12])
     check(any(d[1] == 135 and d[4] == 33 for t, d in w if t < 0.6), "and the state cue before it")
     time.sleep(1.6)

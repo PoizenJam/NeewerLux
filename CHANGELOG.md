@@ -2,13 +2,13 @@
 
 Changes relative to upstream [NeewerLite-Python v0.12d](https://github.com/taburineagle/NeewerLite-Python).
 
-## v1.4.1
+## v1.4.1 - 2026-11-16
 
 ### Added
 - **`tests/beat_score.py` scores the live beat tracker** that sound modes follow against known beats: when it locks on, how many beats it hits, how many it fires off the beat, how late it fires them, and how often it reads the right tempo or a related one (double, half, 3/2, 2/3, 4/3, 3/4). Synthetic cases cover off-beat bass, dotted-eighth riffs, tempo ramps and jumps, a long breakdown with no drums, half-time, 2-step, drum rolls, a quiet patch and a sparse intro. `--song` scores any song with a steady tempo against its own whole-song analysis (`path@start-end` for part of it).
 - **Tempo range** for sound modes (Sound tab, the dashboard's Sound card, `{"action": "tempo_range", "min": 160, "max": 185}` or `sound=tempo|160|185`): the tempo is only looked for in that range, which settles one read at half or double speed, such as drum and bass at 87 or half-time dubstep at 70. Remembered; 60 to 200 BPM by default.
 - **MIDI clock** (Windows): pick a MIDI input on the Sound tab or the dashboard's Sound card and, while its clock arrives, sound modes follow its tempo and beat exactly instead of the beat heard in the sound (which takes over again when the clock stops). Optionally its transport plays sequences: Start plays the last sequence played, Stop pauses it, Continue resumes it and Song Position moves it. Read through Windows' own MIDI system, so nothing extra to install. Over HTTP: sound `midi_devices`, `midi`, `midi_transport`, `sound=midi|Input`, and `midi` in the sound status.
-- **Kick drive** for sound-mode parts: flash on each kick drum hit heard instead of on the beat clock, so the lights follow a 2-step or broken-beat kick pattern and stay dark through a breakdown with no kick. Paced like the Beat drive, at most 2 flashes a second and evenly on every other kick when kicks come on every beat above 115 BPM. The sound status reports a `kick` count.
+- **Kick drive** for sound-mode parts: flash only on beats where a kick drum is heard, so the lights stay dark through a breakdown with no kick (where Beat keeps flashing) and a bass line between the beats can't set them off. Kicks are looked for only at the beats, because a bass line rises in the kick band about as much as a kick: a kick off the beat (2-step) leaves its beat dark. Paced like the Beat drive, at most 2 flashes a second and evenly on every other beat above 115 BPM. The sound status reports a `kick` count.
 
 ### Changed
 - **Kick Blink, Kick Blink Duo, Metal Hits, Split Blink and Hype flash on the kick drum** (the new Kick drive) instead of following the bass level, which held the lights on through a sustained or off-beat bass line instead of snapping them dark between kicks.

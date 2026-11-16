@@ -63,9 +63,9 @@ TRUST_S = 4.0              # a tempo steady this long with kicks is trusted, and
 HOLD_MAX_S = 60.0          # longest a trusted tempo is held with no kicks (a breakdown, not a new song)
 SILENCE_COAST_S = 4.0      # the beat clock keeps time through silence this long, then lets go
 BEAT_SILENCE_GRACE_S = 1.0  # beats still count this long into a silence (gaps between sparse hits)
-KICK_REFRACTORY_S = 0.1    # one kick counted per hit, however many frames its attack spans
-KICK_HIT_SHARE = 0.5       # a kick counted for the Kick drive rises at least this much of a recent strong one
-                           # (a third lets through too many off-beat bass notes; the tracker's own test is looser)
+KICK_BEAT_WINDOW_S = 0.07  # a kick for the Kick drive is looked for this close to a beat, either side
+KICK_BEAT_SHARE = 0.15     # ... rising at least this much of a recent strong kick. Kicks are only looked for
+                           # at beats: away from them a bass line rises in the kick band about as much as a kick
 
 _captureState = None
 
@@ -144,7 +144,7 @@ class Analyzer:
         self.kickRefDecay = 0.5 ** (1.0 / (KICK_REF_HALF_LIFE_S * self.fps))
         self.kicksPresent = False
         self.kickCount = 0
-        self.lastKick = -1.0
+        self._kickBeat = None   # the last beat a kick was counted for
         self.trusted = False
         self._steadySince = None
         self._noKickSince = None
@@ -224,10 +224,6 @@ class Analyzer:
         self.kickEnv = np.roll(self.kickEnv, -1)
         self.kickEnv[-1] = kick
         self.kickRef = max(kick, self.kickRef * self.kickRefDecay)
-        if (not self.silent and kick > 0 and kick >= self.kickRef * KICK_HIT_SHARE
-                and self.t - self.lastKick >= KICK_REFRACTORY_S):
-            self.kickCount += 1
-            self.lastKick = self.t
 
         out = {"t": self.t, "rms_db": round(rmsDb, 1), "silent": self.silent}
         for key, value in (("level", rms), ("low", bandRms["low"]), ("mid", bandRms["mid"]), ("high", bandRms["high"])):
@@ -253,6 +249,7 @@ class Analyzer:
         if self.frames % self._tempoEvery == 0:
             self._estimateTempo()
         self._advanceBeats()
+        self._kickAtBeat()
         out["bpm"] = round(self.bpm, 1)
         out["confidence"] = round(self.confidence, 3)
         out["beat"] = self.beatCount
@@ -454,6 +451,17 @@ class Analyzer:
             self.beatCount += 1
             self.lastBeat = self.nextBeat
             self.nextBeat += self.period
+
+    def _kickAtBeat(self):
+        """Count the last beat as a kick beat once the kick band rises near it (up to
+        KICK_BEAT_WINDOW_S after it, so the count may come a frame or two after the beat)."""
+        b = self.lastBeat
+        if b is None or b == self._kickBeat or self.silent or self.kickRef <= 0 or self.t > b + KICK_BEAT_WINDOW_S:
+            return
+        n = min(len(self.kickEnv), int((self.t - (b - KICK_BEAT_WINDOW_S)) * self.fps) + 1)
+        if np.max(self.kickEnv[-n:]) >= KICK_BEAT_SHARE * self.kickRef:
+            self.kickCount += 1
+            self._kickBeat = b
 
     def analyze(self, samples):
         """Run a whole mono signal through, one hop at a time; returns the features per hop."""

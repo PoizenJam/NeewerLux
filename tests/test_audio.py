@@ -782,26 +782,37 @@ def t_tempoRange():
 
 
 def t_kickDrive():
-    """The analysis counts kick drum hits (not snares or hi-hats), and a part with the Kick drive
-    flashes on them: on 2-step's kick on the "and" of 3 as well as on beat 1, never more than
-    once in SOUND_KICK_GAP_MS, falling back to the floor between."""
+    """The analysis counts beats where a kick drum is heard: every beat of four-on-the-floor
+    with an off-beat bass line (and never the bass notes between), none through a breakdown of
+    pads, only beat 1 of 2-step (its kick on the "and" of 3 is off the beat). A part with the
+    Kick drive flashes on those beats, paced like Beat (every other one above 115 BPM)."""
     import beat_score
-    segs = beat_score.CASES["garage"]
-    x, truth = beat_score.render(segs)
-    fs = au.Analyzer().analyze(x)
-    kicks = []
-    for k, (bt, bpm, _) in enumerate(truth):
-        for st, _ in beat_score.PATTERNS["garage"]["kick"]:
-            if st // 4 == k % 4:
-                kicks.append(bt + (st % 4) * 60.0 / bpm / 4)
-    heard, last = [], 0
-    for f in fs:
-        if f["kick"] != last:
-            heard.append(f["t"])
-            last = f["kick"]
-    found = sum(1 for k in kicks if min(abs(h - k) for h in heard) < 0.06)
-    check(found >= 0.9 * len(kicks), "kicks heard: %d of %d" % (found, len(kicks)))
-    check(len(heard) <= 1.1 * len(kicks), "%d kicks counted for %d played (snares or hats counted)" % (len(heard), len(kicks)))
+    def kickBeats(case):
+        x, truth = beat_score.render(beat_score.CASES[case])
+        fs = au.Analyzer().analyze(x)
+        heard, last = [], 0
+        for f in fs:
+            if f["kick"] != last:
+                heard.append(f["t"])
+                last = f["kick"]
+        return fs, truth, heard
+    fs, truth, heard = kickBeats("house")
+    beats = [t for t, _, _ in truth if t > 6]
+    onBeat = [h for h in heard if min(abs(h - b) for b, _, _ in truth) < 0.08]
+    check(len(onBeat) == len(heard), "kick beats only on beats, not the bass between: %d of %d" % (len(onBeat), len(heard)))
+    found = sum(1 for b in beats if min(abs(h - b) for h in heard) < 0.08)
+    check(found >= 0.9 * len(beats), "house: kicks heard on %d of %d beats" % (found, len(beats)))
+    _, truthB, heardB = kickBeats("breakdown")
+    pads = [t for t, _, seg in truthB if seg == 1]
+    inPads = [h for h in heardB if pads[0] + 2 < h < pads[-1]]
+    check(len(inPads) <= 2, "no kick beats through 32 bars of pads: %s" % inPads)
+    _, truthG, heardG = kickBeats("garage")
+    downbeats = [t for k, (t, _, _) in enumerate(truthG) if k % 4 == 0 and t > 6]
+    others = [t for k, (t, _, _) in enumerate(truthG) if k % 4 and t > 6]
+    gotDown = sum(1 for b in downbeats if min(abs(h - b) for h in heardG) < 0.08)
+    gotOther = sum(1 for b in others if min(abs(h - b) for h in heardG) < 0.08)
+    check(gotDown >= 0.85 * len(downbeats) and gotOther <= 0.05 * len(others),
+          "2-step: kicks heard on %d of %d first beats and %d of %d others" % (gotDown, len(downbeats), gotOther, len(others)))
     mode, errors, _ = show.parseSoundMode({"name": "K", "floor": 0, "ceiling": 100, "smoothing": 0,
                                             "parts": [{"target": "@rim", "drive": "kick", "colour": 0}]})
     check(mode is not None, "kick drive validates: %s" % errors)
@@ -810,13 +821,14 @@ def t_kickDrive():
         if cmd["bri"] >= 90 and not lit:
             flashes.append(t)
         lit = cmd["bri"] >= 90
-    check(len(flashes) >= 0.75 * len(kicks), "flashed %d times for %d kicks" % (len(flashes), len(kicks)))
-    gaps = np.diff(flashes)
-    check(min(gaps) >= show.SOUND_KICK_GAP_MS / 1000.0 - 0.03, "flashes %.0f ms apart" % (min(gaps) * 1000))
-    onKick = sum(1 for t in flashes if min(abs(t - k) for k in kicks) < 0.08)
-    check(onKick >= 0.9 * len(flashes), "flashes on kicks: %d of %d" % (onKick, len(flashes)))
-    RESULTS.append("    2-step: %d of %d kicks heard, %d flashes (all within 80 ms of a kick: %d), at least %.0f ms apart"
-                   % (found, len(kicks), len(flashes), onKick, min(gaps) * 1000))
+    period = 60.0 / 124
+    late = [t for t in flashes if t > 6]
+    gaps = np.diff(late)
+    check(len(late) >= 0.4 * len(beats), "flashed %d times over %d beats" % (len(late), len(beats)))
+    check(min(gaps) >= show.SOUND_KICK_EVEN_BEATS * period - 0.06, "every other beat at 124 BPM: gaps %.0f ms" % (min(gaps) * 1000))
+    check(all(min(abs(t - b) for b, _, _ in truth) < 0.1 for t in late), "flashes land on beats")
+    RESULTS.append("    house: kicks heard on %d of %d beats, none between; pads: %d; 2-step: %d of %d first beats, %d of %d others; %d flashes"
+                   % (found, len(beats), len(inPads), gotDown, len(downbeats), gotOther, len(others), len(late)))
 
 
 def t_midiClock():
