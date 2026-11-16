@@ -300,6 +300,8 @@ soundModesDir = os.path.dirname(os.path.abspath(sys.argv[0])) + os.sep + "light_
 savedSoundModes = {}           # dict of {name: sound mode dict} loaded from disk
 palettesDir = os.path.dirname(os.path.abspath(sys.argv[0])) + os.sep + "light_prefs" + os.sep + "palettes"
 savedPalettes = {}             # dict of {name: [colours]} loaded from disk
+draftStylesDir = os.path.dirname(os.path.abspath(sys.argv[0])) + os.sep + "light_prefs" + os.sep + "draft_styles"
+savedDraftStyles = {}          # dict of {name: draft style dict} loaded from disk
 audioEngine = audio.AudioEngine()  # live capture and analysis, started with a sound mode
 lightShowPrefs = {}            # {MAC: {"role", "side", "order", "eyeline", "maxBri", "minBri", "locked", "depth", "height", "aim"}}
 _lastWritten = {}              # {MAC: bytes last actually written, after CCT-only conversion and limits}, for display
@@ -7819,19 +7821,148 @@ def draftFromSong(body):
         if not analysis["success"]:
             return analysis
     name = str(body.get("name") or analysis.get("song") or "Draft").strip()
-    seq, errors = show.draftSequence(analysis, body.get("style", "Concert"), name, body.get("bpm"), body.get("offset_ms"))
+    given = body.get("style")
+    if isinstance(given, dict):
+        style, errors = buildDraftStyle(given)
+    else:
+        if not given and (body.get("genre") or body.get("genres")):
+            given = show.matchDraftStyle(parsedDraftStyles(), body.get("genres") or body.get("genre"))
+        style, errors = draftStyleNamed(given or "Concert")
+    if style is None:
+        return {"success": False, "errors": errors}
+    seq, errors = show.draftSequence(analysis, style, name, body.get("bpm"), body.get("offset_ms"),
+                                     animations=savedAnimations, soundModes=savedSoundModes, roles=_draftRoles())
     if seq is None:
         return {"success": False, "errors": errors}
     for key in ("artist", "song"):
         if body.get(key):
             seq[key] = str(body[key])
     rendered = renderSequence(seq)
-    result = {"success": rendered["success"], "sequence": seq, "errors": rendered.get("errors", []),
+    result = {"success": rendered["success"], "sequence": seq, "style": style["name"], "errors": rendered.get("errors", []),
               "warnings": rendered.get("warnings", []), "flashes": rendered.get("flashes")}
     if result["success"] and body.get("save"):
         saved = saveSequenceFromEditor(seq, None, bool(body.get("overwrite", False)))
         result.update(success=saved["success"], errors=saved["errors"], saved=saved["success"])
     return result
+
+
+def _draftRoles():
+    """The roles the lights have (unassigned lights count as background)."""
+    return {getLightShowPref(idx, "role") for idx in range(len(availableLights))}
+
+
+def _paletteColours(name):
+    resolved = resolvePaletteName(name)
+    return None if resolved is None else [dict(c) for c in savedPalettes[resolved]]
+
+
+def buildDraftStyle(data):
+    """Validate a draft style dict. Returns (parsed or None, errors)."""
+    return show.parseDraftStyle(data, _paletteColours)
+
+
+def loadAllDraftStyles():
+    """Load every draft style JSON file in light_prefs/draft_styles/."""
+    global savedDraftStyles
+    savedDraftStyles = {}
+    if not os.path.isdir(draftStylesDir):
+        return
+    for filename in sorted(os.listdir(draftStylesDir)):
+        if not filename.lower().endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(draftStylesDir, filename), "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict) and data.get("name"):
+                savedDraftStyles[str(data["name"])] = data
+        except (IOError, OSError, ValueError) as e:
+            printDebugString("Could not load draft style " + filename + ": " + str(e))
+
+
+def resolveDraftStyleName(name):
+    return next((key for key in savedDraftStyles if key.lower() == str(name).strip().lower()), None)
+
+
+def draftStyleNamed(name):
+    """A saved draft style, parsed. Returns (style or None, errors)."""
+    resolved = resolveDraftStyleName(name)
+    if resolved is None:
+        return None, ["no draft style named %r (there are %s)" % (name, ", ".join(sorted(savedDraftStyles, key=str.lower)))]
+    return buildDraftStyle(savedDraftStyles[resolved])
+
+
+def parsedDraftStyles():
+    """{name: parsed style} for every saved style that checks out."""
+    out = {}
+    for name, data in savedDraftStyles.items():
+        style, _ = buildDraftStyle(data)
+        if style is not None:
+            out[name] = style
+    return out
+
+
+def draftStyleList():
+    """Every saved draft style as saved, with "errors" (a palette may have gone) and, per section
+    kind, how many animations and sound modes its pools match by tags and names."""
+    out = []
+    for name in sorted(savedDraftStyles, key=str.lower):
+        data = savedDraftStyles[name]
+        style, errors = buildDraftStyle(data)
+        entry = dict(data, errors=errors)
+        if style is not None:
+            entry["pools"] = {kind: {"animations": len(show.draftPoolMatches(sec["animations"], savedAnimations)),
+                                     "sound_modes": len(show.draftPoolMatches(sec["sound_modes"], savedSoundModes))}
+                              for kind, sec in style["sections"].items()}
+        out.append(entry)
+    return out
+
+
+def _draftStyleFilesNamed(name):
+    found = []
+    if os.path.isdir(draftStylesDir):
+        for filename in os.listdir(draftStylesDir):
+            path = os.path.join(draftStylesDir, filename)
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    if str(json.load(f).get("name", "")).lower() == str(name).lower():
+                        found.append(path)
+            except (IOError, OSError, ValueError, AttributeError):
+                continue
+    return found
+
+
+def saveDraftStyle(data, original=None, overwrite=False):
+    """Validate and save a draft style as light_prefs/draft_styles/<name>.json. original is the
+    name it was opened under: a different name renames it."""
+    style, errors = buildDraftStyle(data)
+    if style is None:
+        return {"success": False, "errors": errors}
+    existing = resolveDraftStyleName(style["name"])
+    renaming = original is not None and str(original).lower() != style["name"].lower()
+    if existing is not None and (renaming or original is None) and not overwrite:
+        return {"success": False, "errors": ["a draft style named " + repr(existing) + " exists; send \"overwrite\": true to replace it"]}
+    for path in _draftStyleFilesNamed(style["name"]) + (_draftStyleFilesNamed(original) if renaming else []):
+        os.remove(path)
+    os.makedirs(draftStylesDir, exist_ok=True)
+    safeName = "".join(c for c in style["name"] if c.isalnum() or c in " _-").strip() or "draft style"
+    saved = show.draftStyleFile(style)
+    with open(os.path.join(draftStylesDir, safeName + ".json"), "w", encoding="utf-8") as f:
+        json.dump(saved, f, indent=2)
+    savedDraftStyles.pop(existing, None)
+    if renaming:
+        savedDraftStyles.pop(resolveDraftStyleName(original), None)
+    savedDraftStyles[style["name"]] = saved
+    return {"success": True, "style": style["name"], "errors": []}
+
+
+def deleteDraftStyle(name):
+    resolved = resolveDraftStyleName(name)
+    if resolved is None:
+        return False
+    for path in _draftStyleFilesNamed(resolved):
+        os.remove(path)
+    savedDraftStyles.pop(resolved)
+    return True
 
 
 def buildSequence(data):
@@ -7918,6 +8049,29 @@ class SongDraftHost:
 
     def draft(self, analysis, style, name, bpm=None, offsetMs=None):
         return draftFromSong({"analysis": analysis, "style": style, "name": name, "bpm": bpm, "offset_ms": offsetMs})
+
+    def styles(self):
+        return draftStyleList()
+
+    def styleFor(self, genres):
+        return show.matchDraftStyle(parsedDraftStyles(), genres)
+
+    def saveStyle(self, data, original=None, overwrite=False):
+        return saveDraftStyle(data, original, overwrite)
+
+    def deleteStyle(self, name):
+        return deleteDraftStyle(name)
+
+    def styleChoices(self):
+        """What the style editor offers: palettes, animation and sound mode names and tags."""
+        return {"palettes": sorted(savedPalettes, key=str.lower),
+                "animations": sorted(savedAnimations, key=str.lower), "sound_modes": sorted(savedSoundModes, key=str.lower),
+                "animation_tags": sorted({str(t).lower() for a in savedAnimations.values() for t in (a.get("tags") or [])}),
+                "sound_mode_tags": sorted({str(t).lower() for m in savedSoundModes.values() for t in (m.get("tags") or [])})}
+
+    def poolCounts(self, pool, kind):
+        """How many animations (kind "animations") or sound modes a pool matches by tags and names."""
+        return len(show.draftPoolMatches(pool, savedAnimations if kind == "animations" else savedSoundModes))
 
     def openDraft(self, sequence):
         return mainWindow.seqOpenEditor(sequence=sequence)
@@ -8274,10 +8428,12 @@ def soundAvailable():
 
 
 def loadAllSoundModes():
-    """Load every sound mode JSON file in light_prefs/sound_modes/, and the palettes."""
+    """Load every sound mode JSON file in light_prefs/sound_modes/, the palettes and the draft
+    styles (which use both)."""
     global savedSoundModes
     savedSoundModes = {}
     loadAllPalettes()
+    loadAllDraftStyles()
     if not os.path.isdir(soundModesDir):
         return
     for filename in sorted(os.listdir(soundModesDir)):
@@ -9796,6 +9952,22 @@ class NLPythonServer(BaseHTTPRequestHandler):
             elif action == "draft":
                 resultData = draftFromSong(body)
                 resultData["action"] = "draft"
+            elif action == "draft_styles":
+                resultData = dict(SongDraftHost().styleChoices(), success=True, action=action, styles=draftStyleList(),
+                                  behaviours=[{"name": b, "description": show.DRAFT_BEHAVIOUR_NOTES[b]} for b in show.DRAFT_BEHAVIOURS],
+                                  sections=list(show.DRAFT_SECTIONS),
+                                  animation_items={n: [str(t).lower() for t in (a.get("tags") or [])] for n, a in savedAnimations.items()},
+                                  sound_mode_items={n: [str(t).lower() for t in (m.get("tags") or [])] for n, m in savedSoundModes.items()})
+            elif action == "save_draft_style":
+                resultData = saveDraftStyle(body.get("style"), body.get("original"), bool(body.get("overwrite", False)))
+                resultData["action"] = action
+            elif action == "delete_draft_style":
+                deleted = deleteDraftStyle(body.get("name", ""))
+                resultData = {"success": deleted, "action": action, "errors": [] if deleted else ["no draft style named " + repr(body.get("name"))]}
+            elif action == "style_for":
+                found = show.matchDraftStyle(parsedDraftStyles(), body.get("genres") or body.get("genre"))
+                resultData = {"success": found is not None, "action": action, "style": found,
+                              "errors": [] if found else ["no draft style lists those genres"]}
             elif action == "validate":
                 seq, errors, seqWarnings = buildSequence(body.get("sequence"))
                 resultData = {"success": seq is not None, "action": action, "errors": errors, "warnings": seqWarnings}

@@ -273,7 +273,7 @@ def main():
         js(page, "window.scrollTo(0, 0)")
         spin(300)
         view.grab().save(os.path.join(rig.workdir, "webui.png"))
-        print("    screenshots: " + os.path.join(rig.workdir, "webui.png") + ", webui_render.png, webui_settings.png, webui_timeline.png, webui_plan.png, webui_position.png, webui_sound.png")
+        print("    screenshots: " + os.path.join(rig.workdir, "webui.png") + ", webui_render.png, webui_settings.png, webui_timeline.png, webui_plan.png, webui_position.png, webui_sound.png, webui_styles.png")
 
     def flashGuardSetting():
         check(js(page, "document.getElementById('gpFlashGuard').checked") is True, "the guard shows as on")
@@ -630,12 +630,44 @@ def main():
         waitFor(page, "document.getElementById('songInfo').textContent.indexOf(\"Couldn't analyse it\") === 0", "a bad file is reported")
         js(page, "songClose()")
 
+    def draftStyles():
+        nl = rig.nl
+        js(page, "songOpen()")
+        waitFor(page, "document.getElementById('songStyle').options.length >= 25", "the styles listed in the song dialog")
+        js(page, "document.getElementById('songGenre').value = 'thrash metal'; songPickGenre()")
+        waitFor(page, "document.getElementById('songStyle').value === 'Metal'", "a style picked by genre")
+        check("Genres: metal" in js(page, "document.getElementById('songStyleNote').textContent"), "the note shows the genres")
+        js(page, "dsOpen('Metal')")
+        waitFor(page, "document.getElementById('dsModal').classList.contains('open') && document.querySelectorAll('#dsRows tr').length === 6", "the style editor")
+        check(js(page, "const r = document.querySelector('#dsModal .modal').getBoundingClientRect(); document.getElementById('dsModal').contains(document.elementFromPoint(r.left + r.width / 2, r.top + 20))"),
+              "the style editor shows over the song dialog")
+        row = "document.querySelector('#dsRows tr[data-kind=\"Breakdown\"]')"
+        check(js(page, row + ".querySelector('summary').textContent") == "hit_chase, sound" and
+              js(page, row + ".querySelector('.ds-sound').value") == "intense" and "sound modes" in js(page, row + ".querySelector('.ds-count').textContent"),
+              "the style shown: %s" % js(page, row + ".innerText"))
+        spin(200)
+        view.grab().save(os.path.join(rig.workdir, "webui_styles.png"))
+        js(page, row + ".querySelector('input[value=\"hit_chase\"]').click(); " + row + ".querySelector('input[value=\"drift\"]').click(); " +
+           row + ".querySelector('input[value=\"hit_chase\"]').click()")
+        js(page, row + ".querySelector('.ds-sound').value = 'calm, -warm, Pulse'; dsCount('Breakdown')")
+        js(page, "document.getElementById('dsPalette').value = 'Own colours'; dsPaletteShown(); document.getElementById('dsColours').value = '200/80, 300/70';"
+                 "document.getElementById('dsDesc').value = 'web made'; document.getElementById('dsIntensity').value = 'low'; dsSaveAs('Web Style')")
+        waitFor(page, "document.getElementById('dsStatus').textContent === 'Saved Web Style'", "saved")
+        saved = nl.savedDraftStyles.get("Web Style", {})
+        check(saved.get("description") == "web made" and saved["intensity"] == "low" and saved["palette"] == [{"hue": 200, "sat": 80}, {"hue": 300, "sat": 70}]
+              and saved["sections"]["Breakdown"]["behaviour"] == ["sound", "drift", "hit_chase"]
+              and saved["sections"]["Breakdown"]["sound_modes"] == {"tags": ["calm"], "exclude": ["warm"], "names": ["Pulse"]}, "saved as edited: %s" % saved.get("sections", {}).get("Breakdown"))
+        js(page, "dsDelete(true)")
+        waitFor(page, "document.getElementById('dsStatus').textContent === 'Deleted Web Style'", "deleted")
+        check("Web Style" not in nl.savedDraftStyles, "gone")
+        js(page, "dsClose(); songClose()")
+
     for name, fn in [("stage tiles and swatches", stage), ("sequence list", sequenceList),
                      ("play, pause, resume, seek, stop", playPauseSeekStop), ("render", render),
                      ("reload", reload), ("light preferences", lightPrefs), ("global preferences", globalPrefs), ("flash guard setting", flashGuardSetting),
                      ("network settings stay desktop-only", securityPrefsRefused), ("preset editor and menu", presetEditor),
                      ("animation editor, import, duplicate, delete", animationEditor), ("timeline editor", timelineEditor),
-                     ("sound panel", soundPanel), ("draft from a song", songDraft)]:
+                     ("sound panel", soundPanel), ("draft from a song", songDraft), ("draft styles", draftStyles)]:
         step(name, fn)
     if page.errors:
         results.append(("FAIL", "no JavaScript errors", "; ".join(page.errors[:5])))

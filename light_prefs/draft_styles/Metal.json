@@ -1,0 +1,92 @@
+{
+  "format": 1,
+  "name": "Metal",
+  "description": "Blood red, fire and cold white at full intensity: hard sound modes, chases on every heavy part, breakdowns included.",
+  "genres": [
+    "metal",
+    "heavy metal",
+    "thrash metal",
+    "death metal",
+    "black metal",
+    "metalcore",
+    "nu metal",
+    "doom metal",
+    "power metal",
+    "progressive metal",
+    "djent",
+    "deathcore",
+    "sludge metal",
+    "groove metal",
+    "speed metal",
+    "industrial metal"
+  ],
+  "palette": [
+    {
+      "hue": 355,
+      "sat": 75
+    },
+    {
+      "hue": 25,
+      "sat": 90
+    },
+    {
+      "hue": 210,
+      "sat": 15
+    },
+    {
+      "hue": 270,
+      "sat": 85
+    },
+    {
+      "hue": 15,
+      "sat": 70
+    }
+  ],
+  "intensity": "high",
+  "use_animations": true,
+  "use_sound_modes": true,
+  "sections": {
+    "Intro": {
+      "behaviour": "fade_up"
+    },
+    "Groove": {
+      "behaviour": [
+        "pulse",
+        "sound"
+      ],
+      "sound_modes": {
+        "tags": [
+          "hard"
+        ]
+      }
+    },
+    "Build": {
+      "behaviour": "build"
+    },
+    "Drop": {
+      "behaviour": [
+        "hit_chase",
+        "sound"
+      ],
+      "sound_modes": {
+        "tags": [
+          "hard"
+        ]
+      }
+    },
+    "Breakdown": {
+      "behaviour": [
+        "hit_chase",
+        "sound"
+      ],
+      "sound_modes": {
+        "tags": [
+          "intense"
+        ]
+      }
+    },
+    "Outro": {
+      "behaviour": "fade_down"
+    }
+  }
+}

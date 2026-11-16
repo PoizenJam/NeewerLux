@@ -1,0 +1,80 @@
+{
+  "format": 1,
+  "name": "Techno",
+  "description": "Cold whites and deep blue: hard pulses, chases and strobing animations kept under the flash limit.",
+  "genres": [
+    "techno",
+    "minimal techno",
+    "industrial techno",
+    "acid techno",
+    "hard techno",
+    "detroit techno",
+    "minimal",
+    "industrial",
+    "ebm"
+  ],
+  "palette": [
+    {
+      "hue": 210,
+      "sat": 15
+    },
+    {
+      "hue": 200,
+      "sat": 90
+    },
+    {
+      "hue": 230,
+      "sat": 70
+    },
+    {
+      "hue": 180,
+      "sat": 40
+    },
+    {
+      "hue": 260,
+      "sat": 60
+    }
+  ],
+  "intensity": "high",
+  "use_animations": true,
+  "use_sound_modes": true,
+  "sections": {
+    "Intro": {
+      "behaviour": "fade_up"
+    },
+    "Groove": {
+      "behaviour": [
+        "pulse",
+        "sound"
+      ],
+      "sound_modes": {
+        "tags": [
+          "hard"
+        ]
+      }
+    },
+    "Build": {
+      "behaviour": "build"
+    },
+    "Drop": {
+      "behaviour": [
+        "hit_chase",
+        "animation"
+      ],
+      "animations": {
+        "tags": [
+          "chase"
+        ],
+        "exclude": [
+          "calm"
+        ]
+      }
+    },
+    "Breakdown": {
+      "behaviour": "drift"
+    },
+    "Outro": {
+      "behaviour": "fade_down"
+    }
+  }
+}

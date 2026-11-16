@@ -484,6 +484,13 @@ def main():
     songDialog = SongDraftDialog(nl.SongDraftHost(), win)
     assert not tooBig(songDialog) and not tooBig(win), "the song dialog and the main window fit a small screen: %s %s" % (tooBig(songDialog), tooBig(win))
     native.extend(nativeSpins(songDialog))
+    assert songDialog.styleCombo.count() >= 25 and songDialog.styleNote.text(), "the song dialog lists the draft styles"
+    styles = songDialog.editStyles()
+    app.processEvents()
+    assert not tooBig(styles) and not fixedTables(styles), "the style editor fits a small screen and its columns drag: %s %s" % (tooBig(styles), fixedTables(styles))
+    assert styles.styleCombo.currentText() == songDialog.styleCombo.currentText() and styles.behaviourButtons["Build"].text() == "build"
+    native.extend(nativeSpins(styles))
+    styles.close()
     songDialog.close()
     assert not native, "spin boxes with Qt arrows or no room for text (use SpinBoxWithButtons or hideSpinArrows): %r" % native
     sb = SpinBoxWithButtons(minVal=0, maxVal=1000)

@@ -1,0 +1,72 @@
+{
+  "format": 1,
+  "name": "Punk",
+  "description": "Loud from the first beat: bright colours flipping every bar, chases on the choruses.",
+  "genres": [
+    "punk",
+    "punk rock",
+    "pop punk",
+    "hardcore",
+    "hardcore punk",
+    "post-punk",
+    "ska punk",
+    "skate punk",
+    "emo",
+    "riot grrrl"
+  ],
+  "palette": [
+    {
+      "hue": 50,
+      "sat": 95
+    },
+    {
+      "hue": 320,
+      "sat": 85
+    },
+    {
+      "hue": 190,
+      "sat": 85
+    },
+    {
+      "hue": 30,
+      "sat": 95
+    }
+  ],
+  "intensity": "high",
+  "use_animations": false,
+  "use_sound_modes": true,
+  "sections": {
+    "Intro": {
+      "behaviour": "hold"
+    },
+    "Groove": {
+      "behaviour": [
+        "colour_bars",
+        "pulse"
+      ]
+    },
+    "Build": {
+      "behaviour": "build"
+    },
+    "Drop": {
+      "behaviour": [
+        "hit_chase",
+        "sound"
+      ],
+      "sound_modes": {
+        "tags": [
+          "hard"
+        ],
+        "exclude": [
+          "calm"
+        ]
+      }
+    },
+    "Breakdown": {
+      "behaviour": "colour_bars"
+    },
+    "Outro": {
+      "behaviour": "fade_down"
+    }
+  }
+}

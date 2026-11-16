@@ -1,0 +1,78 @@
+{
+  "format": 1,
+  "name": "Dubstep",
+  "description": "Violet and toxic green: a long build into a blackout, then intense sound modes and chases on the drop.",
+  "genres": [
+    "dubstep",
+    "brostep",
+    "riddim",
+    "bass music",
+    "future bass",
+    "trap edm",
+    "glitch hop",
+    "bass house"
+  ],
+  "palette": [
+    {
+      "hue": 280,
+      "sat": 90
+    },
+    {
+      "hue": 120,
+      "sat": 85
+    },
+    {
+      "hue": 320,
+      "sat": 85
+    },
+    {
+      "hue": 190,
+      "sat": 90
+    }
+  ],
+  "intensity": "high",
+  "use_animations": true,
+  "use_sound_modes": true,
+  "sections": {
+    "Intro": {
+      "behaviour": "fade_up"
+    },
+    "Groove": {
+      "behaviour": [
+        "pulse",
+        "colour_bars"
+      ]
+    },
+    "Build": {
+      "behaviour": "build"
+    },
+    "Drop": {
+      "behaviour": [
+        "hit_chase",
+        "sound"
+      ],
+      "sound_modes": {
+        "tags": [
+          "intense"
+        ]
+      }
+    },
+    "Breakdown": {
+      "behaviour": [
+        "drift",
+        "animation"
+      ],
+      "animations": {
+        "tags": [
+          "moody"
+        ],
+        "exclude": [
+          "hard"
+        ]
+      }
+    },
+    "Outro": {
+      "behaviour": "fade_down"
+    }
+  }
+}

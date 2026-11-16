@@ -114,3 +114,32 @@ light_prefs/palettes/*
 .DS_Store
 Thumbs.db
 *~
+# and draft styles
+!light_prefs/draft_styles/
+light_prefs/draft_styles/*
+!light_prefs/draft_styles/Ambient.json
+!light_prefs/draft_styles/Ballad.json
+!light_prefs/draft_styles/Classical.json
+!light_prefs/draft_styles/Concert.json
+!light_prefs/draft_styles/Cozy.json
+!light_prefs/draft_styles/Disco Funk.json
+!light_prefs/draft_styles/Drum and Bass.json
+!light_prefs/draft_styles/Dubstep.json
+!light_prefs/draft_styles/Folk.json
+!light_prefs/draft_styles/Hip Hop.json
+!light_prefs/draft_styles/Horror.json
+!light_prefs/draft_styles/House.json
+!light_prefs/draft_styles/Hype.json
+!light_prefs/draft_styles/Jazz.json
+!light_prefs/draft_styles/Just Chatting.json
+!light_prefs/draft_styles/Lo-fi.json
+!light_prefs/draft_styles/Metal.json
+!light_prefs/draft_styles/Neon.json
+!light_prefs/draft_styles/Pop.json
+!light_prefs/draft_styles/Prog Rock.json
+!light_prefs/draft_styles/Punk.json
+!light_prefs/draft_styles/Rock.json
+!light_prefs/draft_styles/Subtle.json
+!light_prefs/draft_styles/Synthwave.json
+!light_prefs/draft_styles/Techno.json
+!light_prefs/draft_styles/Trance.json

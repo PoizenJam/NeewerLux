@@ -1,0 +1,66 @@
+{
+  "format": 1,
+  "name": "Ambient",
+  "description": "Ocean blues that drift slowly, with calm sound modes. Nothing on the beat.",
+  "genres": [
+    "ambient",
+    "drone",
+    "new age",
+    "chillout",
+    "chill out",
+    "downtempo",
+    "meditation",
+    "dark ambient",
+    "space music",
+    "trip hop",
+    "trip-hop"
+  ],
+  "palette": "Ocean",
+  "intensity": "low",
+  "use_animations": false,
+  "use_sound_modes": true,
+  "sections": {
+    "Intro": {
+      "behaviour": "fade_up"
+    },
+    "Groove": {
+      "behaviour": [
+        "drift",
+        "sound"
+      ],
+      "sound_modes": {
+        "tags": [
+          "calm"
+        ],
+        "exclude": [
+          "hard",
+          "intense"
+        ]
+      }
+    },
+    "Build": {
+      "behaviour": "drift"
+    },
+    "Drop": {
+      "behaviour": [
+        "hold",
+        "sound"
+      ],
+      "sound_modes": {
+        "tags": [
+          "calm"
+        ],
+        "exclude": [
+          "hard",
+          "intense"
+        ]
+      }
+    },
+    "Breakdown": {
+      "behaviour": "drift"
+    },
+    "Outro": {
+      "behaviour": "fade_down"
+    }
+  }
+}

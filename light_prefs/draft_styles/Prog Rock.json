@@ -1,0 +1,93 @@
+{
+  "format": 1,
+  "name": "Prog Rock",
+  "description": "Purples and teals that move with the music: long colour changes, flowing animations, big moments when the band lands.",
+  "genres": [
+    "progressive rock",
+    "prog",
+    "prog rock",
+    "art rock",
+    "psychedelic rock",
+    "space rock",
+    "post-rock",
+    "krautrock",
+    "math rock"
+  ],
+  "palette": [
+    {
+      "hue": 265,
+      "sat": 80
+    },
+    {
+      "hue": 185,
+      "sat": 75
+    },
+    {
+      "hue": 300,
+      "sat": 60
+    },
+    {
+      "hue": 45,
+      "sat": 70
+    },
+    {
+      "hue": 220,
+      "sat": 80
+    }
+  ],
+  "intensity": "medium",
+  "use_animations": true,
+  "use_sound_modes": true,
+  "sections": {
+    "Intro": {
+      "behaviour": "fade_up"
+    },
+    "Groove": {
+      "behaviour": [
+        "colour_bars",
+        "animation",
+        "drift"
+      ],
+      "animations": {
+        "tags": [
+          "smooth"
+        ],
+        "exclude": [
+          "hard"
+        ]
+      }
+    },
+    "Build": {
+      "behaviour": "build"
+    },
+    "Drop": {
+      "behaviour": [
+        "hit_chase",
+        "colour_bars",
+        "sound"
+      ],
+      "sound_modes": {
+        "tags": [
+          "lively"
+        ],
+        "exclude": [
+          "pastel"
+        ]
+      }
+    },
+    "Breakdown": {
+      "behaviour": [
+        "drift",
+        "animation"
+      ],
+      "animations": {
+        "tags": [
+          "calm"
+        ]
+      }
+    },
+    "Outro": {
+      "behaviour": "fade_down"
+    }
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "format": 1,
+  "name": "Subtle",
+  "description": "Gentle colour changes between sections, arriving on their first beat. No pulses.",
+  "genres": [
+    "easy listening",
+    "soft",
+    "background music"
+  ],
+  "palette": [
+    {
+      "hue": 35,
+      "sat": 45
+    },
+    {
+      "hue": 205,
+      "sat": 40
+    },
+    {
+      "hue": 275,
+      "sat": 35
+    },
+    {
+      "hue": 150,
+      "sat": 35
+    },
+    {
+      "hue": 55,
+      "sat": 40
+    }
+  ],
+  "intensity": "low",
+  "use_animations": false,
+  "use_sound_modes": false,
+  "sections": {
+    "Intro": {
+      "behaviour": "fade_up"
+    },
+    "Groove": {
+      "behaviour": "hold"
+    },
+    "Build": {
+      "behaviour": "hold"
+    },
+    "Drop": {
+      "behaviour": "hold"
+    },
+    "Breakdown": {
+      "behaviour": "drift"
+    },
+    "Outro": {
+      "behaviour": "fade_down"
+    }
+  }
+}

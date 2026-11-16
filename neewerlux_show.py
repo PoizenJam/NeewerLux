@@ -14,6 +14,7 @@ layer whose current frame includes it; covered layers keep their clocks running.
 
 import bisect
 import math
+import random
 import threading
 import time
 
@@ -1113,23 +1114,204 @@ def parseSequence(data, clipExists, defaultFps=DEFAULT_SEQUENCE_FPS, resolveTarg
 
 # ---------------------------------------------------------------- song drafts
 
-DRAFT_STYLES = ("Subtle", "Concert", "Neon")
-DRAFT_GROUPS = ("fill", "rim", "background")
-DRAFT_TARGETS = {"fill": "@fill", "rim": "@rim", "background": "@background;@practical"}
-DRAFT_PULSE_MIN_S = 0.5     # rim pulses at most twice a second (a pulse is one flash)
-# Colours keep away from saturated red (hues within 20 of 0), which counts as flashing when it
-# changes. Brightness per group for section levels 1, 2 and 3.
-_DRAFT = {
-    "subtle": {"palette": [(35, 45), (205, 40), (275, 35), (150, 35), (55, 40)],
-               "bri": {"fill": (15, 20, 25), "rim": (25, 33, 42), "background": (20, 27, 34)},
-               "fillSat": 0.5, "pulse": False, "swap": False},
-    "concert": {"palette": [(35, 90), (215, 85), (300, 80), (265, 85), (50, 90)],
-                "bri": {"fill": (20, 26, 32), "rim": (35, 55, 72), "background": (30, 45, 62)},
-                "fillSat": 0.4, "pulse": True, "swap": False},
-    "neon": {"palette": [(190, 95), (285, 90), (320, 90), (160, 90), (240, 95)],
-             "bri": {"fill": (15, 22, 28), "rim": (40, 58, 75), "background": (35, 52, 70)},
-             "fillSat": 0.6, "pulse": True, "swap": True},
+DRAFT_STYLE_FORMAT = 1
+DRAFT_SECTIONS = ("Intro", "Groove", "Build", "Drop", "Breakdown", "Outro")
+DRAFT_BEHAVIOURS = ("fade_up", "fade_down", "hold", "drift", "colour_bars", "pulse", "build", "hit_chase", "animation", "sound")
+DRAFT_BEHAVIOUR_NOTES = {
+    "fade_up": "Starts dark and fades up to the look over the section.",
+    "fade_down": "Fades from the look down to dark by the section's end.",
+    "hold": "One look for the section, arriving on its first beat.",
+    "drift": "Dim, with slow colour changes every four bars.",
+    "colour_bars": "A new colour every bar (every other bar below full energy); brightness follows the energy.",
+    "pulse": "The rim pulses on the beat over a darker look; colour changes every four bars.",
+    "build": "Pulses that speed up to the limit while the light rises, then a blackout on the last beat.",
+    "hit_chase": "Everything hits full on the first beat, then a chase across rim, background and practical with a new colour each bar.",
+    "animation": "Plays an animation from the section's pool, looped in time with the tempo.",
+    "sound": "Hands the lights to a sound mode from the section's pool for the section.",
 }
+DRAFT_DEFAULT_BEHAVIOUR = {"Intro": "fade_up", "Groove": "pulse", "Build": "build", "Drop": "hit_chase",
+                           "Breakdown": "drift", "Outro": "fade_down"}
+# names other section finders use, for analyses that have no NeewerLux kind
+_DRAFT_SECTION_ALIASES = {"verse": "Groove", "inst": "Groove", "instrumental": "Groove", "solo": "Drop", "chorus": "Drop",
+                          "pre-chorus": "Build", "prechorus": "Build", "bridge": "Breakdown", "break": "Breakdown",
+                          "start": "Intro", "end": "Outro"}
+DRAFT_INTENSITIES = ("low", "medium", "high")
+DRAFT_GROUPS = ("fill", "rim", "background", "practical")
+DRAFT_TARGETS = {"fill": "@fill", "rim": "@rim", "background": "@background", "practical": "@practical"}
+DRAFT_CHASE_GROUPS = ("rim", "background", "practical")
+DRAFT_PULSE_MIN_S = 0.5      # a light pulses at most twice a second (a pulse is one flash)
+DRAFT_CLIP_MAX_FLASHES = 2.0 # animations drawn into drafts stay at or under this, as pulses do
+DRAFT_CLIP_SPEEDS = (0.5, 2.0)
+DRAFT_FILL_SAT = 0.45        # the fill gets a pale version of its colour
+# (darkest, brightest) per group for each intensity; energy moves between them
+_DRAFT_BRI = {"low": {"fill": (8, 20), "rim": (8, 45), "background": (8, 40), "practical": (8, 35)},
+              "medium": {"fill": (12, 28), "rim": (8, 75), "background": (10, 65), "practical": (10, 55)},
+              "high": {"fill": (15, 35), "rim": (6, 100), "background": (8, 90), "practical": (8, 80)}}
+
+
+def _draftPool(data, where, errors):
+    """{"tags": every one of these, "exclude": none of these, "names": these whatever their tags}."""
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        errors.append(where + " must be an object")
+        return {"tags": [], "exclude": [], "names": []}
+    pool = {}
+    for key in ("tags", "exclude", "names"):
+        v = data.get(key, [])
+        if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
+            errors.append("%s.%s must be a list of words" % (where, key))
+            v = []
+        pool[key] = [x.strip() if key == "names" else x.strip().lower() for x in v if x.strip()]
+    bad = [k for k in data if k not in pool]
+    if bad:
+        errors.append("%s: unknown %s" % (where, ", ".join(sorted(bad))))
+    return pool
+
+
+def parseDraftStyle(data, paletteLookup=None):
+    """Check a draft style (the format is in docs/SEQUENCE_FORMAT.md). paletteLookup(name) gives
+    a saved palette's colours or None. Returns (style or None, errors); the style carries
+    "colours", the palette's colours."""
+    errors = []
+    if not isinstance(data, dict):
+        return None, ["a draft style must be a JSON object"]
+    if data.get("format", DRAFT_STYLE_FORMAT) != DRAFT_STYLE_FORMAT:
+        errors.append("format must be %d" % DRAFT_STYLE_FORMAT)
+    style = {"format": DRAFT_STYLE_FORMAT, "name": str(data.get("name", "")).strip(),
+             "description": str(data.get("description", "")).strip()}
+    if not style["name"]:
+        errors.append("a draft style needs a name")
+    genres = data.get("genres", [])
+    if not isinstance(genres, list) or not all(isinstance(g, str) for g in genres):
+        errors.append("genres must be a list of words")
+        genres = []
+    style["genres"] = [g.strip().lower() for g in genres if g.strip()]
+    palette = data.get("palette")
+    if isinstance(palette, str):
+        colours = paletteLookup(palette) if paletteLookup else None
+        if colours is None:
+            errors.append("no palette named " + repr(palette))
+            colours = []
+        style["palette"] = palette.strip()
+    else:
+        colours, perrs = parsePalette(palette)
+        errors += perrs
+        style["palette"] = colours
+    style["colours"] = [dict(c) for c in colours]
+    style["intensity"] = str(data.get("intensity", "medium")).strip().lower()
+    if style["intensity"] not in DRAFT_INTENSITIES:
+        errors.append("intensity must be one of " + ", ".join(DRAFT_INTENSITIES))
+    for key in ("use_animations", "use_sound_modes"):
+        v = data.get(key, True)
+        if not isinstance(v, bool):
+            errors.append(key + " must be true or false")
+            v = True
+        style[key] = v
+    sections = data.get("sections", {})
+    if not isinstance(sections, dict):
+        errors.append("sections must be an object")
+        sections = {}
+    unknown = [k for k in sections if k not in DRAFT_SECTIONS]
+    if unknown:
+        errors.append("sections: unknown %s (use %s)" % (", ".join(unknown), ", ".join(DRAFT_SECTIONS)))
+    style["sections"] = {}
+    for kind in DRAFT_SECTIONS:
+        sec = sections.get(kind, {})
+        where = "sections." + kind
+        if not isinstance(sec, dict):
+            errors.append(where + " must be an object")
+            sec = {}
+        beh = sec.get("behaviour", DRAFT_DEFAULT_BEHAVIOUR[kind])
+        beh = [beh] if isinstance(beh, str) else beh
+        if not isinstance(beh, list) or not beh or not all(isinstance(b, str) for b in beh):
+            errors.append(where + ".behaviour must be a behaviour or a list of them")
+            beh = [DRAFT_DEFAULT_BEHAVIOUR[kind]]
+        beh = [b.strip().lower() for b in beh]
+        bad = [b for b in beh if b not in DRAFT_BEHAVIOURS]
+        if bad:
+            errors.append("%s.behaviour: unknown %s (use %s)" % (where, ", ".join(bad), ", ".join(DRAFT_BEHAVIOURS)))
+        extra = [k for k in sec if k not in ("behaviour", "animations", "sound_modes")]
+        if extra:
+            errors.append("%s: unknown %s" % (where, ", ".join(sorted(extra))))
+        style["sections"][kind] = {"behaviour": beh,
+                                   "animations": _draftPool(sec.get("animations"), where + ".animations", errors),
+                                   "sound_modes": _draftPool(sec.get("sound_modes"), where + ".sound_modes", errors)}
+    if errors:
+        return None, errors
+    return style, []
+
+
+def draftStyleFile(style):
+    """A parsed style as it's saved (without the resolved colours)."""
+    out = {k: style[k] for k in ("format", "name", "description", "genres", "palette", "intensity", "use_animations", "use_sound_modes")}
+    out["sections"] = {kind: {"behaviour": sec["behaviour"][0] if len(sec["behaviour"]) == 1 else list(sec["behaviour"]),
+                              **{p: {k: v for k, v in sec[p].items() if v} for p in ("animations", "sound_modes") if any(sec[p].values())}}
+                       for kind, sec in style["sections"].items()}
+    return out
+
+
+def draftPoolMatches(pool, items):
+    """Names of items ({name: data with "tags"}) a pool allows, before the flash check."""
+    names = {n.lower() for n in pool.get("names", [])}
+    tags, exclude = set(pool.get("tags", [])), set(pool.get("exclude", []))
+    out = []
+    for name, data in items.items():
+        have = {str(t).lower() for t in (data.get("tags") or [])} if isinstance(data, dict) else set()
+        if name.lower() in names or (not names or tags) and tags <= have and not exclude & have:
+            out.append(name)
+    return sorted(out, key=str.lower)
+
+
+def draftPoolText(pool):
+    """A pool as the editors show it: tags, -excluded tags and names, separated by commas."""
+    return ", ".join(pool.get("tags", []) + ["-" + t for t in pool.get("exclude", [])] + pool.get("names", []))
+
+
+def draftPoolFromText(text, itemNames):
+    """The editors' pool text read back: a word starting with - is excluded, a word naming an
+    item (itemNames) picks that item, any other word is a tag the item must have."""
+    known = {n.lower(): n for n in itemNames}
+    pool = {"tags": [], "exclude": [], "names": []}
+    for word in str(text or "").split(","):
+        word = word.strip()
+        if not word:
+            continue
+        if word.startswith("-"):
+            pool["exclude"].append(word[1:].strip().lower())
+        elif word.lower() in known:
+            pool["names"].append(known[word.lower()])
+        else:
+            pool["tags"].append(word.lower())
+    return pool
+
+
+def matchDraftStyle(styles, genres):
+    """The style ({name: parsed style}) whose genres best fit the given genres (most important
+    first, as a music database lists them), or None. Exact matches count most, then one genre
+    containing the other, then shared words."""
+    if isinstance(genres, str):
+        genres = [g for g in genres.split(",")]
+    query = [str(g).strip().lower() for g in (genres or []) if str(g).strip()]
+    best, bestScore = None, 0.0
+    for name, style in styles.items():
+        score = 0.0
+        for i, q in enumerate(query):
+            qWords = set(q.replace("-", " ").split())
+            fit = 0.0
+            for g in style.get("genres", []):
+                gWords = set(g.replace("-", " ").split())
+                if g == q:
+                    fit = max(fit, 3.0)
+                elif gWords <= qWords or qWords <= gWords:
+                    # the more of the longer name the shorter one covers, the better
+                    fit = max(fit, 1.0 + min(len(gWords), len(qWords)) / float(max(len(gWords), len(qWords))))
+                elif qWords & gWords:
+                    fit = max(fit, len(qWords & gWords) / float(len(qWords | gWords)))
+            score += fit / (1.0 + 0.5 * i)
+        if score > bestScore:
+            best, bestScore = name, score
+    return best
 
 
 def songGrid(durationMs, bpm, offsetMs):
@@ -1140,17 +1322,47 @@ def songGrid(durationMs, bpm, offsetMs):
     return beats, beats[::4]
 
 
-def draftSequence(analysis, style="Concert", name=None, bpm=None, offsetMs=None):
-    """A first-draft sequence for a song from neewerlux_audio.analyzeSong's result: a look per
-    section (colours from the style's palette, brightness from the section's level), and in
-    Concert and Neon, rim pulses on the beat in the loudest sections (Neon also swaps the rim
-    and background colours each bar). It drives the fill, rim, background and practical
-    lights, never the key. bpm and offsetMs (a bar's first beat) replace the analysed tempo,
-    moving the sections to the nearest bar line. Returns (sequence, errors)."""
-    key = str(style or "").strip().lower()
-    if key not in _DRAFT:
-        return None, ["style must be one of " + ", ".join(DRAFT_STYLES)]
-    look = _DRAFT[key]
+def _draftKind(sec):
+    for raw in (sec.get("kind"), sec.get("label")):
+        word = str(raw or "").strip().lower()
+        for kind in DRAFT_SECTIONS:
+            if word.startswith(kind.lower()):
+                return kind
+        for alias, kind in _DRAFT_SECTION_ALIASES.items():
+            if word.startswith(alias):
+                return kind
+    return "Groove"
+
+
+_clipRates = {}  # (animation, speed): flash rate, for drafts (the same few animations at a few speeds)
+
+
+def _clipSpeed(anim, period):
+    """The speed at which one loop of the animation lasts a whole number of beats (1, 2, 4 ... 64)
+    nearest its own speed, within DRAFT_CLIP_SPEEDS, or None."""
+    tl = AnimationTimeline(anim, fps=FLASH_CHECK_FPS, loop=True)
+    loopMs = tl.dL if anim.get("loop") and tl.dL > 0 else tl.d0
+    if loopMs <= 0:
+        return None
+    fits = [loopMs / (n * period) for n in (1, 2, 4, 8, 16, 32, 64)]
+    fits = [s for s in fits if DRAFT_CLIP_SPEEDS[0] <= s <= DRAFT_CLIP_SPEEDS[1]]
+    return round(min(fits, key=lambda s: abs(math.log(s))), 4) if fits else None
+
+
+def draftSequence(analysis, style, name=None, bpm=None, offsetMs=None, animations=None, soundModes=None, roles=None):
+    """A first-draft sequence for a song from neewerlux_audio.analyzeSong's result, shaped by a
+    draft style (parseDraftStyle): each section plays its kind's behaviour (Intro, Groove,
+    Build, Drop, Breakdown, Outro, from the section's kind or label), brightness follows the
+    energy bar by bar between the style's intensity limits, and colours come from its palette.
+    A part that repeats (the same group) gets the same behaviour, colours and pool pick; other
+    sections of the same kind take the next ones, for variety. animations and soundModes
+    ({name: data}) are the pools' sources; roles is the set of roles the rig has (the chase
+    skips missing ones). Drives the fill, rim, background and practical lights, never the key,
+    and keeps each light at or under 2 flashes a second. bpm and offsetMs (a bar's first beat)
+    replace the analysed tempo, moving the sections to the nearest bar line. Returns
+    (sequence, errors)."""
+    if not isinstance(style, dict) or "sections" not in style:
+        return None, ["style must be a draft style"]
     try:
         durationMs = int(analysis["duration_ms"])
         sections = list(analysis["sections"])
@@ -1167,57 +1379,226 @@ def draftSequence(analysis, style="Concert", name=None, bpm=None, offsetMs=None)
     else:
         beats = list(analysis.get("beats") or songGrid(durationMs, tempo, analysis.get("offset_ms", 0))[0])
         bars = list(analysis.get("bars") or beats[::4])
+    animations = animations or {}
+    soundModes = soundModes or {}
+    roles = set(roles) if roles else set(DRAFT_GROUPS)
+    chaseGroups = [g for g in DRAFT_CHASE_GROUPS if g in roles] or ["rim"]
+    lightGroups = ["fill"] + chaseGroups
+    briRange = _DRAFT_BRI[style["intensity"]]
+    colours = style["colours"] or [{"hue": 35, "sat": 60}]
     pulseEvery = next(n for n in (1, 2, 4, 8) if n * period >= DRAFT_PULSE_MIN_S * 1000)
+    rng = random.Random("%s|%d|%.2f" % (style["name"], durationMs, tempo))
+
+    # energy per bar, 0 to 1 within the song, from the analysis's energy curve when it has one
+    energy, step = analysis.get("energy") or [], int(analysis.get("energy_step_ms") or 250)
+    barEnergy = {}
+    if energy:
+        means = []
+        for t, nxt in zip(bars, bars[1:] + [durationMs]):
+            vals = energy[int(t // step):max(int(t // step) + 1, int(nxt // step))]
+            means.append(sum(vals) / len(vals) if vals else 0.0)
+        ordered = sorted(means)
+        lo, hi = ordered[int(0.1 * (len(ordered) - 1))], ordered[int(0.95 * (len(ordered) - 1))]
+        barEnergy = {t: max(0.0, min(1.0, (m - lo) / (hi - lo))) if hi > lo else 0.5 for t, m in zip(bars, means)}
+
+    def energyAt(t, sec):
+        level = (max(1, min(3, int(sec.get("level", 2)))) - 1) / 2.0
+        if not barEnergy:
+            return level
+        bar = max([b for b in bars if b <= t] or [bars[0]])
+        return 0.6 * barEnergy.get(bar, level) + 0.4 * level
+
+    def bri(group, e):
+        lo, hi = briRange[group]
+        return int(round(lo + (hi - lo) * max(0.0, min(1.0, e))))
+
+    def colour(k):
+        return colours[k % len(colours)]
 
     cues = []
-    def state(at, group, colour, bri, fade, label=None, duration=None):
-        hue, sat = colour
-        if group == "fill":
-            sat = int(round(sat * look["fillSat"]))
-        cue = {"at_ms": int(max(0, at)), "target": DRAFT_TARGETS[group],
-               "state": {"mode": "HSI", "hue": int(hue), "sat": int(sat), "bri": int(bri), "fade_ms": int(max(0, fade))}}
+    def state(at, group, c, b, fade=0, label=None, duration=None):
+        if group not in lightGroups:
+            return
+        if "temp" in c:
+            # sequences take 3200 to 8500 K
+            st = {"mode": "CCT", "temp": max(32, min(85, int(round(c["temp"] / 100.0)))), "bri": int(b)}
+        else:
+            sat = c["sat"] * DRAFT_FILL_SAT if group == "fill" else c["sat"]
+            st = {"mode": "HSI", "hue": int(c["hue"]) % 360, "sat": int(round(sat)), "bri": int(b)}
+        st["fade_ms"] = int(max(0, fade))
+        cue = {"at_ms": int(max(0, at)), "target": DRAFT_TARGETS[group], "state": st}
         if duration:
             cue["duration_ms"] = int(duration)
         if label:
             cue["label"] = label
         cues.append(cue)
 
-    pal = look["palette"]
+    def look(at, off, e, fade, label=None, scale=1.0):
+        """Every light to the section's colours at energy e (scale dims the colour lights)."""
+        for n, g in enumerate(lightGroups):
+            state(at, g, colour(off + (3 if g == "fill" else DRAFT_CHASE_GROUPS.index(g))),
+                  bri(g, e) if g == "fill" else bri(g, e * scale), fade, label if n == 0 else None)
+
+    # pool candidates in a fixed shuffled order per kind, checked lazily (the flash check takes a few ms)
+    clipCache = {}
+    def clipFor(animName):
+        if animName not in clipCache:
+            anim = animations[animName]
+            keyframes = anim.get("keyframes") or []
+            ok = keyframes and not any(str(lp.get("mode", "")).upper() in ("SCENE", "ANM")
+                                       for kf in keyframes for lp in (kf.get("lights") or {}).values() if isinstance(lp, dict))
+            speed = _clipSpeed(anim, period) if ok else None
+            if speed is not None:
+                rateKey = (repr(anim), speed)
+                if rateKey not in _clipRates:
+                    _clipRates[rateKey] = animationFlashRate(anim, speed)
+                fr = _clipRates[rateKey]
+                if fr["flashes"] > DRAFT_CLIP_MAX_FLASHES or fr["red"] > DRAFT_CLIP_MAX_FLASHES:
+                    speed = None
+            clipCache[animName] = speed
+        return clipCache[animName]
+
+    pools = {}
+    for kind, sec in style["sections"].items():
+        anims = draftPoolMatches(sec["animations"], animations) if style["use_animations"] else []
+        modes = draftPoolMatches(sec["sound_modes"], soundModes) if style["use_sound_modes"] else []
+        rng.shuffle(anims)
+        rng.shuffle(modes)
+        pools[kind] = {"animation": anims, "sound": modes}
+
+    keys, colourOffsets = {}, {}
+    def pick(n, candidates, ok=lambda x: True):
+        """The n-th usable candidate, wrapping round; checks only as many as it needs."""
+        usable = []
+        for c in candidates:
+            if ok(c):
+                usable.append(c)
+                if len(usable) > n:
+                    return c
+        return usable[n % len(usable)] if usable else None
+
     for i, sec in enumerate(sections):
         a, b = int(sec["start_ms"]), int(sec["end_ms"])
+        kind = _draftKind(sec)
         level = max(1, min(3, int(sec.get("level", 2))))
-        colours = {"rim": pal[i % len(pal)], "background": pal[(i + 1) % len(pal)], "fill": pal[(i + 2) % len(pal)]}
-        bri = {g: look["bri"][g][level - 1] for g in DRAFT_GROUPS}
-        if i == 0:
-            at, fade = 0, 2000
-        elif key == "subtle":
-            fade = int(min(4 * period, (a - int(sections[i - 1]["start_ms"])) / 2))
-            at = a - fade  # arrive on the section's first beat
-        else:
-            at, fade = a, int(period / 2)
-        for n, g in enumerate(DRAFT_GROUPS):
-            state(at, g, colours[g], bri[g], fade, label=(sec.get("label") or "Section") if n == 0 else None)
-        sectionBars = [t for t in bars if a <= t < b]
-        if look["swap"] and level >= 2:
-            # the rim and background trade colours every bar (every other bar when not at full energy)
-            step = 1 if level == 3 else 2
-            for k, t in enumerate(sectionBars[step::step], start=1):
-                flip = k % 2 == 1
-                state(t, "rim", colours["background"] if flip else colours["rim"], bri["rim"], int(period / 4))
-                state(t, "background", colours["rim"] if flip else colours["background"], bri["background"], int(period / 4))
-        if look["pulse"] and level == 3 and sectionBars:
-            first = beats.index(sectionBars[0]) if sectionBars[0] in beats else 0
-            for t in beats[first::pulseEvery]:
-                if not a <= t < b:
-                    continue
-                # the rim's colour at that moment (it may be mid-swap)
-                barNo = sum(1 for x in sectionBars if x <= t) - 1
-                flip = look["swap"] and (barNo % 2 == 1)
-                colour = colours["background"] if flip else colours["rim"]
-                state(t, "rim", colour, min(100, bri["rim"] + 25), 0, duration=int(period * 0.35))
+        # a repeated part plays the same way; a new one of the same kind takes the next option
+        key = (kind, sec.get("group") or i)
+        if key not in keys:
+            keys[key] = sum(1 for k in keys if k[0] == kind)
+            colourOffsets[key] = len(colourOffsets)
+        n, off = keys[key], colourOffsets[key]
+        label = sec.get("label") or kind
+        secBars = [t for t in bars if a <= t < b] or [a]
+        secBeats = [t for t in beats if a <= t < b] or [a]
+        eSec = energyAt(a, sec)
+
+        choices = []
+        for beh in style["sections"][kind]["behaviour"]:
+            if beh == "animation" and pick(0, pools[kind]["animation"], clipFor) is None:
+                continue
+            if beh == "sound" and not pools[kind]["sound"]:
+                continue
+            choices.append(beh)
+        beh = choices[n % len(choices)] if choices else DRAFT_DEFAULT_BEHAVIOUR[kind]
+        arrive = int(min(period / 2, (b - a) / 4))
+
+        if beh == "fade_up":
+            for g in lightGroups:
+                state(a, g, colour(off), briRange[g][0] if g == "fill" else 0, 0 if i == 0 else arrive, label if g == "fill" else None)
+            up = int(min(b - a, period))
+            look(a + up, off, energyAt(b - 1, sec), max(0, b - a - up - arrive))
+        elif beh == "fade_down":
+            look(a, off, eSec, arrive, label)
+            down = a + int(min(4 * period, (b - a) / 4))
+            for g in lightGroups:
+                state(down, g, colour(off + (3 if g == "fill" else DRAFT_CHASE_GROUPS.index(g))),
+                      briRange[g][0] if g == "fill" else 0, max(0, b - down - arrive))
+        elif beh == "hold":
+            fade = int(min(4 * period, (a - int(sections[i - 1]["start_ms"])) / 2)) if i else 2000
+            look(a - fade if i else 0, off, eSec, fade, label)
+        elif beh == "drift":
+            look(a, off, eSec, 2 * period, label, scale=0.45)
+            for k, t in enumerate(secBars[4::4], start=1):
+                for g in chaseGroups:
+                    state(t, g, colour(off + k + DRAFT_CHASE_GROUPS.index(g)), bri(g, energyAt(t, sec) * 0.45), 3 * period)
+        elif beh == "colour_bars":
+            look(a, off, eSec, arrive, label)
+            every = 1 if level == 3 else 2
+            for k, t in enumerate(secBars[every::every], start=1):
+                for g in chaseGroups:
+                    state(t, g, colour(off + k + DRAFT_CHASE_GROUPS.index(g)), bri(g, energyAt(t, sec)), period / 4)
+        elif beh == "pulse":
+            look(a, off, eSec, arrive, label, scale=0.4)
+            rimNow = {}
+            for k, t in enumerate(secBars):
+                c = off + k // 4
+                e = energyAt(t, sec)
+                for g in chaseGroups:
+                    if k and (k % 4 == 0 or g != "rim"):
+                        state(t, g, colour(c + DRAFT_CHASE_GROUPS.index(g)), bri(g, e * 0.4), period / 4)
+                rimNow[t] = colour(c)
+            if level >= 2:
+                every = pulseEvery * (1 if level == 3 else 2)
+                for t in secBeats[::every]:
+                    bar = max(x for x in secBars if x <= t) if t >= secBars[0] else secBars[0]
+                    state(t, "rim", rimNow[bar], bri("rim", 0.75 + 0.25 * energyAt(t, sec)), 0, duration=period * 0.35)
+        elif beh == "build":
+            last = secBeats[-1] if len(secBeats) > 1 else b
+            look(a, off, 0.15, arrive, label, scale=1.0)
+            rise = a + int(period)
+            for g in chaseGroups:
+                state(rise, g, colour(off + DRAFT_CHASE_GROUPS.index(g)), bri(g, 0.55), max(0, last - rise - period))
+            # pulses every 2 bars, then every bar, half bar and beat, never faster than twice a second
+            span, t, k = max(1, last - a), secBeats[0], 0
+            while t < last:
+                pos = (t - a) / span
+                every = 8 if pos < 0.5 else 4 if pos < 0.75 else 2 if pos < 0.875 else 1
+                every = max(every, pulseEvery)
+                peak = 0.6 + 0.4 * pos
+                dur = min(period * 0.4, every * period * 0.35)
+                if t + dur < last:
+                    for g in chaseGroups:
+                        state(t, g, colour(off + DRAFT_CHASE_GROUPS.index(g)), bri(g, peak), 0, duration=dur)
+                k += every
+                t = secBeats[k] if k < len(secBeats) else last
+            if last < b:
+                for g in lightGroups:
+                    state(last, g, colour(off), briRange[g][0] if g == "fill" else 0, 0)
+        elif beh == "hit_chase":
+            lit = lambda g, e: bri(g, 0.8 + 0.2 * e)
+            dim = lambda g: bri(g, 0.12)
+            for n2, g in enumerate(lightGroups):
+                state(a, g, colour(off + (3 if g == "fill" else 0)), bri(g, 1.0), 0, label if n2 == 0 else None)
+            groups = chaseGroups if len(chaseGroups) > 1 else chaseGroups * 2
+            # a light is lit one step in len(groups): one flash per cycle, at most twice a second
+            stepEvery = next(m for m in (1, 2, 4, 8) if m * period * len(groups) >= DRAFT_PULSE_MIN_S * 1000)
+            for s, t in enumerate(secBeats[stepEvery::stepEvery], start=1):
+                barNo = sum(1 for x in secBars if x <= t) - 1
+                on = groups[s % len(groups)]
+                e = energyAt(t, sec)
+                if len(chaseGroups) > 1:
+                    for g in chaseGroups:
+                        state(t, g, colour(off + barNo), lit(g, e) if g == on else dim(g), period * 0.1)
+                else:
+                    state(t, on, colour(off + barNo), lit(on, e) if s % 2 == 0 else dim(on), period * 0.1)
+        elif beh == "animation":
+            animName = pick(n, pools[kind]["animation"], clipFor)
+            state(a, "fill", colour(off + 3), bri("fill", eSec), arrive, label)
+            cues.append({"at_ms": a, "duration_ms": b - a, "target": ";".join(DRAFT_TARGETS[g] for g in chaseGroups),
+                         "clip": {"name": animName, "fit": "loop", "speed": clipFor(animName),
+                                  "brightness": int(round(briRange["rim"][1] * (0.6 + 0.4 * eSec)))}})
+        elif beh == "sound":
+            modeName = pick(n, pools[kind]["sound"])
+            spec = {"mode": modeName}
+            parts = (soundModes[modeName].get("parts") or []) if isinstance(soundModes[modeName], dict) else []
+            used = [p.get("colour") for p in parts if isinstance(p, dict) and isinstance(p.get("colour"), int)]
+            if style["colours"] and (not used or max(used) < len(style["colours"])):
+                spec["palette"] = [dict(c) for c in style["colours"]]
+            state(a, "fill", colour(off + 3), bri("fill", eSec), arrive, label)
+            cues.append({"at_ms": a, "duration_ms": b - a, "target": ";".join(DRAFT_TARGETS[g] for g in chaseGroups), "sound": spec})
 
     seq = {"format": 1, "name": name or "Draft", "duration_ms": durationMs, "end": "revert",
-           "description": "Drafted from the song (" + DRAFT_STYLES[list(_DRAFT).index(key)] + " style, " + ("%g" % round(tempo, 2)) + " BPM)",
+           "description": "Drafted from the song (" + style["name"] + " style, " + ("%g" % round(tempo, 2)) + " BPM)",
            "tempo": {"bpm": round(tempo, 2), "offset_ms": int(round(bars[0] if bars else 0))},
            "sections": [{"start_ms": int(s["start_ms"]), "end_ms": int(s["end_ms"]), "label": s.get("label", ""),
                          "level": int(s.get("level", 2)), **{k: s[k] for k in ("group", "kind") if s.get(k)}} for s in sections],

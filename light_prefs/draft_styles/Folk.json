@@ -1,0 +1,60 @@
+{
+  "format": 1,
+  "name": "Folk",
+  "description": "Warm wood and sky tones: held looks that change gently with each section.",
+  "genres": [
+    "folk",
+    "country",
+    "americana",
+    "bluegrass",
+    "acoustic",
+    "singer-songwriter",
+    "indie folk",
+    "celtic",
+    "roots"
+  ],
+  "palette": [
+    {
+      "hue": 35,
+      "sat": 65
+    },
+    {
+      "hue": 200,
+      "sat": 40
+    },
+    {
+      "hue": 90,
+      "sat": 35
+    },
+    {
+      "hue": 25,
+      "sat": 50
+    }
+  ],
+  "intensity": "low",
+  "use_animations": false,
+  "use_sound_modes": false,
+  "sections": {
+    "Intro": {
+      "behaviour": "fade_up"
+    },
+    "Groove": {
+      "behaviour": "hold"
+    },
+    "Build": {
+      "behaviour": "hold"
+    },
+    "Drop": {
+      "behaviour": [
+        "colour_bars",
+        "hold"
+      ]
+    },
+    "Breakdown": {
+      "behaviour": "drift"
+    },
+    "Outro": {
+      "behaviour": "fade_down"
+    }
+  }
+}

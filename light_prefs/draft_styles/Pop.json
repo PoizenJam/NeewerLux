@@ -1,0 +1,76 @@
+{
+  "format": 1,
+  "name": "Pop",
+  "description": "Bright, friendly colours: a new colour every bar or two, lively sound modes and a chase on the big chorus.",
+  "genres": [
+    "pop",
+    "dance pop",
+    "electropop",
+    "k-pop",
+    "j-pop",
+    "teen pop",
+    "indie pop",
+    "art pop",
+    "pop rock"
+  ],
+  "palette": [
+    {
+      "hue": 320,
+      "sat": 60
+    },
+    {
+      "hue": 200,
+      "sat": 70
+    },
+    {
+      "hue": 50,
+      "sat": 80
+    },
+    {
+      "hue": 275,
+      "sat": 60
+    },
+    {
+      "hue": 160,
+      "sat": 60
+    }
+  ],
+  "intensity": "medium",
+  "use_animations": true,
+  "use_sound_modes": true,
+  "sections": {
+    "Intro": {
+      "behaviour": "fade_up"
+    },
+    "Groove": {
+      "behaviour": [
+        "colour_bars",
+        "pulse"
+      ]
+    },
+    "Build": {
+      "behaviour": "build"
+    },
+    "Drop": {
+      "behaviour": [
+        "hit_chase",
+        "colour_bars",
+        "sound"
+      ],
+      "sound_modes": {
+        "tags": [
+          "lively"
+        ],
+        "exclude": [
+          "hard"
+        ]
+      }
+    },
+    "Breakdown": {
+      "behaviour": "drift"
+    },
+    "Outro": {
+      "behaviour": "fade_down"
+    }
+  }
+}

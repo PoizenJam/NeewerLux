@@ -1,0 +1,38 @@
+{
+  "format": 1,
+  "name": "Just Chatting",
+  "description": "Warm whites that hold steady and change only between sections. For talking, not music.",
+  "genres": [
+    "just chatting",
+    "talk",
+    "talk show",
+    "podcast",
+    "irl",
+    "chat",
+    "interview"
+  ],
+  "palette": "Warm Whites",
+  "intensity": "low",
+  "use_animations": false,
+  "use_sound_modes": false,
+  "sections": {
+    "Intro": {
+      "behaviour": "fade_up"
+    },
+    "Groove": {
+      "behaviour": "hold"
+    },
+    "Build": {
+      "behaviour": "hold"
+    },
+    "Drop": {
+      "behaviour": "hold"
+    },
+    "Breakdown": {
+      "behaviour": "hold"
+    },
+    "Outro": {
+      "behaviour": "fade_down"
+    }
+  }
+}

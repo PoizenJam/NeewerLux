@@ -1,0 +1,72 @@
+{
+  "format": 1,
+  "name": "Lo-fi",
+  "description": "Dusty warm pastels: gentle held looks and calm sound modes, like a study stream.",
+  "genres": [
+    "lo-fi",
+    "lofi",
+    "lo-fi hip hop",
+    "lofi hip hop",
+    "chillhop",
+    "jazzhop",
+    "study beats",
+    "bedroom pop",
+    "chill beats"
+  ],
+  "palette": [
+    {
+      "hue": 30,
+      "sat": 55
+    },
+    {
+      "hue": 280,
+      "sat": 40
+    },
+    {
+      "hue": 190,
+      "sat": 40
+    },
+    {
+      "hue": 345,
+      "sat": 35
+    }
+  ],
+  "intensity": "low",
+  "use_animations": false,
+  "use_sound_modes": true,
+  "sections": {
+    "Intro": {
+      "behaviour": "fade_up"
+    },
+    "Groove": {
+      "behaviour": [
+        "hold",
+        "sound"
+      ],
+      "sound_modes": {
+        "tags": [
+          "calm"
+        ],
+        "exclude": [
+          "hard",
+          "punchy"
+        ]
+      }
+    },
+    "Build": {
+      "behaviour": "hold"
+    },
+    "Drop": {
+      "behaviour": [
+        "colour_bars",
+        "drift"
+      ]
+    },
+    "Breakdown": {
+      "behaviour": "drift"
+    },
+    "Outro": {
+      "behaviour": "fade_down"
+    }
+  }
+}

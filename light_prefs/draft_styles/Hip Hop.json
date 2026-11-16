@@ -1,0 +1,74 @@
+{
+  "format": 1,
+  "name": "Hip Hop",
+  "description": "Gold and violet: the rim hits on the beat, punchy sound modes, bold colour on the hooks.",
+  "genres": [
+    "hip hop",
+    "hip-hop",
+    "rap",
+    "trap",
+    "boom bap",
+    "grime",
+    "drill",
+    "gangsta rap",
+    "conscious hip hop",
+    "r&b",
+    "rnb",
+    "contemporary r&b"
+  ],
+  "palette": [
+    {
+      "hue": 45,
+      "sat": 90
+    },
+    {
+      "hue": 270,
+      "sat": 80
+    },
+    {
+      "hue": 200,
+      "sat": 70
+    },
+    {
+      "hue": 30,
+      "sat": 60
+    }
+  ],
+  "intensity": "medium",
+  "use_animations": false,
+  "use_sound_modes": true,
+  "sections": {
+    "Intro": {
+      "behaviour": "fade_up"
+    },
+    "Groove": {
+      "behaviour": [
+        "pulse",
+        "sound"
+      ],
+      "sound_modes": {
+        "tags": [
+          "punchy"
+        ],
+        "exclude": [
+          "calm"
+        ]
+      }
+    },
+    "Build": {
+      "behaviour": "build"
+    },
+    "Drop": {
+      "behaviour": [
+        "colour_bars",
+        "hit_chase"
+      ]
+    },
+    "Breakdown": {
+      "behaviour": "hold"
+    },
+    "Outro": {
+      "behaviour": "fade_down"
+    }
+  }
+}

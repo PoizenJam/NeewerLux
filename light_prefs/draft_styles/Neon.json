@@ -1,0 +1,66 @@
+{
+  "format": 1,
+  "name": "Neon",
+  "description": "Saturated neon colours that change each bar; drops chase or hand the lights to neon sound modes.",
+  "genres": [
+    "electroclash",
+    "club",
+    "nu-disco",
+    "electro"
+  ],
+  "palette": "Neon",
+  "intensity": "high",
+  "use_animations": true,
+  "use_sound_modes": true,
+  "sections": {
+    "Intro": {
+      "behaviour": "fade_up"
+    },
+    "Groove": {
+      "behaviour": [
+        "colour_bars",
+        "sound"
+      ],
+      "sound_modes": {
+        "tags": [
+          "neon"
+        ],
+        "exclude": [
+          "calm"
+        ]
+      }
+    },
+    "Build": {
+      "behaviour": "build"
+    },
+    "Drop": {
+      "behaviour": [
+        "hit_chase",
+        "animation"
+      ],
+      "animations": {
+        "tags": [
+          "neon"
+        ],
+        "exclude": [
+          "calm"
+        ]
+      }
+    },
+    "Breakdown": {
+      "behaviour": [
+        "drift",
+        "sound"
+      ],
+      "sound_modes": {
+        "tags": [
+          "neon",
+          "calm"
+        ]
+      }
+    },
+    "Outro": {
+      "behaviour": "fade_down"
+    }
+  }
+}

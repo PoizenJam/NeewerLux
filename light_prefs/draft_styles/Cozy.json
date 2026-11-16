@@ -1,0 +1,75 @@
+{
+  "format": 1,
+  "name": "Cozy",
+  "description": "Candle and lamp colours: slow drifts and warm, calm sound modes.",
+  "genres": [
+    "cozy",
+    "cosy",
+    "chill",
+    "relaxing",
+    "cottagecore",
+    "coffee shop",
+    "rainy day",
+    "fireplace",
+    "cosy games"
+  ],
+  "palette": [
+    {
+      "hue": 30,
+      "sat": 70
+    },
+    {
+      "hue": 40,
+      "sat": 60
+    },
+    {
+      "hue": 20,
+      "sat": 50
+    },
+    {
+      "hue": 45,
+      "sat": 40
+    }
+  ],
+  "intensity": "low",
+  "use_animations": true,
+  "use_sound_modes": true,
+  "sections": {
+    "Intro": {
+      "behaviour": "fade_up"
+    },
+    "Groove": {
+      "behaviour": [
+        "drift",
+        "sound"
+      ],
+      "sound_modes": {
+        "tags": [
+          "warm",
+          "calm"
+        ]
+      }
+    },
+    "Build": {
+      "behaviour": "hold"
+    },
+    "Drop": {
+      "behaviour": [
+        "hold",
+        "animation"
+      ],
+      "animations": {
+        "tags": [
+          "warm",
+          "calm"
+        ]
+      }
+    },
+    "Breakdown": {
+      "behaviour": "drift"
+    },
+    "Outro": {
+      "behaviour": "fade_down"
+    }
+  }
+}

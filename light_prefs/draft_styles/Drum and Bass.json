@@ -1,0 +1,76 @@
+{
+  "format": 1,
+  "name": "Drum and Bass",
+  "description": "Green, violet and amber at full tilt: pulses kept to the limit at high tempos, hard sound modes on the drops.",
+  "genres": [
+    "drum and bass",
+    "dnb",
+    "drum n bass",
+    "drum & bass",
+    "jungle",
+    "liquid funk",
+    "neurofunk",
+    "breakbeat",
+    "breaks"
+  ],
+  "palette": [
+    {
+      "hue": 160,
+      "sat": 90
+    },
+    {
+      "hue": 275,
+      "sat": 85
+    },
+    {
+      "hue": 40,
+      "sat": 95
+    },
+    {
+      "hue": 195,
+      "sat": 85
+    }
+  ],
+  "intensity": "high",
+  "use_animations": false,
+  "use_sound_modes": true,
+  "sections": {
+    "Intro": {
+      "behaviour": "fade_up"
+    },
+    "Groove": {
+      "behaviour": [
+        "pulse",
+        "sound"
+      ],
+      "sound_modes": {
+        "tags": [
+          "lively"
+        ],
+        "exclude": [
+          "calm"
+        ]
+      }
+    },
+    "Build": {
+      "behaviour": "build"
+    },
+    "Drop": {
+      "behaviour": [
+        "hit_chase",
+        "sound"
+      ],
+      "sound_modes": {
+        "tags": [
+          "hard"
+        ]
+      }
+    },
+    "Breakdown": {
+      "behaviour": "drift"
+    },
+    "Outro": {
+      "behaviour": "fade_down"
+    }
+  }
+}

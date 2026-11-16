@@ -1,0 +1,75 @@
+{
+  "format": 1,
+  "name": "Trance",
+  "description": "Wide blues and violets: colour on every bar, soaring builds, smooth animations in the breakdowns.",
+  "genres": [
+    "trance",
+    "uplifting trance",
+    "progressive trance",
+    "psytrance",
+    "psychedelic trance",
+    "goa trance",
+    "vocal trance",
+    "hard trance"
+  ],
+  "palette": [
+    {
+      "hue": 200,
+      "sat": 90
+    },
+    {
+      "hue": 265,
+      "sat": 85
+    },
+    {
+      "hue": 170,
+      "sat": 80
+    },
+    {
+      "hue": 300,
+      "sat": 70
+    },
+    {
+      "hue": 220,
+      "sat": 50
+    }
+  ],
+  "intensity": "high",
+  "use_animations": true,
+  "use_sound_modes": false,
+  "sections": {
+    "Intro": {
+      "behaviour": "fade_up"
+    },
+    "Groove": {
+      "behaviour": [
+        "colour_bars",
+        "pulse"
+      ]
+    },
+    "Build": {
+      "behaviour": "build"
+    },
+    "Drop": {
+      "behaviour": [
+        "hit_chase",
+        "colour_bars"
+      ]
+    },
+    "Breakdown": {
+      "behaviour": [
+        "drift",
+        "animation"
+      ],
+      "animations": {
+        "tags": [
+          "smooth",
+          "calm"
+        ]
+      }
+    },
+    "Outro": {
+      "behaviour": "fade_down"
+    }
+  }
+}

@@ -1,0 +1,78 @@
+{
+  "format": 1,
+  "name": "Disco Funk",
+  "description": "Magenta, gold and cyan: colour on the bar, colourful sound modes and chases on the hooks.",
+  "genres": [
+    "disco",
+    "funk",
+    "nu disco",
+    "boogie",
+    "motown",
+    "p-funk",
+    "jazz funk",
+    "dance-punk"
+  ],
+  "palette": [
+    {
+      "hue": 320,
+      "sat": 80
+    },
+    {
+      "hue": 45,
+      "sat": 90
+    },
+    {
+      "hue": 190,
+      "sat": 85
+    },
+    {
+      "hue": 280,
+      "sat": 80
+    }
+  ],
+  "intensity": "medium",
+  "use_animations": false,
+  "use_sound_modes": true,
+  "sections": {
+    "Intro": {
+      "behaviour": "fade_up"
+    },
+    "Groove": {
+      "behaviour": [
+        "colour_bars",
+        "sound"
+      ],
+      "sound_modes": {
+        "tags": [
+          "lively"
+        ],
+        "exclude": [
+          "hard"
+        ]
+      }
+    },
+    "Build": {
+      "behaviour": "build"
+    },
+    "Drop": {
+      "behaviour": [
+        "hit_chase",
+        "sound"
+      ],
+      "sound_modes": {
+        "tags": [
+          "punchy"
+        ],
+        "exclude": [
+          "calm"
+        ]
+      }
+    },
+    "Breakdown": {
+      "behaviour": "drift"
+    },
+    "Outro": {
+      "behaviour": "fade_down"
+    }
+  }
+}

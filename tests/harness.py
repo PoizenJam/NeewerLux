@@ -145,7 +145,7 @@ def _copyTree(src, dst):
     for name in os.listdir(src):
         if name.endswith(".py") or name.endswith(".toml"):
             shutil.copy2(os.path.join(src, name), dst)
-    for sub in ("animations", "sequences", "sound_modes", "palettes"):
+    for sub in ("animations", "sequences", "sound_modes", "palettes", "draft_styles"):
         s = os.path.join(src, "light_prefs", sub)
         if os.path.isdir(s):
             shutil.copytree(s, os.path.join(dst, "light_prefs", sub))

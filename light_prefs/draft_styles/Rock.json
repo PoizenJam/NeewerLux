@@ -1,0 +1,82 @@
+{
+  "format": 1,
+  "name": "Rock",
+  "description": "Warm amber and steel blue; the rim pulses with the drums and choruses hit and chase.",
+  "genres": [
+    "rock",
+    "hard rock",
+    "classic rock",
+    "alternative rock",
+    "alternative",
+    "grunge",
+    "indie rock",
+    "garage rock",
+    "blues rock",
+    "stoner rock",
+    "southern rock",
+    "rock and roll"
+  ],
+  "palette": [
+    {
+      "hue": 30,
+      "sat": 85
+    },
+    {
+      "hue": 210,
+      "sat": 70
+    },
+    {
+      "hue": 45,
+      "sat": 70
+    },
+    {
+      "hue": 25,
+      "sat": 60
+    },
+    {
+      "hue": 200,
+      "sat": 30
+    }
+  ],
+  "intensity": "high",
+  "use_animations": true,
+  "use_sound_modes": true,
+  "sections": {
+    "Intro": {
+      "behaviour": "fade_up"
+    },
+    "Groove": {
+      "behaviour": [
+        "pulse",
+        "colour_bars"
+      ]
+    },
+    "Build": {
+      "behaviour": "build"
+    },
+    "Drop": {
+      "behaviour": [
+        "hit_chase",
+        "sound"
+      ],
+      "sound_modes": {
+        "tags": [
+          "punchy"
+        ],
+        "exclude": [
+          "calm",
+          "pastel"
+        ]
+      }
+    },
+    "Breakdown": {
+      "behaviour": [
+        "drift",
+        "hold"
+      ]
+    },
+    "Outro": {
+      "behaviour": "fade_down"
+    }
+  }
+}

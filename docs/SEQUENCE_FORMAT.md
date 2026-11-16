@@ -311,15 +311,61 @@ The analysis finds the length, the tempo and where the first beat falls (assumin
 
 **Another section finder (optional).** Global Preferences > Lights and shows > Song section finder command runs another program on each song to find its sections, such as an AI model you install yourself. NeewerLux doesn't include one: the one known to work, the All-In-One Music Structure Analyzer (`allin1`, MIT licence; installed in a Python environment of its own as its README describes), needs PyTorch and several gigabytes, takes a minute or more per song without a graphics card, and was trained on pop songs, so its labels are intro, verse, chorus, bridge and outro. Give the command line with `{song}` for the song's path and `{out}` for a folder it may write into, for example `C:\allin1\Scripts\allin1.exe "{song}" -o "{out}"`. It runs without a shell (the song's path is passed as one argument), in that folder, which is removed afterwards, for at most 10 minutes. It answers with JSON, on its output or in a `.json` file in the folder: a list of segments, or an object with `segments`, each with `start` and `end` in seconds (or `start_ms` and `end_ms`) and a `label`. Its boundaries are moved to the nearest bar line and its label is kept as the section's `ai_label` (shown on hover); tempo, beats, names, levels and parts still come from NeewerLux. With **Name sections with the section finder's labels** ticked, its label (capitalised) becomes the section's `label` instead, and NeewerLux's name is kept as `kind` (shown on hover), which draft styles go by. If it fails, the built-in sections are used and the reason is shown. The setting is on the desktop only, like the network settings, since it runs a program on the computer. If the beat ticks drawn over the waveform don't match the song, correct the tempo (x 1/2 and x 2 fix the commonest mistake, counting double or half the beats) and when the first bar falls; the sections move to the nearest bar line.
 
-The draft uses state cues on `@fill`, `@rim` and `@background;@practical`, never `@key`, sets `tempo` (offset on the first bar) and `sections`, and labels each section's first cue. Every section gets a look: colours from the style's palette (a different pair each section) and brightness from its level. The styles:
+### Draft styles
 
-| Style | What it does |
+A draft is shaped by a **draft style**: pick one in the From song dialog, or type genres (most important first, as a music database lists them, for example `thrash metal, metal`) and **Pick** chooses the style whose genres fit best. Over HTTP, `draft` takes `"style"` by name (or a whole style object), or `"genre"`/`"genres"` instead, and `style_for` answers which style fits some genres, so an outside program that looks up a song's artist can choose one.
+
+The draft drives `@fill`, `@rim`, `@background` and `@practical` (only the roles the rig has; unassigned lights count as background), never `@key`. It sets `tempo` (offset on the first bar) and `sections`, and labels each section's first cue. Each section plays the behaviour its style gives its kind: the section's `kind` when it has one, else its label (`Intro`, `Groove`, `Build`, `Drop`, `Breakdown`, `Outro`; names from other section finders map across, verse to Groove, chorus to Drop, bridge to Breakdown; anything else counts as Groove). The behaviours:
+
+| Behaviour | What it does |
 |---|---|
-| Subtle | Soft colours; each section's look fades in over up to a bar, arriving on its first beat. No pulses. |
-| Concert | Saturated warm and cool colours, changing on the section's first beat; in level 3 sections the rim pulses brighter on the beat (every other beat above 120 BPM, so at most 2 a second). |
-| Neon | Neon colours; in level 3 sections the rim and background swap colours each bar (every other bar at level 2) and the rim pulses as in Concert. |
+| `fade_up` | Starts dark and fades up to the look over the section. |
+| `fade_down` | Fades from the look down to dark by the section's end. |
+| `hold` | One look for the section, arriving on its first beat. |
+| `drift` | Dim, with slow colour changes every four bars. |
+| `colour_bars` | A new colour every bar (every other bar below level 3); brightness follows the energy. |
+| `pulse` | The rim pulses on the beat over a darker look (every beat at level 3, every other at level 2, none at level 1); colour changes every four bars. |
+| `build` | Pulses on rim, background and practical every two bars, then every bar, half bar and beat, while the light rises, then a blackout on the last beat (the fill drops to its lowest). |
+| `hit_chase` | Everything hits full on the first beat, then a chase across rim, background and practical, a new colour each bar. |
+| `animation` | Plays an animation from the section's pool on the colour lights, looped at a speed (0.5 to 2) that makes one loop a whole number of beats. |
+| `sound` | Hands the colour lights to a sound mode from the section's pool for the section (a sound cue), with the style's palette when the mode's parts fit it. |
 
-Drafts keep away from saturated red and stay under the flash limit at any tempo (tests check every style from 60 to 200 BPM). The draft opens unsaved in the timeline editor.
+A kind can list several behaviours: sections of that kind take them in turn, while a part that repeats (the same `group`) plays the same behaviour, colours and pool pick each time, so the song gets variety without the chorus changing look every time it returns. Brightness follows the song's energy bar by bar between the style's intensity limits (from the analysis's energy curve and the section's level). Pulses and chase steps never come faster than twice a second per light, animations are only drawn if they stay at or under 2 flashes a second at their speed (firmware scenes never), and sound modes keep themselves to 2; the tests draft every shipped style at 60 to 200 BPM and check every light stays at or under 2.5 (handing over between sections adds a little), with the flash guard's 3 as the backstop.
+
+Styles are JSON files in `light_prefs/draft_styles/`, edited with **Styles...** in the From song dialog (desktop and dashboard) or over HTTP (`draft_styles`, `save_draft_style`, `delete_draft_style`). 26 ship: Subtle, Concert and Neon; Rock, Prog Rock, Metal, Punk, Pop, Ballad, Folk, Jazz, Classical, Hip Hop, Disco Funk; House, Techno, Trance, Drum and Bass, Dubstep, Synthwave, Ambient, Lo-fi; and for streams that aren't music, Just Chatting, Cozy, Horror and Hype. The format:
+
+```json
+{
+  "format": 1,
+  "name": "Metal",
+  "description": "Blood red, fire and cold white at full intensity.",
+  "genres": ["metal", "heavy metal", "thrash metal"],
+  "palette": [{"hue": 355, "sat": 75}, {"hue": 25, "sat": 90}, {"hue": 210, "sat": 15}],
+  "intensity": "high",
+  "use_animations": true,
+  "use_sound_modes": true,
+  "sections": {
+    "Groove": {"behaviour": ["pulse", "sound"], "sound_modes": {"tags": ["hard"]}},
+    "Drop": {"behaviour": ["hit_chase", "sound"], "sound_modes": {"tags": ["hard"]}},
+    "Breakdown": {"behaviour": "hit_chase"}
+  }
+}
+```
+
+| Field | Required | Value |
+|---|---|---|
+| `format` | no | 1 |
+| `name` | yes | The style's name. |
+| `description` | no | Shown under the style's name. |
+| `genres` | no | Genres it suits, matched by Pick and `style_for` (exact names count most, then one containing the other, then shared words). |
+| `palette` | yes | The name of a saved palette (`light_prefs/palettes/`), or a list of colours: all `{"hue", "sat"}` or all `{"temp"}` in Kelvin (3200 to 8500 in a sequence). Each section takes the next colours round it; the fill gets a pale version. |
+| `intensity` | no | `low`, `medium` (default) or `high`: how bright the colour lights get (rim at most 45, 75 or 100%). |
+| `use_animations`, `use_sound_modes` | no | `true` (default) or `false`: whether `animation` and `sound` behaviours may be used. When one can't (turned off, or nothing in its pool qualifies), the section takes the kind's other behaviours, or its default. |
+| `sections` | no | Per kind (`Intro`, `Groove`, `Build`, `Drop`, `Breakdown`, `Outro`): `behaviour` (one or a list) and the pools `animations` and `sound_modes`. A kind left out uses its default: Intro `fade_up`, Groove `pulse`, Build `build`, Drop `hit_chase`, Breakdown `drift`, Outro `fade_down`. |
+
+A pool is `{"tags": [...], "exclude": [...], "names": [...]}`: an animation or sound mode is in it when it has every tag in `tags` and none in `exclude`, or when `names` lists it (with `names` and no `tags`, only those). An empty pool allows everything. The shipped animations and sound modes are tagged with one energy (`calm`, `lively`, `intense`), one feel (`smooth`, `punchy`, `hard`) and colour words (`warm`, `cool`, `white`, `neon`, `colourful`, `rainbow`, `moody`, `pastel`, `retro`, and `chase` for chases), so a Ballad that asks for `calm` and excludes `hard` and `intense` can never draw a metal breakdown. The editors write a pool as one line: tags, `-tags` to exclude, and names, separated by commas (`calm, -warm, Heartbeat`), and show how many items it matches.
+
+The draft opens unsaved in the timeline editor.
 
 ## Changing the tempo
 

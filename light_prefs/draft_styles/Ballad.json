@@ -1,0 +1,82 @@
+{
+  "format": 1,
+  "name": "Ballad",
+  "description": "Warm and soft: slow colour, calm animations and sound modes only. Nothing hard or fast.",
+  "genres": [
+    "ballad",
+    "power ballad",
+    "love song",
+    "slow",
+    "soul",
+    "soft rock",
+    "adult contemporary",
+    "torch song"
+  ],
+  "palette": [
+    {
+      "hue": 30,
+      "sat": 70
+    },
+    {
+      "hue": 330,
+      "sat": 45
+    },
+    {
+      "hue": 270,
+      "sat": 40
+    },
+    {
+      "hue": 40,
+      "sat": 50
+    }
+  ],
+  "intensity": "low",
+  "use_animations": true,
+  "use_sound_modes": true,
+  "sections": {
+    "Intro": {
+      "behaviour": "fade_up"
+    },
+    "Groove": {
+      "behaviour": [
+        "hold",
+        "drift",
+        "sound"
+      ],
+      "sound_modes": {
+        "tags": [
+          "calm"
+        ],
+        "exclude": [
+          "hard",
+          "punchy",
+          "intense"
+        ]
+      }
+    },
+    "Build": {
+      "behaviour": "hold"
+    },
+    "Drop": {
+      "behaviour": [
+        "colour_bars",
+        "animation"
+      ],
+      "animations": {
+        "tags": [
+          "calm"
+        ],
+        "exclude": [
+          "hard",
+          "intense"
+        ]
+      }
+    },
+    "Breakdown": {
+      "behaviour": "drift"
+    },
+    "Outro": {
+      "behaviour": "fade_down"
+    }
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "format": 1,
+  "name": "Classical",
+  "description": "Soft golds and whites: a held look per movement, slow drifts in the quiet passages. No animations or sound modes.",
+  "genres": [
+    "classical",
+    "orchestral",
+    "symphony",
+    "symphonic",
+    "opera",
+    "baroque",
+    "romantic",
+    "piano",
+    "chamber music",
+    "soundtrack",
+    "film score",
+    "score",
+    "choral"
+  ],
+  "palette": [
+    {
+      "hue": 40,
+      "sat": 30
+    },
+    {
+      "hue": 45,
+      "sat": 60
+    },
+    {
+      "hue": 215,
+      "sat": 30
+    },
+    {
+      "hue": 35,
+      "sat": 15
+    }
+  ],
+  "intensity": "low",
+  "use_animations": false,
+  "use_sound_modes": false,
+  "sections": {
+    "Intro": {
+      "behaviour": "fade_up"
+    },
+    "Groove": {
+      "behaviour": "hold"
+    },
+    "Build": {
+      "behaviour": "hold"
+    },
+    "Drop": {
+      "behaviour": "colour_bars"
+    },
+    "Breakdown": {
+      "behaviour": "drift"
+    },
+    "Outro": {
+      "behaviour": "fade_down"
+    }
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "format": 1,
+  "name": "Hype",
+  "description": "Every colour at full intensity: colour each bar, intense sound modes and chases. For raids, hype trains and wins.",
+  "genres": [
+    "hype",
+    "celebration",
+    "party",
+    "raid",
+    "hype train",
+    "victory",
+    "festival",
+    "gaming"
+  ],
+  "palette": "Rainbow",
+  "intensity": "high",
+  "use_animations": true,
+  "use_sound_modes": true,
+  "sections": {
+    "Intro": {
+      "behaviour": "fade_up"
+    },
+    "Groove": {
+      "behaviour": [
+        "colour_bars",
+        "sound"
+      ],
+      "sound_modes": {
+        "tags": [
+          "intense"
+        ]
+      }
+    },
+    "Build": {
+      "behaviour": "build"
+    },
+    "Drop": {
+      "behaviour": [
+        "hit_chase",
+        "animation"
+      ],
+      "animations": {
+        "tags": [
+          "intense",
+          "chase"
+        ]
+      }
+    },
+    "Breakdown": {
+      "behaviour": [
+        "colour_bars",
+        "drift"
+      ]
+    },
+    "Outro": {
+      "behaviour": "fade_down"
+    }
+  }
+}

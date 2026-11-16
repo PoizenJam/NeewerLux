@@ -667,7 +667,7 @@ def t_clipStretchAndTarget(rig):
 
 
 def t_docExamplesValidate(rig):
-    """Every JSON example in docs/SEQUENCE_FORMAT.md and the shipped example must validate."""
+    """Every JSON example in docs/SEQUENCE_FORMAT.md (sequences, cues and draft styles) and the shipped example must validate."""
     import re
     doc = open(os.path.join(ROOT, "docs", "SEQUENCE_FORMAT.md"), encoding="utf-8").read()
     checked = 0
@@ -678,6 +678,10 @@ def t_docExamplesValidate(rig):
             items = [json.loads(line) for line in block.splitlines() if line.strip()]
         for item in items:
             if "$schema" in item:
+                continue
+            if "intensity" in item:  # a draft style
+                style, errors = rig.nl.buildDraftStyle(item)
+                check(style is not None, "doc draft style failed: " + str(errors))
                 continue
             seqData = item if "cues" in item else {"format": 1, "name": "doc", "duration_ms": 60000, "cues": [item]}
             seq, errors, _ = rig.nl.buildSequence(seqData)
@@ -1900,42 +1904,149 @@ def _songAnalysis(show, bpm, durationMs=96000, offsetMs=250):
     return {"duration_ms": durationMs, "bpm": bpm, "offset_ms": offsetMs, "beats": beats, "bars": bars, "sections": sections}
 
 
+DRAFT_LABELS = ["Intro", "Groove", "Build", "Drop", "Breakdown", "Groove", "Build", "Drop", "Breakdown", "Drop"]
+
+
+def _labelled(show, bpm, durationMs=192000):
+    """_songAnalysis with NeewerLux's section names (and Outro last); each name alternates
+    between two parts, so the third of a kind repeats the first."""
+    a = _songAnalysis(show, bpm, durationMs)
+    seen = {}
+    for i, sec in enumerate(a["sections"]):
+        sec["label"] = DRAFT_LABELS[i % len(DRAFT_LABELS)] if i < len(a["sections"]) - 1 else "Outro"
+        seen[sec["label"]] = seen.get(sec["label"], -1) + 1
+        sec["group"] = sec["label"][:3] + str(seen[sec["label"]] % 2)
+    return a
+
+
 def t_songDrafts(rig):
-    """1.4.0: drafts from a song analysis validate, never drive the key, keep every light under
-    the flash limit (before the guard) at any tempo, and carry the tempo and sections."""
+    """1.4.0: every shipped draft style drafts sequences that validate, never drive the key, keep
+    every light under the flash limit (before the guard) at any tempo, and carry the tempo and
+    sections; the drafts follow the section kinds."""
     nl = rig.nl
     show = nl.show
-    for bpm in (60, 90, 120, 128, 150, 174, 200):
-        a = _songAnalysis(show, bpm)
-        for style in show.DRAFT_STYLES:
-            seq, errors = show.draftSequence(a, style, "Draft %s %d" % (style, bpm))
-            check(not errors, str(errors))
-            built, errs, _ = nl.buildSequence(seq)
-            check(built is not None, "%s at %d BPM validates: %s" % (style, bpm, errs))
+    styles = sorted(nl.savedDraftStyles)
+    check(len(styles) >= 25 and not [st["name"] for st in nl.draftStyleList() if st["errors"]], "shipped styles load: %s" % styles)
+    for name, data in nl.savedDraftStyles.items():
+        check(len(data.get("genres", [])) >= 3 and data.get("description"), name + " has genres and a description")
+    used = set()
+    for bpm in (60, 90, 128, 150, 174, 200):
+        a = _labelled(show, bpm)
+        for name in styles:
+            r = nl.draftFromSong({"analysis": a, "style": name, "name": "Draft %s %d" % (name, bpm)})
+            check(r["success"], "%s at %d BPM: %s" % (name, bpm, r["errors"]))
+            seq = r["sequence"]
             check(not any("key" in c["target"] for c in seq["cues"]), "never the key")
-            check({c["target"] for c in seq["cues"]} == set(show.DRAFT_TARGETS.values()), "every group has cues")
-            r = nl.renderSequence(seq, 25)
             fl = r["flashes"]
-            check(fl["worst"] <= 2.5 and fl["worstRed"] <= 2.5, "%s at %d BPM: %s flashes a second at worst (red %s)" % (style, bpm, fl["worst"], fl["worstRed"]))
+            check(fl["worst"] <= 2.5 and fl["worstRed"] <= 2.5, "%s at %d BPM: %s flashes a second at worst (red %s)" % (name, bpm, fl["worst"], fl["worstRed"]))
             check(seq["tempo"] == {"bpm": bpm, "offset_ms": a["bars"][0]} and len(seq["sections"]) == len(a["sections"]), "tempo and sections")
             check([x.get("group") for x in seq["sections"]] == [x["group"] for x in a["sections"]], "parts kept")
-    a = _songAnalysis(show, 128)
-    concert = show.draftSequence(a, "concert")[0]
-    neon = show.draftSequence(a, "Neon")[0]
-    subtle = show.draftSequence(a, "Subtle")[0]
-    check(len(subtle["cues"]) == 3 * len(a["sections"]), "Subtle: one look per section")
-    pulses = [c for c in concert["cues"] if c.get("duration_ms")]
-    loud = [s for s in a["sections"] if s["level"] == 3]
-    check(pulses and all(any(s["start_ms"] <= c["at_ms"] < s["end_ms"] for s in loud) for c in pulses), "pulses only in the loudest sections")
-    check(all(c["at_ms"] in a["beats"] for c in pulses), "on the beat")
-    check(len([c for c in neon["cues"] if not c.get("duration_ms")]) > len(concert["cues"]) - len(pulses), "Neon swaps colours")
+            used |= {"clip" if "clip" in c else "sound" if "sound" in c else "state" for c in seq["cues"]}
+    check(used == {"clip", "sound", "state"}, "the styles use animations and sound modes: %s" % used)
+
+    a = _labelled(show, 120)
+    beats = a["beats"]
+    def cuesIn(seq, sec, target=None):
+        return [c for c in seq["cues"] if sec["start_ms"] <= c["at_ms"] < sec["end_ms"] and (target is None or c["target"] == target)]
+    concert = nl.draftFromSong({"analysis": a, "style": "Concert"})["sequence"]
+    secs = concert["sections"]
+    build = next(s for s in secs if s["label"] == "Build")
+    last = max(t for t in beats if build["start_ms"] <= t < build["end_ms"])
+    rim = cuesIn(concert, build, "@rim")
+    check(any(c["at_ms"] == last and c["state"]["bri"] == 0 for c in rim), "a build ends in a blackout on its last beat")
+    gaps = [b["at_ms"] - p["at_ms"] for p, b in zip([c for c in rim if c.get("duration_ms")], [c for c in rim if c.get("duration_ms")][1:])]
+    check(gaps and gaps[-1] < gaps[0] and min(gaps) >= 500, "its pulses speed up, never past twice a second: %s" % gaps)
+    drop = secs[secs.index(build) + 1]
+    hit = [c for c in concert["cues"] if c["at_ms"] == drop["start_ms"] and "state" in c and c["target"] in ("@rim", "@background")]
+    check(drop["label"] == "Drop" and len(hit) == 2 and all(c["state"]["bri"] == show._DRAFT_BRI["medium"][c["target"][1:]][1] and c["state"]["fade_ms"] == 0 for c in hit),
+          "the drop hits full on its first beat: %s" % hit)
+    lit = [(c["at_ms"], c["target"]) for c in cuesIn(concert, drop) if "state" in c and c["state"]["bri"] >= 50 and c["at_ms"] > drop["start_ms"]]
+    check(len({t for _, t in lit}) == 2 and lit[0][1] != lit[1][1], "then chases across rim and background: %s" % lit[:4])
+    intro = cuesIn(concert, secs[0], "@rim")
+    check(intro[0]["state"]["bri"] == 0 and intro[-1]["state"]["bri"] > 0 and intro[-1]["state"]["fade_ms"] > 2000, "the intro fades up")
+    out = cuesIn(concert, secs[-1], "@rim")
+    check(out[-1]["state"]["bri"] == 0 and out[-1]["state"]["fade_ms"] > 2000, "the outro fades down")
+
+    def shape(seq, sec):
+        # brightness and pulse rate follow each section's own energy; the behaviour, colours and picks repeat
+        return {(c["target"], json.dumps({k: v for k, v in (c.get("state") or c.get("clip") or c.get("sound")).items()
+                                          if k not in ("bri", "brightness", "fade_ms")}, sort_keys=True)) for c in cuesIn(seq, sec)}
+    groups = {}
+    for sec in secs:
+        groups.setdefault(sec["group"], []).append(sec)
+    same = [g for g in groups.values() if len(g) > 1 and g[0]["end_ms"] - g[0]["start_ms"] == g[1]["end_ms"] - g[1]["start_ms"]]
+    check(same, "the test song repeats parts")
+    for g in same:
+        check(shape(concert, g[0]) == shape(concert, g[1]), "a repeated part plays the same (%s)" % g[0]["group"])
+    drops = [s for s in secs if s["label"] == "Drop"]
+    kinds = {s["group"]: {"clip" if "clip" in c else "state" for c in cuesIn(concert, s)} for s in drops}
+    check(len({frozenset(k) for k in kinds.values()}) > 1, "drops in different parts take different behaviours: %s" % kinds)
+
+    ballad = nl.draftFromSong({"analysis": a, "style": "Ballad"})["sequence"]
+    calm = [c for c in ballad["cues"] if "clip" in c or "sound" in c]
+    check(calm, "Ballad uses its pools")
+    for c in calm:
+        tags = set((nl.savedAnimations[c["clip"]["name"]] if "clip" in c else nl.savedSoundModes[c["sound"]["mode"]]).get("tags", []))
+        check("calm" in tags and not tags & {"hard", "intense"}, "Ballad draws only calm content: %s %s" % (c.get("clip") or c.get("sound"), tags))
+    for c in [c for c in concert["cues"] if "clip" in c]:
+        anim = nl.savedAnimations[c["clip"]["name"]]
+        tl = show.AnimationTimeline(anim, loop=True)
+        loopMs = (tl.dL if anim.get("loop") else tl.d0) / c["clip"]["speed"]
+        check(c["clip"]["fit"] == "loop" and abs(loopMs / 500.0 - round(loopMs / 500.0)) < 0.01, "clips loop in time with the beat: %s" % loopMs)
+    off = dict(nl.savedDraftStyles["Neon"], use_animations=False, use_sound_modes=False)
+    plain = nl.draftFromSong({"analysis": a, "style": off})
+    check(plain["success"] and all("state" in c for c in plain["sequence"]["cues"]), "with both off, states only")
+
     # a corrected tempo: sections move to the nearest bar of the new grid
-    moved, _ = show.draftSequence(a, "Subtle", bpm=64, offsetMs=500)
+    moved = nl.draftFromSong({"analysis": a, "style": "Subtle", "bpm": 64, "offset_ms": 500})["sequence"]
     grid = show.songGrid(a["duration_ms"], 64, 500)[1]
     check(all(s["start_ms"] in grid or s["start_ms"] == 0 for s in moved["sections"]) and moved["tempo"] == {"bpm": 64, "offset_ms": 500},
           "sections snap to the new bars: %s" % [s["start_ms"] for s in moved["sections"]])
-    check(show.draftSequence(a, "Disco")[1] == ["style must be one of Subtle, Concert, Neon"], "unknown style")
-    check(show.draftSequence({"duration_ms": 1000}, "Neon")[1], "an incomplete analysis is an error")
+    check(nl.draftFromSong({"analysis": a, "style": "Disco"})["errors"][0].startswith("no draft style named 'Disco'"), "unknown style")
+    check(nl.draftFromSong({"analysis": {"duration_ms": 1000}, "style": "Neon"})["errors"], "an incomplete analysis is an error")
+    # rigs without some roles: the chase skips them
+    seq, _ = show.draftSequence(a, nl.draftStyleNamed("Concert")[0], roles={"key", "fill", "rim"})
+    check({c["target"] for c in seq["cues"] if "state" in c} <= {"@fill", "@rim"}, "only the roles the rig has")
+
+
+def t_draftStyles(rig):
+    """1.4.0: draft styles are checked, saved, listed, matched by genre and deleted over HTTP."""
+    nl = rig.nl
+    show = nl.show
+    bad = {"name": "Bad", "palette": "Nope", "intensity": "loud", "sections": {"Chorus": {}, "Drop": {"behaviour": ["hit_chase", "spin"]}}}
+    style, errors = nl.buildDraftStyle(bad)
+    check(style is None and any("no palette named 'Nope'" in e for e in errors) and any("intensity" in e for e in errors)
+          and any("Chorus" in e for e in errors) and any("spin" in e for e in errors), "style errors: %s" % errors)
+    good = {"format": 1, "name": "Test Style", "genres": ["Test Genre", "zydeco"], "palette": [{"hue": 200, "sat": 80}], "intensity": "low",
+            "use_animations": False, "sections": {"Drop": {"behaviour": ["colour_bars", "sound"], "sound_modes": {"tags": ["calm"], "exclude": ["warm"]}}}}
+    r = rig.post("/NeewerLux/sequence", {"action": "save_draft_style", "style": good})
+    check(r["success"] and os.path.isfile(os.path.join(nl.draftStylesDir, "Test Style.json")), "saved: %s" % r)
+    check(not rig.post("/NeewerLux/sequence", {"action": "save_draft_style", "style": good})["success"], "won't overwrite without asking")
+    listed = rig.post("/NeewerLux/sequence", {"action": "draft_styles"})
+    mine = next(st for st in listed["styles"] if st["name"] == "Test Style")
+    check(mine["genres"] == ["test genre", "zydeco"] and mine["sections"]["Drop"]["behaviour"] == ["colour_bars", "sound"]
+          and mine["sections"]["Intro"]["behaviour"] == "fade_up", "listed as saved: %s" % mine["sections"])
+    calm = [n for n, m in nl.savedSoundModes.items() if "calm" in m.get("tags", []) and "warm" not in m.get("tags", [])]
+    check(mine["pools"]["Drop"]["sound_modes"] == len(calm) > 0, "pool counts: %s" % mine["pools"]["Drop"])
+    check(set(listed["sections"]) == set(show.DRAFT_SECTIONS) and len(listed["behaviours"]) == len(show.DRAFT_BEHAVIOURS)
+          and "Neon" in listed["palettes"] and "calm" in listed["sound_mode_tags"] and listed["animation_items"], "editor info")
+    for genres, want in ((["zydeco"], "Test Style"), (["thrash metal", "metal"], "Metal"), ("deep house", "House"),
+                         ("chill lofi hip hop", "Lo-fi"), (["k-pop"], "Pop"), (["Drum & Bass"], "Drum and Bass"), (["just chatting"], "Just Chatting")):
+        got = rig.post("/NeewerLux/sequence", {"action": "style_for", "genres" if isinstance(genres, list) else "genre": genres})
+        check(got.get("style") == want, "%s picks %s: %s" % (genres, want, got))
+    check(not rig.post("/NeewerLux/sequence", {"action": "style_for", "genre": "qwertyuiop"})["success"], "no match")
+    a = _labelled(show, 128)
+    d = rig.post("/NeewerLux/sequence", {"action": "draft", "analysis": a, "genres": ["zydeco"], "name": "By Genre"})
+    check(d["success"] and d["style"] == "Test Style" and "Test Style style" in d["sequence"]["description"], "draft by genre")
+    sounds = [c["sound"] for c in d["sequence"]["cues"] if "sound" in c]
+    check(sounds and all(s["mode"] in calm and s.get("palette") == [{"hue": 200, "sat": 80}] for s in sounds if "palette" in s), "the style's pool and palette: %s" % sounds[:2])
+    renamed = dict(good, name="Test Style 2")
+    check(rig.post("/NeewerLux/sequence", {"action": "save_draft_style", "style": renamed, "original": "Test Style"})["success"]
+          and "Test Style" not in nl.savedDraftStyles and not os.path.exists(os.path.join(nl.draftStylesDir, "Test Style.json")), "renamed")
+    check(rig.post("/NeewerLux/sequence", {"action": "delete_draft_style", "name": "test style 2"})["success"]
+          and "Test Style 2" not in nl.savedDraftStyles, "deleted")
+    check(show.draftPoolFromText("calm, -hard, Heartbeat", ["Heartbeat"]) == {"tags": ["calm"], "exclude": ["hard"], "names": ["Heartbeat"]}
+          and show.draftPoolText({"tags": ["calm"], "exclude": ["hard"], "names": ["Heartbeat"]}) == "calm, -hard, Heartbeat", "pool text round-trips")
 
 
 def _songFile(path, bpm=128.0, seconds=40.0, sr=22050):
@@ -2105,7 +2216,7 @@ TESTS = [t_maxBrightnessHTTP, t_maxBrightnessAnimationAndSequence, t_minBrightne
          t_addSimulatedRig, t_compositorWakesOnlyWhenDue, t_handBackToRunningLayerFades,
          t_soundModeHTTP, t_soundUnderShowAndEffects, t_soundRespectsLimitsAndLocks, t_soundUnavailable, t_soundModeFilesHTTP,
          t_offWinsDuringShows, t_animationFlashRates, t_shippedAnimationTags, t_soundCues, t_soundHandsBackToBase, t_manualWriteReleasesSound, t_presetFadeTakesLightsFromSound, t_soundOnSomeLights,
-         t_presetSounds, t_paletteLibrary, t_songDrafts, t_songHTTP]
+         t_presetSounds, t_paletteLibrary, t_songDrafts, t_draftStyles, t_songHTTP]
 
 
 def main():

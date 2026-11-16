@@ -1,0 +1,89 @@
+{
+  "format": 1,
+  "name": "Synthwave",
+  "description": "Hot pink, violet and cyan: retro colour changes, neon sound modes and chases.",
+  "genres": [
+    "synthwave",
+    "retrowave",
+    "outrun",
+    "darksynth",
+    "vaporwave",
+    "chillwave",
+    "new retro wave",
+    "synthpop",
+    "synth-pop",
+    "italo disco",
+    "80s"
+  ],
+  "palette": [
+    {
+      "hue": 320,
+      "sat": 85
+    },
+    {
+      "hue": 285,
+      "sat": 80
+    },
+    {
+      "hue": 190,
+      "sat": 90
+    },
+    {
+      "hue": 30,
+      "sat": 80
+    }
+  ],
+  "intensity": "medium",
+  "use_animations": true,
+  "use_sound_modes": true,
+  "sections": {
+    "Intro": {
+      "behaviour": "fade_up"
+    },
+    "Groove": {
+      "behaviour": [
+        "colour_bars",
+        "sound"
+      ],
+      "sound_modes": {
+        "tags": [
+          "neon"
+        ],
+        "exclude": [
+          "hard"
+        ]
+      }
+    },
+    "Build": {
+      "behaviour": "build"
+    },
+    "Drop": {
+      "behaviour": [
+        "hit_chase",
+        "animation"
+      ],
+      "animations": {
+        "tags": [
+          "neon"
+        ],
+        "exclude": [
+          "calm"
+        ]
+      }
+    },
+    "Breakdown": {
+      "behaviour": [
+        "drift",
+        "sound"
+      ],
+      "sound_modes": {
+        "tags": [
+          "retro"
+        ]
+      }
+    },
+    "Outro": {
+      "behaviour": "fade_down"
+    }
+  }
+}

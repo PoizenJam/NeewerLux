@@ -829,6 +829,9 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
                 <div class="api-code">POST /NeewerLux/sequence {"action":"analyze","path":"C:\\Music\\Song.mp3"}</div>
                 <div class="api-code">POST /NeewerLux/song?name=Song.mp3 (the file as the body)</div>
                 <div class="api-code">POST /NeewerLux/sequence {"action":"draft","analysis":{...},"style":"Concert","name":"Song","save":true}</div>
+                <div class="api-code">POST /NeewerLux/sequence {"action":"draft","analysis":{...},"genres":["thrash metal","metal"],"name":"Song"}</div>
+                <div class="api-desc">Draft styles: list, pick one by genre, save, delete</div>
+                <div class="api-code">POST /NeewerLux/sequence {"action":"draft_styles"} | {"action":"style_for","genres":["deep house"]} | {"action":"save_draft_style","style":{...}} | {"action":"delete_draft_style","name":"Mine"}</div>
                 <div class="api-desc">Live status of layers, the sequence and every light (with approximate colour)</div>
                 <div class="api-code">GET /NeewerLux/doAction?status_json</div>
             </div>
@@ -954,12 +957,36 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
             <button class="btn small" onclick="songScale(2)" title="The analysis counted half the beats">x 2</button>
             First bar at <input type="number" id="songOffset" min="0" step="10" style="width:90px" oninput="songDraw()" title="When a bar's first beat falls; sections move to the nearest bar line"> ms
         </div>
-        <div class="toolbar">Style <select id="songStyle" onchange="songStyleNote()"><option>Subtle</option><option selected>Concert</option><option>Neon</option></select> <span id="songStyleNote" style="color:var(--muted);font-size:12px"></span></div>
+        <div class="toolbar">Style <select id="songStyle" onchange="songStyleNote()"></select>
+            <button class="btn small" onclick="dsOpen(document.getElementById('songStyle').value)" title="Edit, copy or delete draft styles">Styles...</button>
+            or by genre <input type="text" id="songGenre" style="flex:1" placeholder="e.g. thrash metal, deep house" title="Genres, most important first; picks the style whose genres fit best" onkeydown="if (event.key === 'Enter') songPickGenre()">
+            <button class="btn small" onclick="songPickGenre()">Pick</button></div>
+        <div id="songStyleNote" class="tl-hint"></div>
         <div class="toolbar">Name <input type="text" id="songName" style="flex:1"></div>
         <div class="tl-hint">The draft drives the fill, rim, background and practical lights, never the key, and stays under the flash limit. It opens unsaved in the timeline editor for you to change and save.</div>
         <div class="toolbar"><span style="flex:1"></span><button class="btn primary" id="songDraftBtn" disabled onclick="songDraft()">Create draft</button><button class="btn" onclick="songClose()">Close</button></div>
     </div>
 </div>
+<!-- DRAFT STYLES -->
+<div class="modal-bg" id="dsModal">
+    <div class="modal" style="width:min(1000px, 96vw)">
+        <h3 style="margin-top:0;color:var(--accent)">Draft styles</h3>
+        <div class="toolbar">Style <select id="dsStyle" onchange="dsLoad(this.value)"></select>
+            <button class="btn small" onclick="dsSave()">Save</button><button class="btn small" onclick="dsSaveAs()">Save as...</button>
+            <button class="btn small" onclick="dsDelete()">Delete</button><button class="btn small" onclick="dsLoad(document.getElementById('dsStyle').value)">Revert</button></div>
+        <div class="toolbar">Description <input type="text" id="dsDesc" style="flex:1"></div>
+        <div class="toolbar">Genres <input type="text" id="dsGenres" style="flex:1" title="Genres this style suits, separated by commas; Pick by genre and the HTTP style_for action match them"></div>
+        <div class="toolbar">Palette <select id="dsPalette" onchange="dsPaletteShown()"></select>
+            <input type="text" id="dsColours" style="flex:1" title="Hue/saturation pairs (35/90, 215/85) or whites in Kelvin (2700K, 5600K), separated by commas"></div>
+        <div class="toolbar">Intensity <select id="dsIntensity"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select>
+            <label><input type="checkbox" id="dsAnims" onchange="dsCountAll()"> Use animations</label>
+            <label><input type="checkbox" id="dsSounds" onchange="dsCountAll()"> Use sound modes</label></div>
+        <table class="edit-table" style="width:100%"><thead><tr><th>Section</th><th>Behaviour</th><th>Animations</th><th>Sound modes</th><th>Matches</th></tr></thead><tbody id="dsRows"></tbody></table>
+        <div id="dsNotes" class="tl-hint"></div>
+        <div class="toolbar"><span id="dsStatus" style="flex:1;color:var(--muted)"></span><button class="btn" onclick="dsClose()">Close</button></div>
+    </div>
+</div>
+
 
 <!-- SEQUENCE TIMELINE EDITOR -->
 <div class="modal-bg" id="tlModal">
@@ -2940,22 +2967,164 @@ function tlDescribeSection(sec) {
 }
 
 // ---- draft from a song
-const SONG_STYLE_NOTES = {Subtle: 'Gentle colour changes between sections, arriving on their first beat. No pulses.',
-    Concert: 'A strong look per section; the rim pulses on the beat in the loudest sections.',
-    Neon: 'Saturated colours; in loud sections the rim and background swap colours each bar and the rim pulses on the beat.'};
-let songAnalysis = null;
-function songOpen() {
+let songAnalysis = null, dsInfo = null;
+async function dsFetch() {
+    const d = await seqPost({action: 'draft_styles'});
+    if (d.success) dsInfo = d;
+    return dsInfo;
+}
+async function songStyles(current) {
+    const info = await dsFetch(), sel = document.getElementById('songStyle');
+    current = current || sel.value || 'Concert';
+    sel.innerHTML = ((info && info.styles) || []).map(st => '<option>' + esc(st.name) + '</option>').join('');
+    if ([...sel.options].some(o => o.value === current)) sel.value = current;
+    songStyleNote();
+}
+async function songOpen() {
     songAnalysis = null;
     document.getElementById('songFile').value = '';
     document.getElementById('songInfo').textContent = 'Choose a song file to analyse.';
     document.getElementById('songDraftBtn').disabled = true;
     document.getElementById('songName').value = '';
-    songStyleNote();
     document.getElementById('songModal').classList.add('open');
     songDraw();
+    await songStyles();
 }
 function songClose() { document.getElementById('songModal').classList.remove('open'); }
-function songStyleNote() { document.getElementById('songStyleNote').textContent = SONG_STYLE_NOTES[document.getElementById('songStyle').value] || ''; }
+function songStyleNote() {
+    const st = ((dsInfo && dsInfo.styles) || []).find(x => x.name === document.getElementById('songStyle').value) || {};
+    document.getElementById('songStyleNote').textContent = ((st.description || '') + (st.genres && st.genres.length ? ' Genres: ' + st.genres.join(', ') + '.' : '') +
+        (st.errors && st.errors.length ? ' Can\'t be used: ' + st.errors.join('; ') : '')).trim();
+}
+async function songPickGenre() {
+    const d = await seqPost({action: 'style_for', genre: document.getElementById('songGenre').value});
+    if (d.success) { document.getElementById('songStyle').value = d.style; songStyleNote(); }
+    else document.getElementById('songStyleNote').textContent = 'No style lists those genres; add them to a style\'s genres in Styles...';
+}
+// ---- draft style editor
+let dsOrder = {};
+async function dsOpen(current) {
+    await dsFetch();
+    document.getElementById('dsNotes').textContent = 'Behaviours: ' + dsInfo.behaviours.map(b => b.name + ': ' + b.description).join(' ');
+    document.getElementById('dsPalette').innerHTML = dsInfo.palettes.concat(['Own colours']).map(n => '<option>' + esc(n) + '</option>').join('');
+    document.getElementById('dsStyle').innerHTML = dsInfo.styles.map(st => '<option>' + esc(st.name) + '</option>').join('');
+    if (dsInfo.styles.some(st => st.name === current)) document.getElementById('dsStyle').value = current;
+    document.getElementById('dsModal').classList.add('open');
+    dsLoad(document.getElementById('dsStyle').value);
+}
+function dsClose() { document.getElementById('dsModal').classList.remove('open'); songStyles(); }
+function dsPaletteShown() { document.getElementById('dsColours').style.display = document.getElementById('dsPalette').value === 'Own colours' ? '' : 'none'; }
+function dsPoolText(p) { p = p || {}; return [...(p.tags || []), ...(p.exclude || []).map(t => '-' + t), ...(p.names || [])].join(', '); }
+function dsPoolFromText(text, names) {
+    const known = {}, pool = {tags: [], exclude: [], names: []};
+    names.forEach(n => { known[n.toLowerCase()] = n; });
+    String(text || '').split(',').map(w => w.trim()).filter(w => w).forEach(w => {
+        if (w.startsWith('-')) pool.exclude.push(w.slice(1).trim().toLowerCase());
+        else if (known[w.toLowerCase()]) pool.names.push(known[w.toLowerCase()]);
+        else pool.tags.push(w.toLowerCase());
+    });
+    return pool;
+}
+function dsMatches(pool, items) {
+    // as draftPoolMatches: named items, or items with every tag and none excluded
+    const names = new Set(pool.names.map(n => n.toLowerCase()));
+    return Object.keys(items).filter(n => {
+        const have = new Set(items[n]);
+        return names.has(n.toLowerCase()) || ((!names.size || pool.tags.length) && pool.tags.every(t => have.has(t)) && !pool.exclude.some(t => have.has(t)));
+    }).length;
+}
+function dsCount(kind) {
+    const row = document.querySelector('#dsRows tr[data-kind="' + kind + '"]');
+    if (!row) return;
+    const a = dsMatches(dsPoolFromText(row.querySelector('.ds-anim').value, Object.keys(dsInfo.animation_items)), dsInfo.animation_items);
+    const m = dsMatches(dsPoolFromText(row.querySelector('.ds-sound').value, Object.keys(dsInfo.sound_mode_items)), dsInfo.sound_mode_items);
+    row.querySelector('.ds-count').textContent = a + ' animations' + (document.getElementById('dsAnims').checked ? '' : ' (off)') + ', ' +
+        m + ' sound modes' + (document.getElementById('dsSounds').checked ? '' : ' (off)');
+}
+function dsCountAll() { dsInfo.sections.forEach(dsCount); }
+function dsBehaviourChanged(kind) {
+    const row = document.querySelector('#dsRows tr[data-kind="' + kind + '"]');
+    const checked = [...row.querySelectorAll('.ds-beh input')].filter(i => i.checked).map(i => i.value);
+    // kept in the order chosen: sections of the kind take them in turn from the first
+    dsOrder[kind] = (dsOrder[kind] || []).filter(b => checked.includes(b)).concat(checked.filter(b => !(dsOrder[kind] || []).includes(b)));
+    row.querySelector('.ds-beh summary').textContent = dsOrder[kind].join(', ') || '(default)';
+}
+function dsColoursText(c) { return (c || []).map(x => x.temp !== undefined ? x.temp + 'K' : x.hue + '/' + x.sat).join(', '); }
+function dsColoursFromText(t) {
+    const out = [];
+    for (const w of String(t).split(',').map(x => x.trim().toLowerCase()).filter(x => x)) {
+        if (w.endsWith('k')) { const k = parseFloat(w); if (isNaN(k)) return null; out.push({temp: Math.round(k)}); }
+        else { const [h, sat] = w.split('/'); const hv = parseFloat(h), sv = sat === undefined ? 100 : parseFloat(sat); if (isNaN(hv) || isNaN(sv)) return null; out.push({hue: Math.round(hv), sat: Math.round(sv)}); }
+    }
+    return out;
+}
+function dsLoad(name) {
+    const st = dsInfo.styles.find(x => x.name === name);
+    if (!st) return;
+    document.getElementById('dsDesc').value = st.description || '';
+    document.getElementById('dsGenres').value = (st.genres || []).join(', ');
+    if (typeof st.palette === 'string') { document.getElementById('dsPalette').value = st.palette; document.getElementById('dsColours').value = ''; }
+    else { document.getElementById('dsPalette').value = 'Own colours'; document.getElementById('dsColours').value = dsColoursText(st.palette); }
+    dsPaletteShown();
+    document.getElementById('dsIntensity').value = st.intensity || 'medium';
+    document.getElementById('dsAnims').checked = st.use_animations !== false;
+    document.getElementById('dsSounds').checked = st.use_sound_modes !== false;
+    const secs = st.sections || {};
+    dsOrder = {};
+    document.getElementById('dsRows').innerHTML = dsInfo.sections.map(kind => {
+        const sec = secs[kind] || {}, beh = sec.behaviour === undefined ? [] : [].concat(sec.behaviour);
+        dsOrder[kind] = beh;
+        return '<tr data-kind="' + kind + '"><td>' + kind + '</td><td><details class="ds-beh"><summary></summary>' +
+            dsInfo.behaviours.map(b => '<label title="' + esc(b.description) + '" style="display:block"><input type="checkbox" value="' + b.name + '"' +
+                (beh.includes(b.name) ? ' checked' : '') + ' onchange="dsBehaviourChanged(\'' + kind + '\')"> ' + b.name + '</label>').join('') +
+            '</details></td><td><input type="text" class="ds-anim" style="width:100%" value="' + esc(dsPoolText(sec.animations)) + '" oninput="dsCount(\'' + kind + '\')" title="Tags each animation must have, -tags it mustn\'t, or names. Tags in use: ' + esc(dsInfo.animation_tags.join(', ')) + '"></td>' +
+            '<td><input type="text" class="ds-sound" style="width:100%" value="' + esc(dsPoolText(sec.sound_modes)) + '" oninput="dsCount(\'' + kind + '\')" title="Tags each sound mode must have, -tags it mustn\'t, or names. Tags in use: ' + esc(dsInfo.sound_mode_tags.join(', ')) + '"></td>' +
+            '<td class="ds-count"></td></tr>';
+    }).join('');
+    dsInfo.sections.forEach(kind => { dsBehaviourChanged(kind); dsCount(kind); });
+    document.getElementById('dsStatus').textContent = st.errors && st.errors.length ? 'Can\'t be used: ' + st.errors.join('; ') : '';
+}
+function dsData(name) {
+    const out = {format: 1, name: name, description: document.getElementById('dsDesc').value.trim(),
+                 genres: document.getElementById('dsGenres').value.split(',').map(g => g.trim()).filter(g => g),
+                 intensity: document.getElementById('dsIntensity').value, use_animations: document.getElementById('dsAnims').checked,
+                 use_sound_modes: document.getElementById('dsSounds').checked, sections: {}};
+    if (document.getElementById('dsPalette').value === 'Own colours') {
+        out.palette = dsColoursFromText(document.getElementById('dsColours').value);
+        if (!out.palette) { document.getElementById('dsStatus').textContent = 'Colours are hue/saturation pairs (35/90) or Kelvin (2700K), separated by commas'; return null; }
+    } else out.palette = document.getElementById('dsPalette').value;
+    document.querySelectorAll('#dsRows tr').forEach(row => {
+        const kind = row.dataset.kind, beh = dsOrder[kind] && dsOrder[kind].length ? dsOrder[kind] : null;
+        out.sections[kind] = {animations: dsPoolFromText(row.querySelector('.ds-anim').value, Object.keys(dsInfo.animation_items)),
+                              sound_modes: dsPoolFromText(row.querySelector('.ds-sound').value, Object.keys(dsInfo.sound_mode_items))};
+        if (beh) out.sections[kind].behaviour = beh.length === 1 ? beh[0] : beh;
+    });
+    return out;
+}
+async function dsSaveNamed(name, original, overwrite) {
+    const data = dsData(name);
+    if (!data) return null;
+    const d = await seqPost({action: 'save_draft_style', style: data, original: original, overwrite: overwrite});
+    if (!d.success) { document.getElementById('dsStatus').textContent = 'Couldn\'t save: ' + errText(d); return d; }
+    await dsOpen(d.style);
+    document.getElementById('dsStatus').textContent = 'Saved ' + d.style;
+    return d;
+}
+function dsSave() { const n = document.getElementById('dsStyle').value; return n ? dsSaveNamed(n, n, true) : null; }
+async function dsSaveAs(name) {
+    if (name === undefined) name = prompt('Save style as', document.getElementById('dsStyle').value + ' copy');
+    if (!name || !name.trim()) return null;
+    let d = await dsSaveNamed(name.trim(), null, false);
+    if (d && !d.success && errText(d).includes('exists') && confirm('A style named ' + name.trim() + ' exists. Replace it?')) d = await dsSaveNamed(name.trim(), null, true);
+    return d;
+}
+async function dsDelete(skipConfirm) {
+    const n = document.getElementById('dsStyle').value;
+    if (!n || (!skipConfirm && !confirm('Delete the draft style ' + n + '?'))) return;
+    const d = await seqPost({action: 'delete_draft_style', name: n});
+    await dsOpen();
+    document.getElementById('dsStatus').textContent = d.success ? 'Deleted ' + n : 'Couldn\'t delete: ' + errText(d);
+}
 async function songUpload(file) {
     if (!file) return;
     document.getElementById('songInfo').textContent = 'Analysing ' + file.name + '...';
@@ -3029,7 +3198,7 @@ async function songDraft() {
     const bpm = +document.getElementById('songBpm').value, off = +document.getElementById('songOffset').value;
     const first = (a.bars && a.bars.length) ? a.bars[0] : a.offset_ms;
     const changed = Math.abs(bpm - a.bpm) > 0.005 || off !== first;
-    const {waveform, energy, ...lean} = a;  // the draft needs the beats and sections, not the drawing data
+    const {waveform, ...lean} = a;  // the draft needs the beats, sections and energy, not the waveform
     const body = {action: 'draft', analysis: lean, style: document.getElementById('songStyle').value,
                   name: document.getElementById('songName').value.trim() || a.song || 'Draft'};
     if (changed) { body.bpm = bpm; body.offset_ms = off; }

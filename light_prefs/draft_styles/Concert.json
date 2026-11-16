@@ -1,0 +1,70 @@
+{
+  "format": 1,
+  "name": "Concert",
+  "description": "A strong look per section: the rim pulses on the beat, builds speed up to a blackout and drops chase across the lights.",
+  "genres": [
+    "live",
+    "concert",
+    "arena",
+    "festival rock"
+  ],
+  "palette": [
+    {
+      "hue": 35,
+      "sat": 90
+    },
+    {
+      "hue": 215,
+      "sat": 85
+    },
+    {
+      "hue": 300,
+      "sat": 80
+    },
+    {
+      "hue": 265,
+      "sat": 85
+    },
+    {
+      "hue": 50,
+      "sat": 90
+    }
+  ],
+  "intensity": "medium",
+  "use_animations": true,
+  "use_sound_modes": false,
+  "sections": {
+    "Intro": {
+      "behaviour": "fade_up"
+    },
+    "Groove": {
+      "behaviour": [
+        "pulse",
+        "colour_bars"
+      ]
+    },
+    "Build": {
+      "behaviour": "build"
+    },
+    "Drop": {
+      "behaviour": [
+        "hit_chase",
+        "animation"
+      ],
+      "animations": {
+        "tags": [
+          "lively"
+        ],
+        "exclude": [
+          "calm"
+        ]
+      }
+    },
+    "Breakdown": {
+      "behaviour": "drift"
+    },
+    "Outro": {
+      "behaviour": "fade_down"
+    }
+  }
+}

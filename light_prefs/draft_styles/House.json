@@ -1,0 +1,95 @@
+{
+  "format": 1,
+  "name": "House",
+  "description": "Purple and amber with a four-to-the-floor feel: punchy sound modes in the grooves, chases on the drops.",
+  "genres": [
+    "house",
+    "deep house",
+    "tech house",
+    "progressive house",
+    "electro house",
+    "disco house",
+    "funky house",
+    "chicago house",
+    "uk garage",
+    "garage",
+    "dance",
+    "edm"
+  ],
+  "palette": [
+    {
+      "hue": 285,
+      "sat": 80
+    },
+    {
+      "hue": 35,
+      "sat": 90
+    },
+    {
+      "hue": 200,
+      "sat": 80
+    },
+    {
+      "hue": 320,
+      "sat": 70
+    }
+  ],
+  "intensity": "high",
+  "use_animations": true,
+  "use_sound_modes": true,
+  "sections": {
+    "Intro": {
+      "behaviour": "fade_up"
+    },
+    "Groove": {
+      "behaviour": [
+        "sound",
+        "colour_bars"
+      ],
+      "sound_modes": {
+        "tags": [
+          "punchy"
+        ],
+        "exclude": [
+          "calm"
+        ]
+      }
+    },
+    "Build": {
+      "behaviour": "build"
+    },
+    "Drop": {
+      "behaviour": [
+        "hit_chase",
+        "sound"
+      ],
+      "sound_modes": {
+        "tags": [
+          "lively"
+        ],
+        "exclude": [
+          "calm",
+          "pastel"
+        ]
+      }
+    },
+    "Breakdown": {
+      "behaviour": [
+        "drift",
+        "sound"
+      ],
+      "sound_modes": {
+        "tags": [
+          "calm"
+        ],
+        "exclude": [
+          "hard",
+          "intense"
+        ]
+      }
+    },
+    "Outro": {
+      "behaviour": "fade_down"
+    }
+  }
+}

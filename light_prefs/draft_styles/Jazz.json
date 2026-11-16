@@ -1,0 +1,83 @@
+{
+  "format": 1,
+  "name": "Jazz",
+  "description": "Amber and smoky blue: steady looks and smooth sound modes that breathe with the band.",
+  "genres": [
+    "jazz",
+    "smooth jazz",
+    "bebop",
+    "swing",
+    "big band",
+    "jazz fusion",
+    "fusion",
+    "blues",
+    "lounge",
+    "bossa nova",
+    "soul jazz",
+    "acid jazz"
+  ],
+  "palette": [
+    {
+      "hue": 35,
+      "sat": 80
+    },
+    {
+      "hue": 220,
+      "sat": 70
+    },
+    {
+      "hue": 45,
+      "sat": 60
+    },
+    {
+      "hue": 280,
+      "sat": 50
+    }
+  ],
+  "intensity": "low",
+  "use_animations": false,
+  "use_sound_modes": true,
+  "sections": {
+    "Intro": {
+      "behaviour": "fade_up"
+    },
+    "Groove": {
+      "behaviour": [
+        "hold",
+        "sound"
+      ],
+      "sound_modes": {
+        "tags": [
+          "smooth"
+        ],
+        "exclude": [
+          "hard",
+          "intense"
+        ]
+      }
+    },
+    "Build": {
+      "behaviour": "hold"
+    },
+    "Drop": {
+      "behaviour": [
+        "colour_bars",
+        "sound"
+      ],
+      "sound_modes": {
+        "tags": [
+          "smooth"
+        ],
+        "exclude": [
+          "hard"
+        ]
+      }
+    },
+    "Breakdown": {
+      "behaviour": "drift"
+    },
+    "Outro": {
+      "behaviour": "fade_down"
+    }
+  }
+}

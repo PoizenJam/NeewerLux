@@ -17,22 +17,24 @@ import time
 
 import neewerlux_show as show
 from neewerlux_stage import StageView
-from neewerlux_ui import SpinBoxWithButtons, DoubleSpinBoxWithButtons, FlowLayout
+from neewerlux_ui import SpinBoxWithButtons, DoubleSpinBoxWithButtons, FlowLayout, adjustableColumns
 
 try:
-    from PySide6.QtCore import Qt, QTimer, QRectF, QPointF, QSize
+    from PySide6.QtCore import Qt, QTimer, QRectF, QPointF, QSize, Signal
     from PySide6.QtGui import QColor, QPainter, QPen, QFont, QFontMetrics, QKeySequence, QShortcut, QPolygonF, QBrush
     from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel, QLineEdit,
                                    QComboBox, QSpinBox, QDoubleSpinBox, QPushButton, QCheckBox, QScrollBar,
                                    QSplitter, QStackedWidget, QMessageBox, QMenu, QDialog, QDialogButtonBox,
-                                   QInputDialog, QSizePolicy, QFrame, QTextEdit, QFileDialog, QScrollArea)
+                                   QInputDialog, QSizePolicy, QFrame, QTextEdit, QFileDialog, QScrollArea,
+                                   QTableWidget, QTableWidgetItem, QToolButton)
 except ImportError:
-    from PySide2.QtCore import Qt, QTimer, QRectF, QPointF, QSize
+    from PySide2.QtCore import Qt, QTimer, QRectF, QPointF, QSize, Signal
     from PySide2.QtGui import QColor, QPainter, QPen, QFont, QFontMetrics, QKeySequence, QPolygonF, QBrush
     from PySide2.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel, QLineEdit,
                                    QComboBox, QSpinBox, QDoubleSpinBox, QPushButton, QCheckBox, QScrollBar,
                                    QSplitter, QStackedWidget, QMessageBox, QMenu, QDialog, QDialogButtonBox,
-                                   QInputDialog, QSizePolicy, QFrame, QTextEdit, QShortcut, QFileDialog, QScrollArea)
+                                   QInputDialog, QSizePolicy, QFrame, QTextEdit, QShortcut, QFileDialog, QScrollArea,
+                                   QTableWidget, QTableWidgetItem, QToolButton)
 
 PROPS_START_W = 330          # the sequence editor's properties panel width when it opens
 SOUND_CUE_DEFAULT_MS = 8000  # a new sound cue's length
@@ -741,11 +743,6 @@ class SequenceSettingsDialog(QDialog):
 # DRAFT FROM A SONG
 # ============================================================================
 
-STYLE_NOTES = {"Subtle": "Gentle colour changes between sections, arriving on their first beat. No pulses.",
-               "Concert": "A strong look per section; the rim pulses on the beat in the loudest sections.",
-               "Neon": "Saturated colours; in loud sections the rim and background swap colours each bar and the rim pulses on the beat."}
-
-
 class SongView(QWidget):
     """The song at a glance: waveform, energy curve, section bands (by level) and the beat grid."""
 
@@ -873,13 +870,21 @@ class SongDraftDialog(QDialog):
         styleRow = QHBoxLayout()
         styleRow.addWidget(QLabel("Style:"))
         self.styleCombo = QComboBox()
-        self.styleCombo.addItems(list(show.DRAFT_STYLES))
-        self.styleCombo.setCurrentText("Concert")
         styleRow.addWidget(self.styleCombo)
-        self.styleNote = QLabel(STYLE_NOTES["Concert"])
-        self.styleNote.setWordWrap(True)
-        styleRow.addWidget(self.styleNote, 1)
+        self.stylesButton = QPushButton("Styles...")
+        self.stylesButton.setToolTip("Edit, copy or delete draft styles")
+        styleRow.addWidget(self.stylesButton)
+        styleRow.addWidget(QLabel("or by genre:"))
+        self.genreEdit = QLineEdit()
+        self.genreEdit.setPlaceholderText("e.g. thrash metal, deep house")
+        self.genreEdit.setToolTip("Genres, most important first; picks the style whose genres fit best")
+        styleRow.addWidget(self.genreEdit, 1)
+        self.genreButton = QPushButton("Pick")
+        styleRow.addWidget(self.genreButton)
         lay.addLayout(styleRow)
+        self.styleNote = QLabel("")
+        self.styleNote.setWordWrap(True)
+        lay.addWidget(self.styleNote)
         nameRow = QHBoxLayout()
         nameRow.addWidget(QLabel("Name:"))
         self.nameEdit = QLineEdit()
@@ -904,11 +909,53 @@ class SongDraftDialog(QDialog):
         self.doubleButton.clicked.connect(lambda: self.bpmSpin.setValue(self.bpmSpin.value() * 2))
         self.bpmSpin.valueChanged.connect(self._gridEdited)
         self.offsetSpin.valueChanged.connect(self._gridEdited)
-        self.styleCombo.currentTextChanged.connect(lambda t: self.styleNote.setText(STYLE_NOTES.get(t, "")))
+        self.styleCombo.currentTextChanged.connect(self._styleNote)
+        self.stylesButton.clicked.connect(self.editStyles)
+        self.genreButton.clicked.connect(self.pickByGenre)
+        self.genreEdit.returnPressed.connect(self.pickByGenre)
+        self.styleEditor = None
+        self.loadStyles("Concert")
         self.draftButton.clicked.connect(self.createDraft)
         closeButton.clicked.connect(self.reject)
         self.pollTimer = QTimer(self)
         self.pollTimer.timeout.connect(self._poll)
+
+    def loadStyles(self, current=None):
+        current = current or self.styleCombo.currentText()
+        self._styles = {st["name"]: st for st in self.host.styles()}
+        self.styleCombo.blockSignals(True)
+        self.styleCombo.clear()
+        self.styleCombo.addItems(list(self._styles))
+        if current in self._styles:
+            self.styleCombo.setCurrentText(current)
+        self.styleCombo.blockSignals(False)
+        self._styleNote(self.styleCombo.currentText())
+
+    def _styleNote(self, name):
+        st = self._styles.get(name) or {}
+        note = st.get("description", "")
+        if st.get("genres"):
+            note += " Genres: " + ", ".join(st["genres"]) + "."
+        if st.get("errors"):
+            note += " Can't be used: " + "; ".join(st["errors"])
+        self.styleNote.setText(note.strip())
+
+    def pickByGenre(self):
+        found = self.host.styleFor(self.genreEdit.text())
+        if found:
+            self.styleCombo.setCurrentText(found)
+        else:
+            self.styleNote.setText("No style lists those genres; add them to a style's genres in Styles...")
+
+    def editStyles(self):
+        if self.styleEditor is None:
+            self.styleEditor = DraftStyleDialog(self.host, self.styleCombo.currentText(), self)
+            self.styleEditor.saved.connect(lambda name: self.loadStyles(name))
+        else:
+            self.styleEditor.reload(self.styleCombo.currentText())
+        self.styleEditor.show()
+        self.styleEditor.raise_()
+        return self.styleEditor
 
     def choose(self):
         path, _ = QFileDialog.getOpenFileName(self, "Choose a song", "", "Songs (*.wav *.flac *.mp3 *.ogg *.aiff *.aif)")
@@ -980,6 +1027,267 @@ class SongDraftDialog(QDialog):
             self.infoLabel.setText("Couldn't draft it: " + "; ".join(result.get("errors", [])))
             return None
         return self.host.openDraft(result["sequence"])
+
+
+class DraftStyleDialog(QDialog):
+    """Edit draft styles (the files in light_prefs/draft_styles): palette, intensity, whether
+    animations and sound modes may be used, and per section kind the behaviours and the pools
+    of animations and sound modes, by tag. host provides styles(), styleChoices(),
+    saveStyle(data, original, overwrite), deleteStyle(name) and poolCounts(pool, kind).
+    saved(name) is emitted after a save, rename or delete."""
+
+    saved = Signal(str)
+    OWN = "Own colours"
+
+    def __init__(self, host, current=None, parent=None):
+        super().__init__(parent)
+        self.host = host
+        self.setWindowTitle("Draft styles")
+        self.resize(940, 600)
+        lay = QVBoxLayout(self)
+        top = FlowLayout()
+        top.addWidget(QLabel("Style:"))
+        self.styleCombo = QComboBox()
+        self.styleCombo.setMinimumContentsLength(14)
+        top.addWidget(self.styleCombo)
+        self.saveButton = QPushButton("Save")
+        self.saveAsButton = QPushButton("Save as...")
+        self.deleteButton = QPushButton("Delete")
+        self.revertButton = QPushButton("Revert")
+        for b in (self.saveButton, self.saveAsButton, self.deleteButton, self.revertButton):
+            top.addWidget(b)
+        lay.addLayout(top)
+        form = QFormLayout()
+        self.descEdit = QLineEdit()
+        form.addRow("Description:", self.descEdit)
+        self.genresEdit = QLineEdit()
+        self.genresEdit.setToolTip("Genres this style suits, separated by commas; Pick by genre and the HTTP style_for action match them")
+        form.addRow("Genres:", self.genresEdit)
+        palRow = QHBoxLayout()
+        self.paletteCombo = QComboBox()
+        palRow.addWidget(self.paletteCombo)
+        self.coloursEdit = QLineEdit()
+        self.coloursEdit.setToolTip("Hue/saturation pairs (35/90, 215/85) or whites in Kelvin (2700K, 5600K), separated by commas")
+        palRow.addWidget(self.coloursEdit, 1)
+        form.addRow("Palette:", palRow)
+        optRow = QHBoxLayout()
+        self.intensityCombo = QComboBox()
+        self.intensityCombo.addItems([i.capitalize() for i in show.DRAFT_INTENSITIES])
+        self.intensityCombo.setToolTip("How bright the colour lights get: low, medium or high")
+        optRow.addWidget(self.intensityCombo)
+        self.animCheck = QCheckBox("Use animations")
+        self.soundCheck = QCheckBox("Use sound modes")
+        optRow.addWidget(self.animCheck)
+        optRow.addWidget(self.soundCheck)
+        optRow.addStretch(1)
+        form.addRow("Intensity:", optRow)
+        lay.addLayout(form)
+        self.table = QTableWidget(len(show.DRAFT_SECTIONS), 5)
+        self.table.setHorizontalHeaderLabels(["Section", "Behaviour", "Animations", "Sound modes", "Matches"])
+        self.table.verticalHeader().setVisible(False)
+        self.table.verticalHeader().setDefaultSectionSize(34)
+        adjustableColumns(self.table)
+        self.behaviourButtons, self.animEdits, self.soundEdits, self._order = {}, {}, {}, {}
+        choices = host.styleChoices()
+        self._names = {"animations": choices["animations"], "sound_modes": choices["sound_modes"]}
+        tagTip = "Tags each item must have, -tags it mustn't, or item names, separated by commas. Tags in use: "
+        for row, kind in enumerate(show.DRAFT_SECTIONS):
+            item = QTableWidgetItem(kind)
+            item.setFlags(Qt.ItemIsEnabled)
+            self.table.setItem(row, 0, item)
+            button = QToolButton()
+            button.setPopupMode(QToolButton.InstantPopup)
+            button.setToolButtonStyle(Qt.ToolButtonTextOnly)
+            menu = QMenu(button)
+            for beh in show.DRAFT_BEHAVIOURS:
+                act = menu.addAction(beh)
+                act.setCheckable(True)
+                act.setToolTip(show.DRAFT_BEHAVIOUR_NOTES[beh])
+                act.toggled.connect(lambda on, k=kind: self._behavioursChanged(k))
+            menu.setToolTipsVisible(True)
+            button.setMenu(menu)
+            self.behaviourButtons[kind] = button
+            self.table.setCellWidget(row, 1, button)
+            anim, snd = QLineEdit(), QLineEdit()
+            anim.setToolTip(tagTip + ", ".join(choices["animation_tags"]))
+            snd.setToolTip(tagTip + ", ".join(choices["sound_mode_tags"]))
+            anim.textChanged.connect(lambda _t, k=kind: self._counts(k))
+            snd.textChanged.connect(lambda _t, k=kind: self._counts(k))
+            self.animEdits[kind], self.soundEdits[kind] = anim, snd
+            self.table.setCellWidget(row, 2, anim)
+            self.table.setCellWidget(row, 3, snd)
+            matches = QTableWidgetItem("")
+            matches.setFlags(Qt.ItemIsEnabled)
+            self.table.setItem(row, 4, matches)
+        for col, width in ((0, 90), (1, 190), (2, 220), (3, 220)):
+            self.table.setColumnWidth(col, width)
+        lay.addWidget(self.table, 1)
+        self.notes = QLabel("Behaviours: " + " ".join("%s: %s" % (b, show.DRAFT_BEHAVIOUR_NOTES[b]) for b in show.DRAFT_BEHAVIOURS))
+        self.notes.setWordWrap(True)
+        self.notes.setStyleSheet("color: #888;")
+        lay.addWidget(self.notes)
+        bottom = QHBoxLayout()
+        self.status = QLabel("")
+        self.status.setWordWrap(True)
+        bottom.addWidget(self.status, 1)
+        closeButton = QPushButton("Close")
+        bottom.addWidget(closeButton)
+        lay.addLayout(bottom)
+
+        self.paletteCombo.currentTextChanged.connect(lambda t: self.coloursEdit.setVisible(t == self.OWN))
+        for check in (self.animCheck, self.soundCheck):
+            check.toggled.connect(lambda _on: [self._counts(k) for k in show.DRAFT_SECTIONS])
+        self.styleCombo.currentTextChanged.connect(self.load)
+        self.saveButton.clicked.connect(self.save)
+        self.saveAsButton.clicked.connect(self.saveAs)
+        self.deleteButton.clicked.connect(self.delete)
+        self.revertButton.clicked.connect(lambda: self.load(self.styleCombo.currentText()))
+        closeButton.clicked.connect(self.close)
+        self.reload(current)
+
+    def reload(self, current=None):
+        self._styles = {st["name"]: st for st in self.host.styles()}
+        self.paletteCombo.blockSignals(True)
+        self.paletteCombo.clear()
+        self.paletteCombo.addItems(self.host.styleChoices()["palettes"] + [self.OWN])
+        self.paletteCombo.blockSignals(False)
+        self.styleCombo.blockSignals(True)
+        self.styleCombo.clear()
+        self.styleCombo.addItems(list(self._styles))
+        if current in self._styles:
+            self.styleCombo.setCurrentText(current)
+        self.styleCombo.blockSignals(False)
+        self.load(self.styleCombo.currentText())
+
+    @staticmethod
+    def coloursText(colours):
+        return ", ".join("%dK" % c["temp"] if "temp" in c else "%d/%d" % (c["hue"], c["sat"]) for c in colours)
+
+    @staticmethod
+    def coloursFromText(text):
+        out = []
+        for word in str(text).split(","):
+            word = word.strip().lower()
+            if not word:
+                continue
+            try:
+                if word.endswith("k"):
+                    out.append({"temp": int(float(word[:-1]))})
+                else:
+                    hue, _, sat = word.partition("/")
+                    out.append({"hue": int(float(hue)), "sat": int(float(sat or 100))})
+            except ValueError:
+                return None
+        return out
+
+    def load(self, name):
+        st = self._styles.get(name)
+        if st is None:
+            return
+        self.descEdit.setText(st.get("description", ""))
+        self.genresEdit.setText(", ".join(st.get("genres", [])))
+        palette = st.get("palette")
+        if isinstance(palette, str):
+            self.paletteCombo.setCurrentText(palette)
+            self.coloursEdit.setText("")
+        else:
+            self.paletteCombo.setCurrentText(self.OWN)
+            self.coloursEdit.setText(self.coloursText(palette or []))
+        self.coloursEdit.setVisible(self.paletteCombo.currentText() == self.OWN)
+        self.intensityCombo.setCurrentText(str(st.get("intensity", "medium")).capitalize())
+        self.animCheck.setChecked(bool(st.get("use_animations", True)))
+        self.soundCheck.setChecked(bool(st.get("use_sound_modes", True)))
+        sections = st.get("sections") or {}
+        for kind in show.DRAFT_SECTIONS:
+            sec = sections.get(kind) or {}
+            beh = sec.get("behaviour", show.DRAFT_DEFAULT_BEHAVIOUR[kind])
+            beh = [beh] if isinstance(beh, str) else list(beh)
+            self._order[kind] = list(beh)
+            for act in self.behaviourButtons[kind].menu().actions():
+                act.blockSignals(True)
+                act.setChecked(act.text() in beh)
+                act.blockSignals(False)
+            self._behavioursChanged(kind)
+            self.animEdits[kind].setText(show.draftPoolText(dict({"tags": [], "exclude": [], "names": []}, **(sec.get("animations") or {}))))
+            self.soundEdits[kind].setText(show.draftPoolText(dict({"tags": [], "exclude": [], "names": []}, **(sec.get("sound_modes") or {}))))
+            self._counts(kind)
+        self.status.setText("Can't be used: " + "; ".join(st["errors"]) if st.get("errors") else "")
+
+    def _behavioursChanged(self, kind):
+        # kept in the order chosen: sections of the kind take them in turn from the first
+        checked = [a.text() for a in self.behaviourButtons[kind].menu().actions() if a.isChecked()]
+        chosen = [b for b in self._order.get(kind, []) if b in checked] + [b for b in checked if b not in self._order.get(kind, [])]
+        self._order[kind] = chosen
+        self.behaviourButtons[kind].setText(", ".join(chosen) or show.DRAFT_DEFAULT_BEHAVIOUR[kind])
+        self.behaviourButtons[kind].setToolTip("\n".join("%s: %s" % (b, show.DRAFT_BEHAVIOUR_NOTES[b]) for b in (chosen or [show.DRAFT_DEFAULT_BEHAVIOUR[kind]]))
+                                               + "\n\nSeveral: sections of this kind take turns, a repeated part keeping its own.")
+
+    def _counts(self, kind):
+        row = show.DRAFT_SECTIONS.index(kind)
+        anims = self.host.poolCounts(show.draftPoolFromText(self.animEdits[kind].text(), self._names["animations"]), "animations")
+        modes = self.host.poolCounts(show.draftPoolFromText(self.soundEdits[kind].text(), self._names["sound_modes"]), "sound_modes")
+        self.table.item(row, 4).setText("%d animations%s, %d sound modes%s" % (anims, "" if self.animCheck.isChecked() else " (off)",
+                                                                             modes, "" if self.soundCheck.isChecked() else " (off)"))
+
+    def data(self, name=None):
+        """The style as edited, or None (with the reason in the status line) if the colours don't read."""
+        out = {"format": 1, "name": name or self.styleCombo.currentText(), "description": self.descEdit.text().strip(),
+               "genres": [g.strip() for g in self.genresEdit.text().split(",") if g.strip()],
+               "intensity": self.intensityCombo.currentText().lower(),
+               "use_animations": self.animCheck.isChecked(), "use_sound_modes": self.soundCheck.isChecked(), "sections": {}}
+        if self.paletteCombo.currentText() == self.OWN:
+            out["palette"] = self.coloursFromText(self.coloursEdit.text())
+            if out["palette"] is None:
+                self.status.setText("Colours are hue/saturation pairs (35/90) or Kelvin (2700K), separated by commas")
+                return None
+        else:
+            out["palette"] = self.paletteCombo.currentText()
+        for kind in show.DRAFT_SECTIONS:
+            beh = self._order.get(kind) or [show.DRAFT_DEFAULT_BEHAVIOUR[kind]]
+            out["sections"][kind] = {"behaviour": beh[0] if len(beh) == 1 else beh,
+                                     "animations": show.draftPoolFromText(self.animEdits[kind].text(), self._names["animations"]),
+                                     "sound_modes": show.draftPoolFromText(self.soundEdits[kind].text(), self._names["sound_modes"])}
+        return out
+
+    def _saveAs(self, name, original, overwrite):
+        data = self.data(name)
+        if data is None:
+            return None
+        result = self.host.saveStyle(data, original, overwrite)
+        if not result.get("success"):
+            self.status.setText("Couldn't save: " + "; ".join(result.get("errors", [])))
+            return result
+        self.status.setText("Saved " + result["style"])
+        self.reload(result["style"])
+        self.saved.emit(result["style"])
+        return result
+
+    def save(self):
+        name = self.styleCombo.currentText()
+        return self._saveAs(name, name, True) if name else None
+
+    def saveAs(self, name=None):
+        if name is None:
+            name, ok = QInputDialog.getText(self, "Save style as", "Name:", text=self.styleCombo.currentText() + " copy")
+            if not ok:
+                return None
+        name = str(name).strip()
+        if not name:
+            return None
+        result = self._saveAs(name, None, False)
+        if result is not None and not result.get("success") and any("exists" in e for e in result.get("errors", [])):
+            if QMessageBox.question(self, "Replace style", "A style named %s exists. Replace it?" % name) == QMessageBox.Yes:
+                result = self._saveAs(name, None, True)
+        return result
+
+    def delete(self, confirm=True):
+        name = self.styleCombo.currentText()
+        if not name or (confirm and QMessageBox.question(self, "Delete style", "Delete the draft style %s?" % name) != QMessageBox.Yes):
+            return False
+        ok = self.host.deleteStyle(name)
+        self.reload()
+        self.saved.emit(self.styleCombo.currentText())
+        return ok
 
 
 # ============================================================================

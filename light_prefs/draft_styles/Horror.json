@@ -1,0 +1,74 @@
+{
+  "format": 1,
+  "name": "Horror",
+  "description": "Dim red, sickly green and violet: moody drifts and sound modes, with a jolt where the music hits.",
+  "genres": [
+    "horror",
+    "spooky",
+    "halloween",
+    "creepy",
+    "dark",
+    "thriller",
+    "survival horror",
+    "gothic",
+    "dark wave",
+    "darkwave"
+  ],
+  "palette": [
+    {
+      "hue": 355,
+      "sat": 70
+    },
+    {
+      "hue": 275,
+      "sat": 80
+    },
+    {
+      "hue": 120,
+      "sat": 60
+    },
+    {
+      "hue": 200,
+      "sat": 20
+    }
+  ],
+  "intensity": "medium",
+  "use_animations": true,
+  "use_sound_modes": true,
+  "sections": {
+    "Intro": {
+      "behaviour": "fade_up"
+    },
+    "Groove": {
+      "behaviour": [
+        "drift",
+        "sound"
+      ],
+      "sound_modes": {
+        "tags": [
+          "moody"
+        ]
+      }
+    },
+    "Build": {
+      "behaviour": "build"
+    },
+    "Drop": {
+      "behaviour": [
+        "hit_chase",
+        "animation"
+      ],
+      "animations": {
+        "tags": [
+          "moody"
+        ]
+      }
+    },
+    "Breakdown": {
+      "behaviour": "drift"
+    },
+    "Outro": {
+      "behaviour": "fade_down"
+    }
+  }
+}
