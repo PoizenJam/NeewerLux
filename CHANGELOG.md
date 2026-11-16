@@ -5,7 +5,10 @@ Changes relative to upstream [NeewerLite-Python v0.12d](https://github.com/tabur
 ## v1.4.1
 
 ### Added
-- **`tests/beat_score.py` scores the live beat tracker** that sound modes follow against known beats: when it locks on, how many beats it hits, how many it fires off the beat, how late it fires them, and how often it reads the right tempo or a related one (double, half, 3/2, 2/3, 4/3, 3/4). Synthetic cases cover off-beat bass, dotted-eighth riffs, tempo ramps and jumps, a long breakdown with no drums, half-time, 2-step, drum rolls, a quiet patch and a sparse intro. `--song` scores any song with a steady tempo against its own whole-song analysis.
+- **`tests/beat_score.py` scores the live beat tracker** that sound modes follow against known beats: when it locks on, how many beats it hits, how many it fires off the beat, how late it fires them, and how often it reads the right tempo or a related one (double, half, 3/2, 2/3, 4/3, 3/4). Synthetic cases cover off-beat bass, dotted-eighth riffs, tempo ramps and jumps, a long breakdown with no drums, half-time, 2-step, drum rolls, a quiet patch and a sparse intro. `--song` scores any song with a steady tempo against its own whole-song analysis (`path@start-end` for part of it).
+
+### Changed
+- **Sound modes keep to the beat much better.** The beat now follows the kick drum when there is one, instead of whatever is loudest across the spectrum, which in house music with an off-beat bass line meant the lights flashed between the beats. A tempo that has held for a few seconds is kept through breakdowns without drums and through short stops, so the lights come back in time when the drop hits. Readings at 2/3 or 4/3 of the tempo (2-step, broken beats, riffs) need much more evidence before they replace a tempo that has held. The tempo is measured more finely (it read 134.0 for a 135 BPM song) and beats land within about 10 ms of the sound instead of 30 to 50 ms after it. Scored with `tests/beat_score.py`: on real songs, an I Feel Love club mix from 78% to 90% of beats hit, Insomnia from 91% to 98%, Space Cowboy's first 90 seconds from 63% to 100%; on the synthetic cases, house with an off-beat bass from never locking to 100%, 2-step garage from 40% to 92%, a breakdown from 69% to 100%.
 
 ## v1.4.0 - 2026-11-16
 

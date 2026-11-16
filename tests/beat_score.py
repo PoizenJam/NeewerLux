@@ -5,11 +5,13 @@ Synthetic cases are built here from drum, bass and pad sounds on a known grid, e
 one way live tracking goes wrong: off-beat bass, dotted-eighth riffs, tempo ramps and jumps,
 long breakdowns with no kick, half-time, 2-step, drum rolls, a quiet patch, a sparse intro.
 A song file can be scored too: its reference grid is the whole-song analysis (tempo and first
-beat from analyzeSong, which assumes one tempo), so only use songs with a steady tempo.
+beat from analyzeSong, which assumes one tempo), so only use songs with a steady tempo, or
+score only the stretch of a song where the reference holds (path@start-end, in seconds).
 
     python tests/beat_score.py                  all synthetic cases
     python tests/beat_score.py house breakdown  only those cases
     python tests/beat_score.py --song "C:\\Music\\Insomnia.mp3" [--song ...]
+    python tests/beat_score.py --song "C:\\Music\\Space Cowboy.mp3@0-90"   only 0 to 90 s
     python tests/beat_score.py --json out.json  also write the numbers
 
 A beat counts as hit when the tracker fires one within TOLERANCE_S of it. Columns:
@@ -22,6 +24,7 @@ import argparse
 import json
 import math
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -250,19 +253,23 @@ def runCase(name):
     return score(au.Analyzer().analyze(x), truth, segments)
 
 
-def runSong(path):
+def runSong(path, start=0.0, end=None):
+    """Score a song from start to end (seconds; the tracker starts at start, as if the song
+    began there). The reference grid comes from the whole song's analysis."""
     samples, sr = au.loadSong(path)
     analysis = au.analyzeSong(samples, sr)
     bpm, first = analysis["bpm"], analysis["offset_ms"] / 1000.0
     period = 60.0 / bpm
     duration = len(samples) / sr
+    end = duration if end is None else min(end, duration)
     truth = []
     t = first
-    while t < duration - 0.5:
-        truth.append((t, bpm, 0))
+    while t < end - 0.5:
+        if t >= start:
+            truth.append((t - start, bpm, 0))
         t += period
     hop = max(1, int(round(au.HOP * sr / SR)))  # the same ~21 ms frames at the song's rate
-    out = score(au.Analyzer(sampleRate=sr, hop=hop).analyze(samples), truth)
+    out = score(au.Analyzer(sampleRate=sr, hop=hop).analyze(samples[int(start * sr):int(end * sr)]), truth)
     out["reference_bpm"] = round(bpm, 2)
     return out
 
@@ -298,11 +305,16 @@ def main(argv):
             ap.error("unknown case %s (have: %s)" % (name, ", ".join(CASES)))
         results[name] = runCase(name)
         report(name, results[name])
-    for path in args.song:
+    for arg in args.song:
+        path, start, end = arg, 0.0, None
+        span = re.match(r"^(.*)@(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)$", arg)
+        if span:
+            path, start, end = span.group(1), float(span.group(2)), float(span.group(3))
         label = os.path.splitext(os.path.basename(path))[0][:14]
-        results[path] = runSong(path)
-        report(label, results[path])
-        print("%-14s reference tempo %s BPM from the song analysis" % ("", results[path]["reference_bpm"]))
+        results[arg] = runSong(path, start, end)
+        report(label, results[arg])
+        print("%-14s reference tempo %s BPM from the song analysis%s" % (
+            "", results[arg]["reference_bpm"], " (%g to %g s)" % (start, end) if span else ""))
     if args.json:
         with open(args.json, "w", encoding="utf-8") as f:
             json.dump(results, f, indent=1)

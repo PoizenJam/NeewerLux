@@ -31,7 +31,7 @@ Every 21 ms or so NeewerLux measures:
 | `level` | 0 to 1 | How loud it is, against the loudest of the last few seconds, on a decibel scale (30 dB below that peak reads as 0). Quiet and loud material both use the whole range; silence is 0. |
 | `low`, `mid`, `high` | 0 to 1 | The same for the bass (below 250 Hz), the middle (250 Hz to 4 kHz) and the treble (above 4 kHz). |
 | `centroid` | 0 to 1 | How bright the sound is: low for bass-heavy sound, high for cymbals and hiss (the spectral centroid, 150 Hz to 6 kHz on a log scale). |
-| beats | | A tempo estimate (60 to 200 BPM) and a beat clock that keeps time through short gaps and stops in silence. |
+| beats | | A tempo estimate (60 to 200 BPM) and a beat clock. With a kick drum, the beat follows the kick, so an off-beat bass line, busy hi-hats or a 2-step pattern don't pull it off the beat. A tempo that has held for a few seconds is kept through a breakdown with no kick (up to a minute) and through a stop of up to 4 seconds, where no beats are counted, so the first beat after it lands on time. Longer silence stops the clock. |
 
 ## The file
 

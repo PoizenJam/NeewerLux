@@ -45,6 +45,22 @@ TEMPO_EVERY_S = 0.5
 BPM_MIN, BPM_MAX = 60.0, 200.0
 BPM_PRIOR = 120.0          # tempos far from this (in octaves) are less likely
 STALE_S = 0.5              # features older than this are treated as no signal
+KICK_BAND = (40.0, 150.0)  # where a kick drum's body is; phase comes from onsets here when there are any
+KICK_WINDOW_S = 2.0        # kicks are present when this stretch holds at least KICK_MIN_COUNT kick onsets
+KICK_MIN_COUNT = 2
+KICK_REF_HALF_LIFE_S = 20.0  # how fast the reference for a strong kick onset forgets a loud passage
+PHASE_WINDOW_S = 6.0       # onset history the beat phase is fitted to
+PHASE_DECAY = 0.85         # each beat further back counts this much less, so a new phase shows sooner
+PHASE_FLUX_WEIGHT = 0.3    # with kicks, the whole-spectrum onsets still count this much (snares, claps)
+PHASE_LAG_S = 0.025        # how far an onset in the envelope trails the sound itself
+TEMPO_BAR_WEIGHT = 0.5     # a pattern repeating every 4 beats (a bar) supports a tempo; a 3/2 or 4/3 reading has no such repeat
+RELATED_TEMPOS = (2.0, 0.5, 1.5, 2.0 / 3.0, 4.0 / 3.0, 0.75)
+TEMPO_CONFIRM = 3          # estimates in a row (every TEMPO_EVERY_S) that switch to a new tempo
+TEMPO_CONFIRM_RELATED = 8  # ... when the new tempo is a related one: usually a fill or a riff, not a change
+TRUST_S = 4.0              # a tempo steady this long with kicks is trusted, and held when the kicks stop
+HOLD_MAX_S = 60.0          # longest a trusted tempo is held with no kicks (a breakdown, not a new song)
+SILENCE_COAST_S = 4.0      # the beat clock keeps time through silence this long, then lets go
+BEAT_SILENCE_GRACE_S = 1.0  # beats still count this long into a silence (gaps between sparse hits)
 
 _captureState = None
 
@@ -91,6 +107,7 @@ class Analyzer:
         self.freqs = freqs
         self.bandMasks = {k: (freqs >= lo) & (freqs < hi) for k, (lo, hi) in BANDS.items()}
         self.centroidMask = (freqs >= 40.0) & (freqs <= 12000.0)
+        self.kickMask = (freqs >= KICK_BAND[0]) & (freqs < KICK_BAND[1])
         # onsets are measured on 24 bands spaced evenly in pitch (40 Hz to 11 kHz), so a kick
         # drum counts as much as a hi-hat that covers many more FFT bins
         edges = np.geomspace(40.0, 11000.0, 25)
@@ -103,6 +120,14 @@ class Analyzer:
         self.peaks = {"level": 0.0, "low": 0.0, "mid": 0.0, "high": 0.0, "flux": 0.0}
         self.histLen = int(math.ceil(8.0 * self.fps))
         self.onsetEnv = np.zeros(self.histLen)
+        self.kickEnv = np.zeros(self.histLen)
+        self.prevKick = None
+        self.kickRef = 0.0
+        self.kickRefDecay = 0.5 ** (1.0 / (KICK_REF_HALF_LIFE_S * self.fps))
+        self.kicksPresent = False
+        self.trusted = False
+        self._steadySince = None
+        self._noKickSince = None
         self.frames = 0
         self.onsetCount = 0
         self.lastOnset = -1.0
@@ -165,11 +190,20 @@ class Analyzer:
         self.silent = self.quiet and self.t - self.quietSince >= SILENCE_HOLD_S
         if self.silent and not wasSilent:
             self.silentSince = self.t
+        # amplitude, not log: on a log scale a bass note rising from quiet outweighs a louder
+        # kick that lands while the last bass note is still sounding
+        ampKick = math.sqrt(float(np.sum(power[self.kickMask])) * scale)
+        kick = 0.0 if self.prevKick is None else max(0.0, ampKick - self.prevKick)
+        self.prevKick = ampKick
         if self.quiet:
             flux = 0.0
+            kick = 0.0
 
         self.onsetEnv = np.roll(self.onsetEnv, -1)
         self.onsetEnv[-1] = flux
+        self.kickEnv = np.roll(self.kickEnv, -1)
+        self.kickEnv[-1] = kick
+        self.kickRef = max(kick, self.kickRef * self.kickRefDecay)
 
         out = {"t": self.t, "rms_db": round(rmsDb, 1), "silent": self.silent}
         for key, value in (("level", rms), ("low", bandRms["low"]), ("mid", bandRms["mid"]), ("high", bandRms["high"])):
@@ -223,6 +257,16 @@ class Analyzer:
             if self.silent:
                 self.confidence = 0.0
             return
+        self.kicksPresent = self._countKicks() >= KICK_MIN_COUNT
+        if self.kicksPresent:
+            self._noKickSince = None
+        elif self._noKickSince is None:
+            self._noKickSince = self.t
+        if self.trusted and not self.kicksPresent:
+            if self.t - self._noKickSince < HOLD_MAX_S:
+                return  # a breakdown: the beat clock keeps the trusted tempo and phase
+            self.trusted = False
+            self._steadySince = None
         x = self.onsetEnv[-min(w, filled):]
         # a little blur: beats at a fractional number of frames apart still line up
         x = np.convolve(x, (0.25, 0.5, 0.25), mode="same")
@@ -249,7 +293,7 @@ class Analyzer:
             # the period itself and its double support a tempo. A strong peak at half the period
             # counts against it, but only when twice this tempo is itself a plausible tempo:
             # eighth notes over a 124 BPM beat are not a 248 BPM song
-            score = at(lag) + 0.5 * at(2 * lag)
+            score = at(lag) + 0.5 * at(2 * lag) + TEMPO_BAR_WEIGHT * at(4 * lag)
             if 2 * bpm <= BPM_MAX:
                 score -= 0.35 * max(0.0, at(lag / 2))
             score *= math.exp(-0.5 * (math.log2(bpm / BPM_PRIOR) / 0.8) ** 2)
@@ -258,39 +302,79 @@ class Analyzer:
             bpm += 0.25
         if best is None or bestScore <= 0:
             return
+        # refine: the autocorrelation at 1 to 4 periods pins the period down far finer than one
+        # step of the search (0.25 BPM is 0.2% at 120, enough to drift a light off the beat)
+        top = max(1, min(4, int((n - 2) // (60.0 * self.fps / best))))
+        fine, fineScore = best, -1e9
+        b = best - 0.3
+        while b <= best + 0.3:
+            lag = 60.0 * self.fps / b
+            sc = sum(at(m * lag) for m in range(1, top + 1))
+            if sc > fineScore:
+                fine, fineScore = b, sc
+            b += 0.02
         lag = 60.0 * self.fps / best
-        cand = 60.0 * self.fps / lag
+        cand = fine
         self.confidence = float(max(0.0, min(1.0, at(lag))))
         if self.bpm <= 0:
             self.bpm = cand
         elif abs(cand / self.bpm - 1.0) < 0.04:
             self.bpm += (cand - self.bpm) * 0.3
+            self._pendingBpm = None
         elif self._pendingBpm is not None and abs(cand / self._pendingBpm - 1.0) < 0.04:
             self._pendingCount += 1
-            if self._pendingCount >= 3:  # a new tempo three times running: the song changed tempo
-                self.bpm = cand
+            related = self.trusted and any(abs(cand / (self.bpm * r) - 1.0) < 0.04 for r in RELATED_TEMPOS)
+            if self._pendingCount >= (TEMPO_CONFIRM_RELATED if related else TEMPO_CONFIRM):
+                self.bpm = cand  # the song changed tempo
                 self._pendingBpm = None
+                self.trusted = False
+                self._steadySince = None
         else:
             self._pendingBpm, self._pendingCount = cand, 1
+        if self.kicksPresent and abs(cand / self.bpm - 1.0) < 0.02:
+            if self._steadySince is None:
+                self._steadySince = self.t
+            if self.t - self._steadySince >= TRUST_S:
+                self.trusted = True
+        elif not self.trusted:
+            self._steadySince = None
         self.period = 60.0 / self.bpm
         self._alignPhase()
 
+    def _countKicks(self):
+        """Kick onsets in the last KICK_WINDOW_S: peaks in the kick band's envelope that are at
+        least a third of a recent strong one."""
+        w = int(KICK_WINDOW_S * self.fps)
+        x = self.kickEnv[-w:]
+        thr = self.kickRef / 3.0
+        if thr <= 0:
+            return 0
+        peaks = (x[1:-1] >= thr) & (x[1:-1] >= x[:-2]) & (x[1:-1] > x[2:])
+        return int(np.sum(peaks))
+
     def _alignPhase(self):
         """Find where the beats fall: the offset whose comb of beat times collects the most
-        onset energy over the last few seconds."""
+        onset energy over the last few seconds, recent beats counting most. With kicks, the
+        kick band leads: across the whole spectrum an off-beat bass note or busy hi-hats
+        outweigh the kick."""
         p = self.period * self.fps
         filled = min(self.frames, self.histLen)
-        k = int(min(4.0 * self.fps, filled) // p)
+        k = int(min(PHASE_WINDOW_S * self.fps, filled) // p)
         if k < 2:
             return
-        env = self.onsetEnv
-        best, bestScore = 0, -1.0
-        for off in range(int(math.ceil(p))):
-            idx = [len(env) - 1 - int(round(off + j * p)) for j in range(k)]
-            score = float(sum(env[i] for i in idx if i >= 0))
-            if score > bestScore:
-                best, bestScore = off, score
-        lastBeat = self.t - best / self.fps
+        flux = self.onsetEnv / self.peaks["flux"] if self.peaks["flux"] > 0 else self.onsetEnv
+        if self.kicksPresent and self.kickRef > 0:
+            env = self.kickEnv / self.kickRef + PHASE_FLUX_WEIGHT * flux
+        else:
+            env = flux
+        # quarter-frame steps between frames: a whole frame (21 ms) is too coarse for a beat
+        n = len(env)
+        offs = np.arange(0.0, p, 0.25)
+        pos = (n - 1) - (offs[:, None] + np.arange(k)[None, :] * p)
+        weights = PHASE_DECAY ** np.arange(k)
+        scores = (np.interp(pos, np.arange(n), env) * weights).sum(axis=1)
+        best = float(offs[int(np.argmax(scores))])
+        lastBeat = self.t - best / self.fps - PHASE_LAG_S
         nxt = lastBeat + self.period
         while nxt <= self.t:
             nxt += self.period
@@ -314,10 +398,21 @@ class Analyzer:
     def _advanceBeats(self):
         if self.nextBeat is None or self.period <= 0:
             return
-        if self.silent and self.t - self.silentSince > 1.0:
-            self.nextBeat = None  # the beat clock stops in silence and re-aligns when sound returns
-            return
-        while self.t >= self.nextBeat:
+        if self.silent:
+            if self.t - self.silentSince > SILENCE_COAST_S:
+                self.nextBeat = None  # the beat clock stops and re-aligns when sound returns
+                self.trusted = False
+                self._steadySince = None
+                return
+            if self.t - self.silentSince > BEAT_SILENCE_GRACE_S:
+                # a longer stop (before a drop): keep time without beats, so the first beat
+                # after it lands where it should and sound modes stay at their floor meanwhile
+                while self.t + 0.5 * self.hop / self.sr >= self.nextBeat:
+                    self.nextBeat += self.period
+                return
+        # fire on the block nearest the beat rather than the first one after it: half a block
+        # (about 10 ms) sooner on average
+        while self.t + 0.5 * self.hop / self.sr >= self.nextBeat:
             self.beatCount += 1
             self.lastBeat = self.nextBeat
             self.nextBeat += self.period

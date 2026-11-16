@@ -714,10 +714,49 @@ def t_beatScorer():
     check(abs(song["reference_bpm"] - 126.0) < 0.3, "song reference tempo %s" % song["reference_bpm"])
 
 
+def t_beatTracking():
+    """The live beat tracker on tests/beat_score.py's cases, with room below what it scores
+    today. Phase comes from the kick, so an off-beat bass, a dotted riff or 2-step don't pull it
+    off the beat; a trusted tempo holds through a breakdown with no drums and a short stop;
+    beats land within a few ms of the sound, not 30 to 50 ms late."""
+    import beat_score
+    need = {"clicks120": 0.95, "house": 0.95, "riff": 0.95, "breakdown": 0.95, "garage": 0.85,
+            "jump": 0.75, "ramp": 0.6, "roll": 0.95, "quiet": 0.9, "sparse_intro": 0.9}
+    lines = []
+    for name, least in need.items():
+        r = beat_score.runCase(name)
+        check(r["hit"] is not None and r["hit"] >= least, "%s: %s of beats hit, want %d%% (%s)" % (name, r["hit"], least * 100, r))
+        lines.append("%s %d%%" % (name, round(r["hit"] * 100)))
+        if name in ("clicks120", "house", "riff", "breakdown"):
+            check(abs(r["offset_ms"]) <= 20, "%s: beats %s ms off the sound" % (name, r["offset_ms"]))
+    br = beat_score.runCase("breakdown")
+    check(br["segments"][1]["hit"] >= 0.9, "the beat holds through 32 bars of pads: %s" % br["segments"])
+    # half-time reads at half speed: fine for lights, which flash every other beat above 120 anyway
+    half = beat_score.runCase("halftime")
+    check(half["tempo_ok"] + half["related"].get("x1/2", 0) >= 0.95, "half-time: %s" % half)
+    RESULTS.append("    beats hit: " + ", ".join(lines))
+
+
+def t_beatsStopInLongSilence():
+    """Through a stop of a few seconds the clock keeps time without firing beats (sound modes
+    sit at their floor), and the first beat after it is on time."""
+    import beat_score
+    x, truth = beat_score.render(beat_score.CASES["quiet"])
+    fs = au.Analyzer().analyze(x)
+    fired = beat_score.firedBeats(fs)
+    silence = [t for t, _, seg in truth if seg == 1]
+    start, end = silence[0], silence[-1] + 60.0 / 128
+    inside = [t for t in fired if start + au.BEAT_SILENCE_GRACE_S + 0.1 < t < end - 0.05]
+    check(not inside, "beats fired %d s into the silence: %s" % (au.BEAT_SILENCE_GRACE_S, inside))
+    after = [t for t, _, seg in truth if seg == 2][:4]
+    for t in after:
+        check(min(abs(f - t) for f in fired) <= beat_score.TOLERANCE_S, "beat at %.2f s after the stop missed" % t)
+
+
 TESTS = [t_tempoOfClickTracks, t_tempoOfDrumPattern, t_tempoChange, t_bandsAndCentroid, t_silenceAndGaps,
          t_levelIsRelative, t_shippedModesValid, t_shippedModesUnderFlashLimit, t_modesMoveWithTheMusic,
          t_modesAimAtRoles, t_beatChase, t_hardModesSnap, t_beatBlinkPaced, t_brightnessCurve, t_warmGlowIsWhiteOnly, t_silenceSettlesAtTheFloor, t_modeValidation,
-         t_docExamplesValidate, t_colourCycle, t_voices, t_retryNow, t_silenceMeansFloor, t_songAnalysis, t_songRiser, t_externalSections, t_songFiles, t_beatScorer]
+         t_docExamplesValidate, t_colourCycle, t_voices, t_retryNow, t_silenceMeansFloor, t_songAnalysis, t_songRiser, t_externalSections, t_songFiles, t_beatScorer, t_beatTracking, t_beatsStopInLongSilence]
 
 
 def main():
