@@ -2,7 +2,7 @@
 
 Changes relative to upstream [NeewerLite-Python v0.12d](https://github.com/taburineagle/NeewerLite-Python).
 
-## v1.4.0 - in development
+## v1.4.0 - 2026-11-16
 
 ### Added
 - **Sound modes: lights that follow whatever is playing, live.** By default NeewerLux listens to what the computer's default output plays (Windows loopback capture, no cable or virtual device; it follows the default if you change it), or any other output or input you pick. It measures the level, bass, mids and treble, how bright the sound is (spectral centroid), onsets, the tempo and a beat clock, on a thread of its own, and a sound mode maps that onto the lights it aims at by role or position. 62 ship (see below); none of them touches the key light. Each has a sensitivity, floor and ceiling brightness, smoothing and a palette, and they are JSON files in `light_prefs/sound_modes/` (format in `docs/SOUND_MODES.md`), so you can make your own.

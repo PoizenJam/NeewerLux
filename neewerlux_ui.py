@@ -1866,7 +1866,7 @@ copied between installations.</p>
 <tr><td><b>light=N&amp;mode=HSI&amp;hue=240&amp;sat=100&amp;bri=80</b></td><td>Set a light to HSI mode</td></tr>
 <tr><td><b>light=N&amp;mode=ANM&amp;scene=1&amp;bri=50</b></td><td>Set a light to a built-in scene</td></tr>
 <tr><td><b>turnoff / turnon</b></td><td>Power lights off or on</td></tr>
-<tr><td><b>use_preset=N</b></td><td>Recall preset N</td></tr>
+<tr><td><b>use_preset=N</b></td><td>Recall preset N; add <code>&amp;layer=effect&amp;hold=3000</code> to show it for a while over whatever is playing</td></tr>
 <tr><td><b>animate=Name|speed|rate|bri|loop|maxLoops|revert</b></td>
     <td>Play an animation. Only the name is required. The rest are positional and optional:
     speed (1.0), rate (5), brightness percent (80), loop (true/false), maxLoops (0 for
@@ -1876,15 +1876,15 @@ copied between installations.</p>
 <tr><td><b>animate=Name|...|revert|layer|queue|target</b></td><td>Optional layer (override, effect, show), queue mode (queue, replace) and target such as <code>@rim</code></td></tr>
 <tr><td><b>stop_layer=effect</b></td><td>Stop a layer (<code>effect_all</code> also clears the effect queue; also <code>show</code>, <code>sound</code>, <code>all</code>)</td></tr>
 <tr><td><b>sound=start|Pulse</b></td><td>Start a sound mode (lights following live audio); also <code>mode|Name</code>, <code>stop</code>; add <code>|1;3</code> for some lights only (<code>stop|3</code>)</td></tr>
-<tr><td><b>sequence=play|Name</b></td><td>Play a sequence; also <code>pause</code>, <code>resume</code>, <code>stop</code></td></tr>
+<tr><td><b>sequence=play|Name</b></td><td>Play a sequence (<code>play|Name|start|brightness|watchdog</code>); <code>song|Artist|Song</code> finds it by artist and song; also <code>pause</code>, <code>resume</code>, <code>stop</code></td></tr>
 <tr><td><b>status_json</b></td><td>Layers, sequence position, and each light's layer and approximate colour</td></tr>
 </table>
 <p>POST to <code>/NeewerLux/batch</code> for multi-light JSON commands, to
 <code>/NeewerLux/animate</code> for JSON animation control, to <code>/NeewerLux/sequence</code>
 for sequences (list, reload, play, pause, resume, stop, seek, set_position, status, validate,
-save, get, delete, render), to <code>/NeewerLux/sound</code> for sound modes (start, stop,
+save, get, delete, render, analyze, draft and the draft styles), to <code>/NeewerLux/song</code> to upload a song for analysis, to <code>/NeewerLux/sound</code> for sound modes (start, stop,
 mode, set, device, status and the mode files), to <code>/NeewerLux/presets</code> to edit presets, or to
-<code>/NeewerLux/settings</code> for light and show preferences (get, set_light, set_global). The web dashboard has the same Sequences, Stage and Settings panels
+<code>/NeewerLux/settings</code> for light and show preferences (get, set_light, set_global, and your swatches). The web dashboard has the same Sequences, Sound, Stage and Settings panels
 as this window. The full contract, including the structured light state in <code>list_json</code>,
 is in <code>docs/HTTP_API.md</code>.</p>
 

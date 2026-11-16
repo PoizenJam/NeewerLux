@@ -871,6 +871,7 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
                 <div class="api-code">POST /NeewerLux/settings {"action":"get"}</div>
                 <div class="api-code">POST /NeewerLux/settings {"action":"set_light","light":0,"settings":{"role":"key","maxBri":60}}</div>
                 <div class="api-code">POST /NeewerLux/settings {"action":"set_global","settings":{"envMaxBri":80}}</div>
+                <div class="api-code">POST /NeewerLux/settings {"action":"add_swatch","hue":200,"sat":80} | {"action":"delete_swatch","index":0} | {"action":"swatches"}</div>
             </div>
             <div class="api-section">
                 <h3>Utility</h3>
