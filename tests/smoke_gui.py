@@ -85,6 +85,18 @@ def tooBig(widget):
     return (w, h) if w > SMALL_SCREEN[0] or h > SMALL_SCREEN[1] else None
 
 
+def widthBreakdown(win):
+    """The main window's parts and their minimum widths, to show what holds it wide."""
+    parts = [(w.objectName() or type(w).__name__, w.minimumSizeHint().width()) for w in win.centralWidget().children()
+             if hasattr(w, "minimumSizeHint") and w.isVisible()]
+    tabs = win.ColorModeTabWidget
+    parts += [("tab " + tabs.tabText(i), tabs.widget(i).minimumSizeHint().width()) for i in range(tabs.count())]
+    tb = win.findChild(type(win.centralWidget()), "toolbarWidget")
+    if tb is not None:
+        parts += [("button " + w.text(), w.minimumSizeHint().width()) for w in tb.findChildren(type(win.turnOffButton))]
+    return ", ".join("%s %d" % p for p in parts)
+
+
 def fixedTables(widget):
     """Tables in widget whose columns the user can't drag (none Interactive), or with a stretching
     column, which makes each divider move the one to its left."""
@@ -289,7 +301,9 @@ def checkOwnSwatches(nl, app, win):
     app.processEvents()
     assert win.minimumSizeHint() == emptySize, "a full set of swatches doesn't change the main window's minimum: %s, was %s" % (
         win.minimumSizeHint(), emptySize)
-    assert not tooBig(win), "the main window still fits %dx%d with a full set of swatches: %s" % (SMALL_SCREEN + (tooBig(win),))
+    if tooBig(win):
+        # not a swatch failure (the size is the same as with none): the main window's own check comes later
+        print("note: the main window's minimum here is %s (%s)" % (tooBig(win), widthBreakdown(win)))
     tabs.setCurrentIndex(lastTab)
     b = win.hsiSwatches.buttons[0]
     assert (b.height(), win.hsiSwatches.addButton.height()) == (22, 22), \
@@ -615,7 +629,8 @@ def main():
     win.songSectionCommandOnCheck.setChecked(True)
     assert win.songSectionCommandField.isEnabled()
     songDialog = SongDraftDialog(nl.SongDraftHost(), win)
-    assert not tooBig(songDialog) and not tooBig(win), "the song dialog and the main window fit a small screen: %s %s" % (tooBig(songDialog), tooBig(win))
+    assert not tooBig(songDialog) and not tooBig(win), "the song dialog and the main window fit a small screen: %s %s (%s)" % (
+        tooBig(songDialog), tooBig(win), widthBreakdown(win))
     native.extend(nativeSpins(songDialog))
     assert songDialog.styleCombo.count() >= 25 and songDialog.styleNote.text(), "the song dialog lists the draft styles"
     styles = songDialog.editStyles()
