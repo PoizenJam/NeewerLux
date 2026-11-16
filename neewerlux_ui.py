@@ -1487,6 +1487,12 @@ class Ui_MainWindow(object):
                                              "and the finder's label shows on hover. On: the finder's label is the name and\n"
                                              "NeewerLux's shows on hover; drafts still go by NeewerLux's.")
         shows.addRow("", self.songFinderNamesCheck)
+        self.songSectionCommandOnCheck = QCheckBox("Use the section finder command")
+        self.songSectionCommandOnCheck.setChecked(True)
+        self.songSectionCommandOnCheck.setToolTip("Off: songs use the built-in analysis and the command is kept for later")
+        self.songSectionCommandOnCheck.toggled.connect(self.songSectionCommandField.setEnabled)
+        self.songSectionCommandOnCheck.toggled.connect(self.songFinderNamesCheck.setEnabled)
+        shows.addRow("", self.songSectionCommandOnCheck)
         shows.addRow(QLabel("<br><strong>Your rig</strong>"))
         shows.addRow("Main camera:", self.cameraPositionCombo)
         shows.addRow(cctFallbackRow)

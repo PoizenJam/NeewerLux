@@ -643,7 +643,7 @@ def main():
               "the style editor shows over the song dialog")
         row = "document.querySelector('#dsRows tr[data-kind=\"Breakdown\"]')"
         check(js(page, row + ".querySelector('summary').textContent") == "hit_chase, sound" and
-              js(page, row + ".querySelector('.ds-sound').value") == "intense" and "sound modes" in js(page, row + ".querySelector('.ds-count').textContent"),
+              js(page, row + ".querySelector('.ds-sound').value") == "intense" and js(page, row + ".querySelector('.ds-count').textContent").endswith(" sound"),
               "the style shown: %s" % js(page, row + ".innerText"))
         spin(200)
         view.grab().save(os.path.join(rig.workdir, "webui_styles.png"))

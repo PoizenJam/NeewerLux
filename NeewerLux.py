@@ -385,6 +385,7 @@ soundMode = "Pulse"       # the sound mode last started, and the capture device 
 soundDevice = ""
 songSectionCommand = ""   # another section finder to run on songs (Global Preferences only: it runs a program)
 songFinderNames = False   # name sections with that finder's labels instead of NeewerLux's
+songSectionCommandOn = True  # off: the built-in analysis, keeping the command for later
 stageView = "plan"        # the desktop Stage window's view, and its size and place ("x,y,w,h"), remembered
 stageGeometry = ""
 fadeInMs = 0              # fade when a preset, animation or sequence takes lights over; 0 = cut (each can set its own)
@@ -3195,6 +3196,7 @@ try: # try to load the GUI
                 self.fadeInSpin.setValue(fadeInMs)
                 self.songSectionCommandField.setText(songSectionCommand)
                 self.songFinderNamesCheck.setChecked(songFinderNames)
+                self.songSectionCommandOnCheck.setChecked(songSectionCommandOn)
                 self.simulatedLightsCombo.setCurrentIndex(simulatedLights)
                 self.simulatedCCTOnlyCheck.setChecked(simulatedCCTOnly)
                 self.maxNumOfAttempts_field.setText(str(maxNumOfAttempts))
@@ -3255,6 +3257,7 @@ try: # try to load the GUI
                 self.fadeInSpin.setValue(0)
                 self.songSectionCommandField.setText("")
                 self.songFinderNamesCheck.setChecked(False)
+                self.songSectionCommandOnCheck.setChecked(True)
                 self.simulatedLightsCombo.setCurrentIndex(0)
                 self.simulatedCCTOnlyCheck.setChecked(False)
                 self.maxNumOfAttempts_field.setText("6")
@@ -3287,7 +3290,7 @@ try: # try to load the GUI
 
         def saveGlobalPrefs(self):
             # change these global values to the new values in Prefs
-            global customKeys, autoConnectToLights, printDebug, rememberLightsOnExit, rememberPresetsOnExit, autoReconnectOnDisconnect, maxNumOfAttempts, acceptable_HTTP_IPs, whiteListedMACs, hideConsoleOnLaunch, minimizeToTrayOnClose, httpAutoStart, httpPort, cctFallbackMode, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, globalCCTMin, globalCCTMax, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, cctFallbackMode, envMaxBri, envMinBri, seqFrameRate, effectMaxSeconds, simulatedLights, simulatedCCTOnly, flashGuardEnabled, cameraPosition, eyelineFlash, handbackFadeMs, fadeInMs, songSectionCommand, songFinderNames
+            global customKeys, autoConnectToLights, printDebug, rememberLightsOnExit, rememberPresetsOnExit, autoReconnectOnDisconnect, maxNumOfAttempts, acceptable_HTTP_IPs, whiteListedMACs, hideConsoleOnLaunch, minimizeToTrayOnClose, httpAutoStart, httpPort, cctFallbackMode, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, globalCCTMin, globalCCTMax, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, cctFallbackMode, envMaxBri, envMinBri, seqFrameRate, effectMaxSeconds, simulatedLights, simulatedCCTOnly, flashGuardEnabled, cameraPosition, eyelineFlash, handbackFadeMs, fadeInMs, songSectionCommand, songFinderNames, songSectionCommandOn
 
             finalPrefs = [] # list of final prefs to merge together at the end
 
@@ -3443,6 +3446,9 @@ try: # try to load the GUI
             songFinderNames = self.songFinderNamesCheck.isChecked()
             if songFinderNames:
                 finalPrefs.append("songFinderNames=1")
+            songSectionCommandOn = self.songSectionCommandOnCheck.isChecked()
+            if not songSectionCommandOn:
+                finalPrefs.append("songSectionCommandOn=0")
 
             # Simulated lights take effect at the next start (the light list isn't rebuilt live)
             simulatedLights = self.simulatedLightsCombo.currentIndex()
@@ -7777,7 +7783,7 @@ def analyzeSongFile(path, bpm=None, offsetMs=None):
     if len(samples) < sr * 5:
         return {"success": False, "errors": ["the song is shorter than 5 seconds"]}
     segments, notes = None, []
-    if songSectionCommand:
+    if songSectionCommand and songSectionCommandOn:
         # an absolute path can't be mistaken for one of the finder's own options
         segments, why = audio.externalSections(songSectionCommand, os.path.abspath(path))
         if segments is None:
@@ -10248,7 +10254,7 @@ def loadPrefsFile(globalPrefsFile = ""):
            rememberLightsOnExit, acceptable_HTTP_IPs, customKeys, enableTabsOnLaunch, \
            whiteListedMACs, rememberPresetsOnExit, autoReconnectOnDisconnect, livePreview, hideConsoleOnLaunch, minimizeToTrayOnClose, httpAutoStart, httpPort, cctFallbackMode, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, \
            envMaxBri, envMinBri, seqFrameRate, effectMaxSeconds, simulatedLights, simulatedCCTOnly, flashGuardEnabled, \
-           cameraPosition, eyelineFlash, handbackFadeMs, fadeInMs, stageView, stageGeometry, soundMode, soundDevice, songSectionCommand, songFinderNames
+           cameraPosition, eyelineFlash, handbackFadeMs, fadeInMs, stageView, stageGeometry, soundMode, soundDevice, songSectionCommand, songFinderNames, songSectionCommandOn
 
     if globalPrefsFile != "":
         printDebugString("Loading global preferences from file...")
@@ -10263,7 +10269,7 @@ def loadPrefsFile(globalPrefsFile = ""):
             "SC_Dec_1_Large", "SC_Inc_1_Large", "SC_Dec_2_Large", "SC_Inc_2_Large", "SC_Dec_3_Large", "SC_Inc_3_Large", \
             "enableTabsOnLaunch", "whiteListedMACs", "rememberPresetsOnExit", "autoReconnectOnDisconnect", "hideConsoleOnLaunch", "minimizeToTrayOnClose", "livePreview", "httpAutoStart", "httpPort", "cctFallbackMode", "enableLogTab", "logToFile", "logHeartbeat", "globalCCTMin", "globalCCTMax", \
             "envMaxBri", "envMinBri", "seqFrameRate", "effectMaxSeconds", "simulatedLights", "simulatedCCTOnly", "flashGuard", \
-            "cameraPosition", "eyelineFlash", "handbackFadeMs", "fadeInMs", "stageView", "stageGeometry", "soundMode", "soundDevice", "songSectionCommand", "songFinderNames"]
+            "cameraPosition", "eyelineFlash", "handbackFadeMs", "fadeInMs", "stageView", "stageGeometry", "soundMode", "soundDevice", "songSectionCommand", "songFinderNames", "songSectionCommandOn"]
 
         # KICK OUT ANY PARAMETERS THAT AREN'T IN THE "ACCEPTABLE ARGUMENTS" LIST ABOVE
         # THIS SECTION OF CODE IS *SLIGHTLY* DIFFERENT THAN THE CLI KICK OUT CODE
@@ -10314,6 +10320,7 @@ def loadPrefsFile(globalPrefsFile = ""):
     prefsParser.add_argument("--soundDevice", default="")
     prefsParser.add_argument("--songSectionCommand", default="")
     prefsParser.add_argument("--songFinderNames", default="0")
+    prefsParser.add_argument("--songSectionCommandOn", default="1")
     prefsParser.add_argument("--seqFrameRate", default=20)
     prefsParser.add_argument("--effectMaxSeconds", default=30)
     prefsParser.add_argument("--simulatedLights", default=0)
@@ -10400,6 +10407,7 @@ def loadPrefsFile(globalPrefsFile = ""):
     soundDevice = str(mainPrefs.soundDevice or "")
     songSectionCommand = str(mainPrefs.songSectionCommand or "").strip()
     songFinderNames = str(mainPrefs.songFinderNames) == "1"
+    songSectionCommandOn = str(mainPrefs.songSectionCommandOn) != "0"
 
     if type(mainPrefs.acceptableIPs) is not list: # we have a string in the return, so we need to post-process it
         acceptable_HTTP_IPs = mainPrefs.acceptableIPs.replace(" ", "").split(";") # split the IP addresses into a list for acceptable IPs

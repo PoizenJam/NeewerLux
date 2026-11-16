@@ -2115,6 +2115,10 @@ def t_songHTTP(rig):
             check(got["success"] and got["sections_from"] == "command" and any(s.get("ai_label") == "chorus" for s in got["sections"]),
                   "a finder command sets the sections: %s" % {k: got.get(k) for k in ("sections_from", "warnings", "sections")})
             check(all("kind" not in s for s in got["sections"]), "NeewerLux names them by default")
+            nl.songSectionCommandOn = False
+            off = rig.post("/NeewerLux/sequence", {"action": "analyze", "path": path})
+            check(off["sections_from"] == "analysis" and not off["warnings"], "turned off, the command is kept but not run: %s" % off.get("sections_from"))
+            nl.songSectionCommandOn = True
             nl.songFinderNames = True
             got = rig.post("/NeewerLux/sequence", {"action": "analyze", "path": path})
             named = [s for s in got["sections"] if s.get("ai_label") == "chorus"]

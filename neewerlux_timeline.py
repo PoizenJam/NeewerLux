@@ -1119,8 +1119,10 @@ class DraftStyleDialog(QDialog):
             matches = QTableWidgetItem("")
             matches.setFlags(Qt.ItemIsEnabled)
             self.table.setItem(row, 4, matches)
-        for col, width in ((0, 90), (1, 190), (2, 220), (3, 220)):
-            self.table.setColumnWidth(col, width)
+        fm = self.table.fontMetrics()
+        self.table.setColumnWidth(0, fm.horizontalAdvance("Breakdown") + 24)
+        self.table.setColumnWidth(2, 170)
+        self.table.setColumnWidth(3, 170)
         lay.addWidget(self.table, 1)
         self.notes = QLabel("Behaviours: " + " ".join("%s: %s" % (b, show.DRAFT_BEHAVIOUR_NOTES[b]) for b in show.DRAFT_BEHAVIOURS))
         self.notes.setWordWrap(True)
@@ -1212,6 +1214,9 @@ class DraftStyleDialog(QDialog):
             self.soundEdits[kind].setText(show.draftPoolText(dict({"tags": [], "exclude": [], "names": []}, **(sec.get("sound_modes") or {}))))
             self._counts(kind)
         self.status.setText("Can't be used: " + "; ".join(st["errors"]) if st.get("errors") else "")
+        # the behaviour column fits its longest list (within reason), leaving Matches the rest
+        want = max(b.sizeHint().width() for b in self.behaviourButtons.values()) + 12
+        self.table.setColumnWidth(1, max(self.table.columnWidth(1), min(280, want)))
 
     def _behavioursChanged(self, kind):
         # kept in the order chosen: sections of the kind take them in turn from the first
@@ -1226,8 +1231,11 @@ class DraftStyleDialog(QDialog):
         row = show.DRAFT_SECTIONS.index(kind)
         anims = self.host.poolCounts(show.draftPoolFromText(self.animEdits[kind].text(), self._names["animations"]), "animations")
         modes = self.host.poolCounts(show.draftPoolFromText(self.soundEdits[kind].text(), self._names["sound_modes"]), "sound_modes")
-        self.table.item(row, 4).setText("%d animations%s, %d sound modes%s" % (anims, "" if self.animCheck.isChecked() else " (off)",
-                                                                             modes, "" if self.soundCheck.isChecked() else " (off)"))
+        item = self.table.item(row, 4)
+        item.setText("%d anim%s, %d sound%s" % (anims, "" if self.animCheck.isChecked() else " (off)",
+                                                  modes, "" if self.soundCheck.isChecked() else " (off)"))
+        item.setToolTip("%d animations and %d sound modes match%s" % (anims, modes, "" if self.animCheck.isChecked() and self.soundCheck.isChecked()
+                                                                        else "; the ones marked off aren't used by this style"))
 
     def data(self, name=None):
         """The style as edited, or None (with the reason in the status line) if the colours don't read."""

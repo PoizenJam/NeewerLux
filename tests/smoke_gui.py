@@ -481,6 +481,10 @@ def main():
             w.close()
     from neewerlux_timeline import SongDraftDialog
     assert win.seqFromSongButton.text() == "From song..."
+    win.songSectionCommandOnCheck.setChecked(False)
+    assert not win.songSectionCommandField.isEnabled() and not win.songFinderNamesCheck.isEnabled(), "turning the finder off greys out its settings"
+    win.songSectionCommandOnCheck.setChecked(True)
+    assert win.songSectionCommandField.isEnabled()
     songDialog = SongDraftDialog(nl.SongDraftHost(), win)
     assert not tooBig(songDialog) and not tooBig(win), "the song dialog and the main window fit a small screen: %s %s" % (tooBig(songDialog), tooBig(win))
     native.extend(nativeSpins(songDialog))
@@ -583,15 +587,21 @@ def main():
     win.seqFrameRateSpin.setValue(15)
     win.simulatedLightsCombo.setCurrentIndex(3)
     win.simulatedCCTOnlyCheck.setChecked(True)
+    win.songSectionCommandField.setText("finder {song}")
+    win.songSectionCommandOnCheck.setChecked(False)
     nl.globalPrefsFile = os.path.join(rig.workdir, "light_prefs", "NeewerLux.prefs")
     win.saveGlobalPrefs()
     text = open(nl.globalPrefsFile, encoding="utf-8").read()
     assert "envMaxBri=80" in text and "seqFrameRate=15" in text and "simulatedLights=3" in text and "simulatedCCTOnly=1" in text, text
-    nl.envMaxBri, nl.seqFrameRate, nl.simulatedLights, nl.simulatedCCTOnly = 100, 20, 0, False
+    assert "songSectionCommand=finder {song}" in text and "songSectionCommandOn=0" in text, text
+    nl.envMaxBri, nl.seqFrameRate, nl.simulatedLights, nl.simulatedCCTOnly, nl.songSectionCommandOn = 100, 20, 0, False, True
     nl.loadPrefsFile(nl.globalPrefsFile)
     assert nl.envMaxBri == 80 and nl.seqFrameRate == 15 and nl.simulatedLights == 3 and nl.simulatedCCTOnly is True
+    assert nl.songSectionCommand == "finder {song}" and nl.songSectionCommandOn is False, "the finder is kept but off"
     win.setupGlobalLightPrefsTab(True)
     assert win.envMaxBriSpin.value() == 100 and win.effectMaxSecondsSpin.value() == 30 and win.simulatedLightsCombo.currentIndex() == 0
+    assert win.songSectionCommandOnCheck.isChecked() and win.songSectionCommandField.text() == ""
+    nl.songSectionCommand, nl.songSectionCommandOn = "", True
 
     # Settings changed from the web dashboard show up in the window, and the window's next
     # Save keeps them (the file isn't overwritten with stale widget values)

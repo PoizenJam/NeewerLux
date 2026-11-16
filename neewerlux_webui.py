@@ -3038,8 +3038,9 @@ function dsCount(kind) {
     if (!row) return;
     const a = dsMatches(dsPoolFromText(row.querySelector('.ds-anim').value, Object.keys(dsInfo.animation_items)), dsInfo.animation_items);
     const m = dsMatches(dsPoolFromText(row.querySelector('.ds-sound').value, Object.keys(dsInfo.sound_mode_items)), dsInfo.sound_mode_items);
-    row.querySelector('.ds-count').textContent = a + ' animations' + (document.getElementById('dsAnims').checked ? '' : ' (off)') + ', ' +
-        m + ' sound modes' + (document.getElementById('dsSounds').checked ? '' : ' (off)');
+    const cell = row.querySelector('.ds-count'), on = document.getElementById('dsAnims').checked && document.getElementById('dsSounds').checked;
+    cell.textContent = a + ' anim' + (document.getElementById('dsAnims').checked ? '' : ' (off)') + ', ' + m + ' sound' + (document.getElementById('dsSounds').checked ? '' : ' (off)');
+    cell.title = a + ' animations and ' + m + ' sound modes match' + (on ? '' : '; the ones marked off aren\'t used by this style');
 }
 function dsCountAll() { dsInfo.sections.forEach(dsCount); }
 function dsBehaviourChanged(kind) {
