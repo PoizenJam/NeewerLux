@@ -1068,6 +1068,9 @@ class AudioEngine:
         self.device = ""
         self.tempoRange = (BPM_MIN, BPM_MAX)
         self._newRange = None
+        # another source of tempo and beats (MIDI clock): when it returns features, its bpm,
+        # beat, beat_phase, beat_t and confidence replace the ones heard in the audio
+        self.beatSource = None
         self.deviceName = ""
         self.error = ""
         self._thread = None
@@ -1114,7 +1117,11 @@ class AudioEngine:
         with self._lock:
             if self._latest is None or time.monotonic() - self._latestAt > STALE_S:
                 return None
-            return dict(self._latest)
+            f = dict(self._latest)
+        beats = self.beatSource() if self.beatSource is not None else None
+        if beats:
+            f.update(beats)
+        return f
 
     def _run(self):
         _initComOnThisThread()

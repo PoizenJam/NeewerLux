@@ -2431,6 +2431,85 @@ def t_compositorWakesOnlyWhenDue(rig):
                    % (len(items), dueTicks, fineTicks, 100.0 * dueTicks / max(1, fineTicks)))
 
 
+def t_midiClockHTTP(rig):
+    """1.4.1: a MIDI input's clock sets the beat sound modes follow (the sound still sets the
+    levels); with the transport setting on, its Start plays the last sequence played, Stop
+    pauses it, Song Position and Continue carry on from there; the input and the setting are
+    remembered; over HTTP and GET. A stand-in input replaces winmm, so this runs anywhere."""
+    nl = rig.nl
+    import threading
+
+    class FakeInput:
+        def __init__(self, name, onMessage):
+            self.name, self.onMessage = name, onMessage
+        def open(self):
+            if self.name != "Fake In":
+                raise OSError("MIDI input " + repr(self.name) + " isn't connected")
+        def close(self):
+            pass
+    saved = (nl.midi.available, nl.midi.listInputs, nl.midiManager.inputFactory)
+    nl.midi.available = lambda: (True, "")
+    nl.midi.listInputs = lambda: ["Fake In"]
+    nl.midiManager.inputFactory = FakeInput
+    stop = threading.Event()
+    sound = lambda body: rig.post("/NeewerLux/sound", body)
+    midiState = lambda: rig.getJSON("status_json")["sound"]["midi"]
+    seqState = lambda: rig.getJSON("status_json")["sequence"]
+    try:
+        check(sound({"action": "midi_devices"})["devices"] == ["Fake In"], "lists the inputs")
+        r = sound({"action": "midi", "device": "Nope"})
+        check(not r["success"] and "isn't connected" in r["errors"][0], "a missing input is an error: %s" % r)
+        check(sound({"action": "midi", "device": "Fake In"})["success"], "opens the input")
+        check("midiDevice=Fake In" in open(nl.globalPrefsFile, encoding="utf-8").read(), "the input is remembered")
+        send = nl.midiManager._input.onMessage
+
+        def pulses():  # 100 BPM: 24 pulses a beat
+            nxt = time.monotonic()
+            while not stop.is_set():
+                send(0xF8, 0, 0)
+                nxt += 0.025
+                time.sleep(max(0.0, nxt - time.monotonic()))
+        threading.Thread(target=pulses, daemon=True).start()
+        check(_until(lambda: midiState()["receiving"] and abs(midiState()["bpm"] - 100) < 1, 3.0), "the clock arrives: %s" % midiState())
+        if not _needsNumpy(rig):
+            _soundSignal(nl)  # 124 BPM kick and hats
+            check(sound({"action": "start", "mode": "Pulse"})["success"], "a sound mode starts")
+            levels = lambda: sound({"action": "status"})["levels"] or {}
+            check(_until(lambda: abs(levels().get("bpm", 0) - 100) < 1 and levels().get("level", 0) > 0, 5.0),
+                  "the MIDI tempo, not the heard 124, with the sound's levels: %s" % levels())
+            sound({"action": "stop"})
+
+        check(sound({"action": "midi_transport", "on": True})["transport"], "transport on")
+        check("midiTransport=1" in open(nl.globalPrefsFile, encoding="utf-8").read(), "the transport setting is remembered")
+        check(rig.post("/NeewerLux/sequence", {"action": "play", "name": "Starter - Countdown"})["success"], "a sequence plays")
+        rig.post("/NeewerLux/sequence", {"action": "stop"})
+        check(_until(lambda: seqState() is None, 2.0), "and is stopped")
+        send(0xFA, 0, 0)
+        check(_until(lambda: (seqState() or {}).get("state") == "playing", 2.0), "MIDI Start plays the last sequence: %s" % seqState())
+        check(seqState()["name"] == "Starter - Countdown" and seqState()["position_ms"] < 1500, "from its start: %s" % seqState())
+        send(0xFC, 0, 0)
+        check(_until(lambda: (seqState() or {}).get("state") == "paused", 2.0), "Stop pauses it: %s" % seqState())
+        send(0xF2, 32, 0)  # two bars of sixteenths: 32 x 150 ms at 100 BPM (it has no tempo of its own)
+        check(_until(lambda: abs((seqState() or {}).get("position_ms", 0) - 4800) < 50, 2.0), "Song Position moves it: %s" % seqState())
+        send(0xFB, 0, 0)
+        check(_until(lambda: (seqState() or {}).get("state") == "playing", 2.0), "Continue carries on: %s" % seqState())
+        check(4800 <= seqState()["position_ms"] < 6500, "from the Song Position: %s" % seqState())
+        sound({"action": "midi_transport", "on": False})
+        send(0xFC, 0, 0)
+        time.sleep(0.3)
+        check(seqState()["state"] == "playing", "with the setting off, Stop does nothing")
+        rig.get("sound=midi|", 0.2)
+        check(midiState()["device"] == "" and not midiState()["connected"], "sound=midi| closes the input: %s" % midiState())
+        prefs = open(nl.globalPrefsFile, encoding="utf-8").read() if os.path.exists(nl.globalPrefsFile) else ""
+        check("midiDevice" not in prefs and "midiTransport" not in prefs, "nothing left in the prefs: %s" % prefs)
+    finally:
+        stop.set()
+        nl.midi.available, nl.midi.listInputs, nl.midiManager.inputFactory = saved
+        nl.setMidiDevice("")
+        nl.setMidiTransport(False)
+        rig.post("/NeewerLux/sequence", {"action": "stop"})
+
+
 TESTS = [t_maxBrightnessHTTP, t_maxBrightnessAnimationAndSequence, t_minBrightness, t_globalDefaultLimit,
          t_slidersExempt, t_lockedLight, t_roleTargets, t_effectOverPartOfRigRejoinsInSync, t_revertToPresetAtEnd,
          t_endPreset, t_holdAtEnd, t_pauseRevertsAndResumes, t_seekAndSetPosition, t_effectQueueReplaceFull,
@@ -2449,7 +2528,7 @@ TESTS = [t_maxBrightnessHTTP, t_maxBrightnessAnimationAndSequence, t_minBrightne
          t_addSimulatedRig, t_compositorWakesOnlyWhenDue, t_handBackToRunningLayerFades,
          t_soundModeHTTP, t_soundUnderShowAndEffects, t_soundRespectsLimitsAndLocks, t_soundUnavailable, t_soundModeFilesHTTP,
          t_offWinsDuringShows, t_animationFlashRates, t_shippedAnimationTags, t_soundCues, t_soundHandsBackToBase, t_manualWriteReleasesSound, t_presetFadeTakesLightsFromSound, t_soundOnSomeLights,
-         t_presetSounds, t_paletteLibrary, t_songDrafts, t_draftStyles, t_playBrightness, t_clockFollow, t_presetAsEffect, t_accessToken, t_reconnectBackoff, t_songHTTP, t_swatches, t_songTags]
+         t_presetSounds, t_paletteLibrary, t_songDrafts, t_draftStyles, t_playBrightness, t_clockFollow, t_presetAsEffect, t_accessToken, t_reconnectBackoff, t_songHTTP, t_swatches, t_songTags, t_midiClockHTTP]
 
 
 def main():

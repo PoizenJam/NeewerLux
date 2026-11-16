@@ -569,7 +569,7 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
             <div id="sndUnavailable" style="display:none;color:var(--muted);font-size:12px"></div>
             <div id="sndControls">
                 <div class="snd-row"><label>Listen to</label><select id="sndDevice" onchange="sndSetDevice(this.value)" title="What an output plays (loopback), or an input such as a microphone or audio interface"></select>
-                    <button class="btn small" onclick="sndDevices()" title="List the audio devices again">Refresh</button></div>
+                    <button class="btn small" onclick="sndDevices(); sndMidiDevices()" title="List the audio devices and MIDI inputs again">Refresh</button></div>
                 <div class="snd-row"><label>Mode</label><select id="sndMode" onchange="sndModeChosen(this.value)"></select></div>
                 <div id="sndDesc" style="color:var(--muted);font-size:11px;margin:2px 0 6px;white-space:pre-line"></div>
                 <div class="btn-row">
@@ -583,6 +583,11 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
                 <div class="snd-row" title="The tempo is only looked for in this range. Narrow it to settle a tempo read at half or double speed: 160 to 185 for drum and bass, 115 to 135 for house."><label>Tempo range</label>
                     <input type="number" id="sndBpmMin" min="40" max="240" value="60" style="width:64px" onchange="sndTempoRange('min')"> to
                     <input type="number" id="sndBpmMax" min="50" max="250" value="200" style="width:64px" onchange="sndTempoRange('max')"> BPM</div>
+                <div class="snd-row" title="Take the tempo and beat from a MIDI input's clock (a DAW, drum machine or sequencer) instead of from the sound, while it sends one"><label>MIDI clock</label>
+                    <select id="sndMidi" onchange="sndSetMidi(this.value)"><option value="">None</option></select></div>
+                <div class="snd-row" title="MIDI Start plays the sequence played last from its start, Continue resumes it, Stop pauses it and Song Position moves it"><label></label>
+                    <label style="min-width:0;color:inherit"><input type="checkbox" id="sndMidiTransport" onchange="sndMidiTransport(this.checked)"> Start/Stop plays the last sequence</label></div>
+                <div id="sndMidiStatus" style="font-size:12px;color:var(--muted);margin-bottom:6px"></div>
                 <div id="sndSliders"></div>
                 <div style="color:var(--muted);font-size:11px;margin:6px 0 2px">Palette: the colours this mode uses. Each group of lights below picks one of them, or moves through them (cycling, on the beat, or with the sound).</div>
                 <div class="snd-row"><label>Palette</label><select id="sndPalKind" onchange="sndPaletteKind(this.value)"><option value="hsi">Colours</option><option value="cct">White (Kelvin)</option></select>
@@ -858,7 +863,8 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
                 <div class="api-code">GET /NeewerLux/doAction?sound=start|Colour Drift|1;3</div>
                 <div class="api-code">GET /NeewerLux/doAction?sound=stop|3</div>
                 <div class="api-code">GET /NeewerLux/doAction?sound=tempo|160|185</div>
-                <div class="api-desc">JSON API: start, stop, mode, set, device, devices, tempo_range, status (with live levels and tempo), list, get, save, delete, validate, reload, palettes, save_palette, delete_palette</div>
+                <div class="api-code">GET /NeewerLux/doAction?sound=midi|loopMIDI Port</div>
+                <div class="api-desc">JSON API: start, stop, mode, set, device, devices, tempo_range, midi_devices, midi, midi_transport, status (with live levels and tempo), list, get, save, delete, validate, reload, palettes, save_palette, delete_palette</div>
                 <div class="api-code">POST /NeewerLux/sound {"action":"set","params":{"sensitivity":1.5,"palette":"Neon"}}</div>
             </div>
             <div class="api-section">
@@ -3762,6 +3768,22 @@ async function sndDevices() {
     sel.value = current;
 }
 async function sndSetDevice(id) { await sndPost({action: 'device', device: id}); }
+async function sndMidiDevices() {
+    const sel = document.getElementById('sndMidi');
+    const d = await sndPost({action: 'midi_devices'});
+    const m = (lastStatus && lastStatus.sound && lastStatus.sound.midi) || {};
+    const list = d.success ? d.devices.slice() : [];
+    if (m.device && !list.includes(m.device)) list.push(m.device);
+    sel.innerHTML = '<option value="">None</option>' + list.map(n => '<option value="' + esc(n) + '">' + esc(n) + '</option>').join('');
+    sel.value = m.device || '';
+    sel.disabled = !d.success;
+    sel.title = d.success ? '' : errText(d);
+}
+async function sndSetMidi(name) {
+    const r = await sndPost({action: 'midi', device: name});
+    if (!r.success) document.getElementById('sndMidiStatus').textContent = 'MIDI: ' + errText(r);
+}
+async function sndMidiTransport(on) { await sndPost({action: 'midi_transport', on: on}); }
 async function sndTempoRange(changed) {
     const lo = document.getElementById('sndBpmMin'), hi = document.getElementById('sndBpmMax');
     // push the other end along rather than refuse the change
@@ -3776,7 +3798,7 @@ function renderSoundStatus() {
     document.getElementById('sndUnavailable').textContent = s.reason || '';
     document.getElementById('sndControls').style.display = s.available ? 'block' : 'none';
     if (!s.available) return;
-    if (!sndDraft && !sndEditing) { sndEditing = 1; sndLoadModes().then(() => { sndEditing = 0; }); sndDevices(); sndLoadPalettes(); }
+    if (!sndDraft && !sndEditing) { sndEditing = 1; sndLoadModes().then(() => { sndEditing = 0; }); sndDevices(); sndMidiDevices(); sndLoadPalettes(); }
     const st = document.getElementById('sndStatus');
     const plays = (s.assignments || []).map(a => a.mode + (a.lights ? ' on ' + a.lights.join(', ') : '')).join('; ');
     let text = s.running ? 'Playing ' + plays + (s.deviceName ? ', listening to ' + s.deviceName : ', starting...') : 'Not playing';
@@ -3797,6 +3819,15 @@ function renderSoundStatus() {
     document.getElementById('sndMeters').innerHTML = SND_METERS.map(([k, label]) =>
         '<div class="snd-meter"><span>' + label + '</span><div><div style="width:' + Math.round(100 * (lv[k] || 0)) + '%"></div></div></div>').join('');
     document.getElementById('sndTempo').textContent = lv.bpm ? 'Tempo: ' + Math.round(lv.bpm) + ' BPM' : 'Tempo: -';
+    const m = s.midi || {};
+    const midiSel = document.getElementById('sndMidi');
+    if (document.activeElement !== midiSel && midiSel.value !== (m.device || '')) {
+        if (m.device && ![...midiSel.options].some(o => o.value === m.device)) midiSel.add(new Option(m.device, m.device));
+        midiSel.value = m.device || '';
+    }
+    document.getElementById('sndMidiTransport').checked = !!m.transport;
+    document.getElementById('sndMidiStatus').textContent = !m.device ? '' : m.error ? 'MIDI: ' + m.error
+        : m.receiving ? 'MIDI clock: ' + m.bpm.toFixed(1) + ' BPM' + (m.playing ? ', playing' : '') : 'MIDI: no clock arriving';
     [['sndBpmMin', 0], ['sndBpmMax', 1]].forEach(([id, i]) => {
         const el = document.getElementById(id);
         if (s.tempoRange && document.activeElement !== el) el.value = Math.round(s.tempoRange[i]);

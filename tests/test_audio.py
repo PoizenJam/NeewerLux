@@ -7,6 +7,7 @@ import json
 import math
 import os
 import sys
+import time
 import traceback
 
 sys.argv = [sys.argv[0]]
@@ -818,10 +819,84 @@ def t_kickDrive():
                    % (found, len(kicks), len(flashes), onKick, min(gaps) * 1000))
 
 
+def t_midiClock():
+    """MIDI clock: the tempo from 24 pulses a beat (steady through a millisecond of jitter), a
+    beat on every 24th pulse, Start counting from its first pulse, Stop holding the count and
+    Continue carrying on, Song Position (sixteenths) moving it, nothing when the pulses stop;
+    and a MIDI clock, while it arrives, setting the beat sound modes follow in place of the one
+    heard."""
+    import neewerlux_midi as midi
+    rng = np.random.default_rng(4)
+    clk = midi.MidiClock(clock=lambda: 0.0)
+    t = 0.0
+    def pulses(n, bpm):
+        nonlocal t
+        for _ in range(n):
+            clk.feed(midi.CLOCK, t=t + rng.uniform(-0.001, 0.001))
+            t += 60.0 / bpm / midi.CLOCKS_PER_BEAT
+    pulses(24 * 8, 120)
+    check(abs(clk.bpm() - 120) < 0.5, "tempo from pulses: %.2f" % clk.bpm())
+    check(clk.beat == 8 and not clk.playing, "a bare clock counts beats: %d" % clk.beat)
+    f = clk.features(now=t)
+    check(f["bpm"] == round(clk.bpm(), 2) and f["beat"] == 8 and f["confidence"] == 1.0, f)
+    check(clk.features(now=t + midi.STALE_S + 0.1) is None, "nothing once the pulses stop")
+    check(clk.feed(midi.START, t=t) == "start" and clk.playing, "Start")
+    pulses(1, 120)
+    check(clk.beat == 9, "Start counts a beat on its first pulse: %d" % clk.beat)
+    pulses(24 * 2 - 1, 120)
+    check(clk.beat == 10 and clk.position == 8, "two beats after Start: beat %d, position %d" % (clk.beat, clk.position))
+    check(clk.feed(midi.STOP, t=t) == "stop" and not clk.playing, "Stop")
+    pulses(48, 120)
+    check(clk.beat == 10, "no beats while stopped (the clock keeps the tempo): %d" % clk.beat)
+    check(clk.feed(midi.SONG_POSITION, 16, 0, t=t) == "position" and clk.position == 16, "Song Position: %d" % clk.position)
+    check(clk.feed(midi.CONTINUE, t=t) == "continue" and clk.playing, "Continue")
+    pulses(1, 120)
+    check(clk.beat == 11, "from a bar line a beat lands on the first pulse: %d" % clk.beat)
+    pulses(24 * 8, 140)
+    check(abs(clk.bpm() - 140) < 0.5, "a tempo change followed within two beats: %.2f" % clk.bpm())
+
+    class FakeInput:
+        def __init__(self, name, onMessage):
+            self.name, self.onMessage, self.closed = name, onMessage, False
+        def open(self):
+            if self.name != "Fake In":
+                raise OSError("MIDI input " + repr(self.name) + " isn't connected")
+        def close(self):
+            self.closed = True
+    events = []
+    mgr = midi.MidiManager(inputFactory=FakeInput, onTransport=lambda e, c: events.append((e, c.position)))
+    check(mgr.start("Missing") and not mgr.connected, "a missing input reports an error")
+    check(mgr.start("Fake In") == "" and mgr.connected, "the input opens")
+    send = mgr._input.onMessage
+    send(midi.SONG_POSITION, 0x10, 0x01)
+    send(midi.START, 0, 0)
+    mgr.wait()
+    check([e for e, _ in events] == ["position", "start"], "transport events, in order: %s" % events)
+    first = mgr._input
+    mgr.start("")
+    check(first.closed and not mgr.connected and mgr.features() is None, "choosing none closes it")
+
+    eng = au.AudioEngine(sourceFactory=lambda dev: au.ArraySource(kickHats(124, 8)))
+    eng.start("")
+    try:
+        end = time.monotonic() + 8
+        while time.monotonic() < end and not (eng.features() or {}).get("bpm"):
+            time.sleep(0.1)
+        heard = eng.features()
+        check(heard and abs(heard["bpm"] - 124) < 3, "the sound's own tempo first: %s" % heard)
+        eng.beatSource = lambda: {"bpm": 100.0, "beat": 77, "beat_phase": 0.5, "beat_t": 1.0, "confidence": 1.0}
+        f = eng.features()
+        check(f["bpm"] == 100.0 and f["beat"] == 77 and "level" in f, "MIDI sets the beat, the sound the levels: %s" % f)
+        eng.beatSource = lambda: None
+        check(abs(eng.features()["bpm"] - 124) < 3, "the sound's tempo again once MIDI stops")
+    finally:
+        eng.stop()
+
+
 TESTS = [t_tempoOfClickTracks, t_tempoOfDrumPattern, t_tempoChange, t_bandsAndCentroid, t_silenceAndGaps,
          t_levelIsRelative, t_shippedModesValid, t_shippedModesUnderFlashLimit, t_modesMoveWithTheMusic,
          t_modesAimAtRoles, t_beatChase, t_hardModesSnap, t_beatBlinkPaced, t_brightnessCurve, t_warmGlowIsWhiteOnly, t_silenceSettlesAtTheFloor, t_modeValidation,
-         t_docExamplesValidate, t_colourCycle, t_voices, t_retryNow, t_silenceMeansFloor, t_songAnalysis, t_songRiser, t_externalSections, t_songFiles, t_beatScorer, t_beatTracking, t_beatsStopInLongSilence, t_tempoRange, t_kickDrive]
+         t_docExamplesValidate, t_colourCycle, t_voices, t_retryNow, t_silenceMeansFloor, t_songAnalysis, t_songRiser, t_externalSections, t_songFiles, t_beatScorer, t_beatTracking, t_beatsStopInLongSilence, t_tempoRange, t_kickDrive, t_midiClock]
 
 
 def main():

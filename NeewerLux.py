@@ -53,6 +53,7 @@ from datetime import datetime
 import neewerlux_show as show # layered show engine: animation timelines, sequences, compositor
 import neewerlux_sim as sim # simulated lights for testing without hardware
 import neewerlux_audio as audio # sound modes: capture and analysis (numpy, soundcard optional)
+import neewerlux_midi as midi # MIDI clock input (Windows)
 
 # IMPORT BLEAK (this is the library that allows the program to communicate with the lights) - THIS IS NECESSARY!
 try:
@@ -306,6 +307,8 @@ savedPalettes = {}             # dict of {name: [colours]} loaded from disk
 draftStylesDir = os.path.dirname(os.path.abspath(sys.argv[0])) + os.sep + "light_prefs" + os.sep + "draft_styles"
 savedDraftStyles = {}          # dict of {name: draft style dict} loaded from disk
 audioEngine = audio.AudioEngine()  # live capture and analysis, started with a sound mode
+midiManager = midi.MidiManager(onTransport=lambda event, clock: _midiTransport(event, clock))
+audioEngine.beatSource = midiManager.features  # a MIDI clock, when one is arriving, sets the beat
 lightShowPrefs = {}            # {MAC: {"role", "side", "order", "eyeline", "maxBri", "minBri", "locked", "depth", "height", "aim"}}
 _lastWritten = {}              # {MAC: bytes last actually written, after CCT-only conversion and limits}, for display
 API_VERSION = 2                # HTTP API contract version (docs/HTTP_API.md); v1.3.0 and earlier count as 1
@@ -389,6 +392,9 @@ handbackFadeMs = 500      # fade when a layer hands a light back (effect ends, s
 soundMode = "Pulse"       # the sound mode last started, and the capture device ("" = what the default output plays)
 soundDevice = ""
 soundTempoRange = (audio.BPM_MIN, audio.BPM_MAX)  # the live tempo is looked for only in here (BPM)
+midiDevice = ""           # the MIDI input whose clock sets the beat ("" = none)
+midiTransport = False     # its Start, Continue, Stop and Song Position control the last sequence played
+_lastSequenceName = None  # the saved sequence played most recently (what MIDI Start plays)
 songSectionCommand = ""   # another section finder to run on songs (Global Preferences only: it runs a program)
 songFinderNames = False   # name sections with that finder's labels instead of NeewerLux's
 songSectionCommandOn = True  # off: the built-in analysis, keeping the command for later
@@ -1701,6 +1707,9 @@ try: # try to load the GUI
             self.soundBpmMin.setValue(int(round(soundTempoRange[0])))
             self.soundBpmMax.setValue(int(round(soundTempoRange[1])))
             self.soundBpmMin.valueChanged.connect(lambda v: self.soundTempoRangeChosen(True))
+            self.soundMidiCombo.activated.connect(lambda i: setMidiDevice(self.soundMidiCombo.currentData()))
+            self.soundMidiTransport.setChecked(midiTransport)
+            self.soundMidiTransport.toggled.connect(setMidiTransport)
             self.soundBpmMax.valueChanged.connect(lambda v: self.soundTempoRangeChosen(False))
             for key, (slider, label) in self.soundSliders.items():
                 slider.valueChanged.connect(lambda v, k=key: self.soundSliderMoved(k, v))
@@ -2105,6 +2114,19 @@ try: # try to load the GUI
                 combo.setCurrentIndex(max(0, combo.findData(soundDevice)))
             if audioEngine.error:
                 audioEngine.retry()  # a device that was missing may be back
+            ok, why = midi.available()
+            inputs = midi.listInputs() if ok else []
+            if midiDevice and midiDevice not in inputs:
+                inputs.append(midiDevice)  # remembered but not connected now
+            self.soundMidiCombo.clear()
+            self.soundMidiCombo.addItem("None", "")
+            for name in inputs:
+                self.soundMidiCombo.addItem(name, name)
+            self.soundMidiCombo.setCurrentIndex(max(0, self.soundMidiCombo.findData(midiDevice)))
+            self.soundMidiCombo.setEnabled(ok)
+            self.soundMidiCombo.setToolTip("" if ok else why)
+            if ok and midiDevice and midiManager.error:
+                setMidiDevice(midiDevice)  # an input that was missing may be back
 
         def soundDeviceChosen(self, combo):
             setSoundDevice(combo.currentData())
@@ -2156,6 +2178,25 @@ try: # try to load the GUI
                 bar.setValue(int(round(100 * levels.get(key, 0.0))))
             bpm = levels.get("bpm", 0)
             self.soundTempoLabel.setText("Tempo: %.0f BPM" % bpm if bpm else "Tempo: -")
+            m = st["midi"]
+            if not m["device"]:
+                self.soundMidiStatus.setText("")
+            elif m["error"]:
+                self.soundMidiStatus.setText("MIDI: " + m["error"])
+            elif m["receiving"]:
+                self.soundMidiStatus.setText("MIDI clock: %.1f BPM%s" % (m["bpm"], ", playing" if m["playing"] else ""))
+            else:
+                self.soundMidiStatus.setText("MIDI: no clock arriving")
+            if self.soundMidiTransport.isChecked() != m["transport"]:  # changed over HTTP
+                self.soundMidiTransport.blockSignals(True)
+                self.soundMidiTransport.setChecked(m["transport"])
+                self.soundMidiTransport.blockSignals(False)
+            if self.soundMidiCombo.currentData() != m["device"] and not self.soundMidiCombo.view().isVisible():
+                i = self.soundMidiCombo.findData(m["device"])
+                if i < 0:
+                    self.soundMidiCombo.addItem(m["device"], m["device"])
+                    i = self.soundMidiCombo.count() - 1
+                self.soundMidiCombo.setCurrentIndex(i)
             for box, value in ((self.soundBpmMin, st["tempoRange"][0]), (self.soundBpmMax, st["tempoRange"][1])):
                 if not box.hasFocus() and box.value() != int(round(value)):  # changed over HTTP
                     box.blockSignals(True)
@@ -3532,6 +3573,10 @@ try: # try to load the GUI
                 finalPrefs.append("soundDevice=" + soundDevice)
             if soundTempoRange != (audio.BPM_MIN, audio.BPM_MAX):  # set on the Sound tab, kept when saving here
                 finalPrefs.append("soundTempoRange=%g-%g" % soundTempoRange)
+            if midiDevice:  # also set on the Sound tab
+                finalPrefs.append("midiDevice=" + midiDevice)
+            if midiTransport:
+                finalPrefs.append("midiTransport=1")
             songSectionCommand = self.songSectionCommandField.text().strip()
             if songSectionCommand:
                 finalPrefs.append("songSectionCommand=" + songSectionCommand)
@@ -7085,6 +7130,8 @@ def processHTMLCommands(paramsList, loop):
         if soundVerb == "tempo":
             soundVerb = "tempo_range"
             soundBody = {"min": soundParts[1] if len(soundParts) > 1 else None, "max": soundParts[2] if len(soundParts) > 2 else None}
+        elif soundVerb == "midi":
+            soundBody = {"device": soundParts[1] if len(soundParts) > 1 else ""}
         elif soundVerb == "stop":
             soundBody = {"lights": soundParts[1] if len(soundParts) > 1 else None}
         else:
@@ -8235,6 +8282,9 @@ def startSequence(nameOrData, startMs=0, fadeIn=None, fadeOut=None, brightness=N
         startMs = max(0, int(startMs or 0))
     except (TypeError, ValueError):
         startMs = 0
+    if not isinstance(nameOrData, dict):
+        global _lastSequenceName
+        _lastSequenceName = resolved
     showEngine.playSequence(player, startMs)
     printDebugString("Sequence '" + seq.name + "' playing from " + str(startMs) + " ms (" + str(len(seq.cues)) + " cues, " + str(seq.duration) + " ms, " + str(seq.fps) + " fps"
                      + (", " + str(int(briScale * 100)) + "% brightness" if briScale != 1.0 else "") + (", watchdog " + str(watchdogMs) + " ms" if watchdogMs else "") + ")")
@@ -8879,6 +8929,76 @@ def setSoundTempoRange(lo, hi):
     return {"success": True, "tempo_range": list(rng)}
 
 
+def setMidiDevice(device):
+    """Follow the clock of this MIDI input ("" = none); remembered. Returns a result dict."""
+    global midiDevice
+    device = str(device or "")
+    ok, why = midi.available()
+    if device and not ok:
+        return {"success": False, "errors": [why]}
+    midiDevice = device
+    error = midiManager.start(device)
+    try:
+        _updatePrefsFile({"midiDevice": device or None})
+    except OSError as e:
+        printDebugString("Couldn't save the MIDI input (" + str(e) + ")")
+    if error:
+        printDebugString("MIDI: " + error)
+    return {"success": not error, "device": device, "errors": [error] if error else []}
+
+
+def setMidiTransport(on):
+    global midiTransport
+    midiTransport = on in (True, 1, "1", "true", "True", "on")
+    try:
+        _updatePrefsFile({"midiTransport": "1" if midiTransport else None})
+    except OSError as e:
+        printDebugString("Couldn't save the MIDI transport setting (" + str(e) + ")")
+    return {"success": True, "transport": midiTransport}
+
+
+def _midiPositionMs(clock):
+    """A Song Position (sixteenth notes) in ms of the last sequence played: on its tempo grid
+    when it has one, else at the MIDI tempo. None when neither tempo is known."""
+    data = savedSequences.get(_lastSequenceName) if _lastSequenceName else None
+    tempo = (data or {}).get("tempo") or {}
+    bpm = float(tempo.get("bpm") or 0) or clock.bpm()
+    if bpm <= 0:
+        return None
+    return int(round(float(tempo.get("offset_ms") or 0) + clock.position * 15000.0 / bpm))
+
+
+def _midiTransport(event, clock):
+    """MIDI Start plays the last sequence played from its start, Continue resumes it (or plays
+    it from the Song Position), Stop pauses it, and Song Position moves it. Only with the
+    MIDI transport setting on."""
+    if not midiTransport or not _lastSequenceName:
+        return
+    active = showEngine is not None and showEngine.sequenceActive()
+    if event == "start":
+        startSequence(_lastSequenceName, 0)
+    elif event == "continue":
+        if active:
+            showEngine.resumeSequence()
+        else:
+            startSequence(_lastSequenceName, _midiPositionMs(clock) or 0)
+    elif event == "stop" and active:
+        showEngine.pauseSequence()
+    elif event == "position" and active:
+        ms = _midiPositionMs(clock)
+        if ms is not None:
+            showEngine.seekSequence(ms)
+    printDebugString("MIDI " + event + " (" + _lastSequenceName + ")")
+
+
+def midiStatus():
+    ok, why = midi.available()
+    st = midiManager.clock.status()
+    return {"available": ok, "reason": why, "device": midiDevice, "connected": midiManager.connected,
+            "error": midiManager.error, "receiving": midiManager.connected and midiManager.clock.receiving(),
+            "bpm": st["bpm"], "playing": st["playing"], "transport": midiTransport, "sequence": _lastSequenceName}
+
+
 def startSound(modeName=None, device=None, params=None, fadeIn=None, fadeOut=None, lights=None):
     """Start a sound mode on the sound layer, starting capture if needed. Without lights it
     replaces whatever the layer plays and drives the mode's own targets; with lights (a target
@@ -9015,7 +9135,7 @@ def soundStatus():
             "assignments": _soundAssignments(player) if player is not None else [],
             "lastMode": soundMode, "device": soundDevice, "deviceName": audioEngine.deviceName if audioEngine.running else "",
             "capturing": audioEngine.running, "error": audioEngine.error, "levels": levels,
-            "tempoRange": list(soundTempoRange)}
+            "tempoRange": list(soundTempoRange), "midi": midiStatus()}
 
 
 def soundAction(action, body):
@@ -9036,6 +9156,15 @@ def soundAction(action, body):
         return setSoundDevice(body.get("device", ""))
     if action == "tempo_range":
         return setSoundTempoRange(body.get("min"), body.get("max"))
+    if action == "midi_devices":
+        ok, why = midi.available()
+        if not ok:
+            return {"success": False, "errors": [why]}
+        return {"success": True, "devices": midi.listInputs(), "device": midiDevice}
+    if action == "midi":
+        return setMidiDevice(body.get("device", ""))
+    if action == "midi_transport":
+        return setMidiTransport(body.get("on"))
     if action == "status":
         return dict(soundStatus(), success=True)
     if action == "devices":
@@ -10455,7 +10584,7 @@ def writeHTMLSections(self, theSection, errorMsg = ""):
         self.wfile.write(bytes("<STRONG>sequence=</STRONG> - play|Name, pause, resume or stop a sequence<BR>\n", "utf-8"))
         self.wfile.write(bytes("&nbsp;&nbsp;&nbsp;&nbsp;Example: <EM>http://(server address)/NeewerLux/doAction?sequence=play|Example%20-%20Four%20Light%20Demo</EM><BR>\n", "utf-8"))
         self.wfile.write(bytes("&nbsp;&nbsp;&nbsp;&nbsp;Also <EM>sequence=play|Name|start_ms|brightness|watchdog_ms</EM> and <EM>sequence=song|Artist|Song|start_ms|brightness|watchdog_ms</EM><BR>\n", "utf-8"))
-        self.wfile.write(bytes("<STRONG>sound=</STRONG> - start|Mode, mode|Mode or stop a sound mode (lights following live audio), or tempo|min|max for the tempo range<BR>\n", "utf-8"))
+        self.wfile.write(bytes("<STRONG>sound=</STRONG> - start|Mode, mode|Mode or stop a sound mode (lights following live audio), tempo|min|max for the tempo range, or midi|Input to follow a MIDI clock<BR>\n", "utf-8"))
         self.wfile.write(bytes("<STRONG>status_json</STRONG> - layers, sequence position, and each light's layer and approximate colour<BR>\n", "utf-8"))
         self.wfile.write(bytes("<STRONG>POST /NeewerLux/sequence</STRONG> - list, reload, play, pause, resume, stop, seek, set_position, status, validate, save, render<BR>\n", "utf-8"))
         self.wfile.write(bytes("<STRONG>POST /NeewerLux/sound</STRONG> - start, stop, mode, set, device, devices, status, list, get, save, delete, validate, reload<BR>\n", "utf-8"))
@@ -10553,7 +10682,7 @@ def loadPrefsFile(globalPrefsFile = ""):
            rememberLightsOnExit, acceptable_HTTP_IPs, customKeys, enableTabsOnLaunch, \
            whiteListedMACs, rememberPresetsOnExit, autoReconnectOnDisconnect, livePreview, hideConsoleOnLaunch, minimizeToTrayOnClose, httpAutoStart, httpPort, httpAccessToken, cctFallbackMode, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, \
            envMaxBri, envMinBri, seqFrameRate, effectMaxSeconds, simulatedLights, simulatedCCTOnly, flashGuardEnabled, \
-           cameraPosition, eyelineFlash, handbackFadeMs, fadeInMs, stageView, stageGeometry, soundMode, soundDevice, soundTempoRange, songSectionCommand, songFinderNames, songSectionCommandOn
+           cameraPosition, eyelineFlash, handbackFadeMs, fadeInMs, stageView, stageGeometry, soundMode, soundDevice, soundTempoRange, midiDevice, midiTransport, songSectionCommand, songFinderNames, songSectionCommandOn
 
     if globalPrefsFile != "":
         printDebugString("Loading global preferences from file...")
@@ -10568,7 +10697,7 @@ def loadPrefsFile(globalPrefsFile = ""):
             "SC_Dec_1_Large", "SC_Inc_1_Large", "SC_Dec_2_Large", "SC_Inc_2_Large", "SC_Dec_3_Large", "SC_Inc_3_Large", \
             "enableTabsOnLaunch", "whiteListedMACs", "rememberPresetsOnExit", "autoReconnectOnDisconnect", "hideConsoleOnLaunch", "minimizeToTrayOnClose", "livePreview", "httpAutoStart", "httpPort", "httpAccessToken", "cctFallbackMode", "enableLogTab", "logToFile", "logHeartbeat", "globalCCTMin", "globalCCTMax", \
             "envMaxBri", "envMinBri", "seqFrameRate", "effectMaxSeconds", "simulatedLights", "simulatedCCTOnly", "flashGuard", \
-            "cameraPosition", "eyelineFlash", "handbackFadeMs", "fadeInMs", "stageView", "stageGeometry", "soundMode", "soundDevice", "soundTempoRange", "songSectionCommand", "songFinderNames", "songSectionCommandOn"]
+            "cameraPosition", "eyelineFlash", "handbackFadeMs", "fadeInMs", "stageView", "stageGeometry", "soundMode", "soundDevice", "soundTempoRange", "midiDevice", "midiTransport", "songSectionCommand", "songFinderNames", "songSectionCommandOn"]
 
         # KICK OUT ANY PARAMETERS THAT AREN'T IN THE "ACCEPTABLE ARGUMENTS" LIST ABOVE
         # THIS SECTION OF CODE IS *SLIGHTLY* DIFFERENT THAN THE CLI KICK OUT CODE
@@ -10619,6 +10748,8 @@ def loadPrefsFile(globalPrefsFile = ""):
     prefsParser.add_argument("--soundMode", default="Pulse")
     prefsParser.add_argument("--soundDevice", default="")
     prefsParser.add_argument("--soundTempoRange", default="")
+    prefsParser.add_argument("--midiDevice", default="")
+    prefsParser.add_argument("--midiTransport", default="0")
     prefsParser.add_argument("--songSectionCommand", default="")
     prefsParser.add_argument("--songFinderNames", default="0")
     prefsParser.add_argument("--songSectionCommandOn", default="1")
@@ -10709,6 +10840,8 @@ def loadPrefsFile(globalPrefsFile = ""):
     soundDevice = str(mainPrefs.soundDevice or "")
     soundTempoRange = audio.validTempoRange(*(str(mainPrefs.soundTempoRange).split("-") + ["", ""])[:2]) or (audio.BPM_MIN, audio.BPM_MAX)
     audioEngine.setTempoRange(*soundTempoRange)
+    midiDevice = str(mainPrefs.midiDevice or "")
+    midiTransport = str(mainPrefs.midiTransport) == "1"
     songSectionCommand = str(mainPrefs.songSectionCommand or "").strip()
     songFinderNames = str(mainPrefs.songFinderNames) == "1"
     songSectionCommandOn = str(mainPrefs.songSectionCommandOn) != "0"
@@ -10965,6 +11098,9 @@ if __name__ == '__main__':
                         mainWindow._consoleVisible = False
                         if mainWindow._consoleAction:
                             mainWindow._consoleAction.setText("Show Console")
+
+                if midiDevice and midi.available()[0]:
+                    setMidiDevice(midiDevice)  # follow the remembered MIDI clock
 
                 # Auto-start HTTP server if preference is set
                 if httpAutoStart:

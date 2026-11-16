@@ -424,6 +424,13 @@ def main():
         nl.setSoundTempoRange(60, 200)
         waitFor(page, "document.getElementById('sndBpmMin').value === '60' && document.getElementById('sndBpmMax').value === '200'",
                 "a change from elsewhere shown")
+        midiOk = nl.midi.available()[0]
+        waitFor(page, "document.getElementById('sndMidi').options.length >= 1 && document.getElementById('sndMidi').disabled === %s"
+                % ("false" if midiOk else "true"), "the MIDI clock menu (off where MIDI isn't available)")
+        js(page, "document.getElementById('sndMidiTransport').checked = true; sndMidiTransport(true)")
+        until(lambda: nl.midiTransport, "the MIDI transport box to apply")
+        nl.setMidiTransport(False)
+        waitFor(page, "document.getElementById('sndMidiTransport').checked === false", "a change from elsewhere shown")
         waitFor(page, "document.getElementById('sndPalPreset').options.length === %d" % (len(nl.savedPalettes) + 1), "the saved palettes")
         js(page, "document.getElementById('sndPalPreset').value = 'Neon'; sndPalPresetChosen('Neon')")
         until(lambda: player.mode.palette == nl.savedPalettes["Neon"], "a saved palette to load live")

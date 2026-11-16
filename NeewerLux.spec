@@ -40,6 +40,7 @@ a = Analysis(
         'neewerlux_anim_editor',
         'neewerlux_show',
         'neewerlux_audio',
+        'neewerlux_midi',
         'neewerlux_sim',
         'neewerlux_stage',
         'neewerlux_timeline',

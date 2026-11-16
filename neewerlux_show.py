@@ -1639,8 +1639,9 @@ SOUND_FLASH_WINDOW_S = 1.05 # a little over a second: evenly paced transitions 0
 SOUND_CHASE_MAX_BPM = 150   # faster than this, chases step on every other beat
 SOUND_BLINK_MAX_BPM = 120   # faster than this, Beat-driven lights flash on every other beat (one flash per beat at 120 BPM is the 2/s limit)
 SOUND_KICK_GAP_MS = 500     # Kick-driven lights flash at most once in this long (2 a second)
-SOUND_KICK_EVEN_BPM = 115   # faster than this, a Kick flash also waits 1.5 beats, so kicks on every beat
-                            # flash on every other one evenly instead of whenever timing jitter lets one through
+SOUND_KICK_EVEN_BPM = 115   # faster than this, a Kick flash also waits SOUND_KICK_EVEN_BEATS, so kicks on every
+                            # beat flash on every other one evenly instead of whenever timing jitter lets one through
+SOUND_KICK_EVEN_BEATS = 1.4 # under 1.5, so a 2-step kick 1.5 beats after the last always flashes
 SOUND_ATTACK_MS = 60        # how fast a light rises to a louder value (less with low Smoothing, none at 0)
 SOUND_COLOUR_STEP_MS = 400  # how long a palette step (colour "beat") takes to blend
 SOUND_SETTLE_MS = 300       # a value held this long is written even if under the write deadband,
@@ -2057,7 +2058,7 @@ class SoundPlayer:
         kick = f.get("kick")
         gap = SOUND_KICK_GAP_MS
         if f.get("bpm", 0) > SOUND_KICK_EVEN_BPM:
-            gap = max(gap, 1.5 * 60000.0 / f["bpm"])
+            gap = max(gap, SOUND_KICK_EVEN_BEATS * 60000.0 / f["bpm"])
         kickBlink = (kick is not None and self._lastKick is not None and kick != self._lastKick
                      and nowMs - self._kickFlashAt >= gap)
         self._lastKick = kick

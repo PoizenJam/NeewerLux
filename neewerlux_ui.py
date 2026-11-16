@@ -1319,9 +1319,28 @@ class Ui_MainWindow(object):
         self.soundDeviceCombo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         devRow.addWidget(self.soundDeviceCombo, 1)
         self.soundDeviceRefresh = QPushButton("Refresh")
-        self.soundDeviceRefresh.setToolTip("List the audio devices again (after plugging one in)")
+        self.soundDeviceRefresh.setToolTip("List the audio devices and MIDI inputs again (after plugging one in)")
         devRow.addWidget(self.soundDeviceRefresh)
         soundLeft.addLayout(devRow)
+        # a FlowLayout, so the checkbox wraps under the menu in a narrow window instead of widening it
+        midiRow = FlowLayout(spacing=6)
+        midiLabel = QLabel("MIDI clock:")
+        midiLabel.setToolTip("Take the tempo and beat from a MIDI input's clock (a DAW, drum machine or sequencer)\n"
+                             "instead of from the sound, while it sends one. Refresh lists the inputs again.")
+        midiRow.addWidget(midiLabel)
+        self.soundMidiCombo = QComboBox()
+        self.soundMidiCombo.setToolTip(midiLabel.toolTip())
+        self.soundMidiCombo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.soundMidiCombo.setMinimumContentsLength(16)
+        widePopup(self.soundMidiCombo)
+        midiRow.addWidget(self.soundMidiCombo)
+        self.soundMidiTransport = QCheckBox("Start/Stop plays the last sequence")
+        self.soundMidiTransport.setToolTip("MIDI Start plays the sequence played last from its start, Continue resumes it,\n"
+                                           "Stop pauses it and Song Position moves it.")
+        midiRow.addWidget(self.soundMidiTransport)
+        self.soundMidiStatus = QLabel("")
+        midiRow.addWidget(self.soundMidiStatus)
+        soundLeft.addLayout(midiRow)
         modeRow = QHBoxLayout()
         modeRow.addWidget(QLabel("Mode:"))
         self.soundModeCombo = QComboBox()
@@ -1886,7 +1905,7 @@ copied between installations.</p>
 <tr><td><b>list / list_json</b></td><td>List lights, presets, and animations</td></tr>
 <tr><td><b>animate=Name|...|revert|layer|queue|target</b></td><td>Optional layer (override, effect, show), queue mode (queue, replace) and target such as <code>@rim</code></td></tr>
 <tr><td><b>stop_layer=effect</b></td><td>Stop a layer (<code>effect_all</code> also clears the effect queue; also <code>show</code>, <code>sound</code>, <code>all</code>)</td></tr>
-<tr><td><b>sound=start|Pulse</b></td><td>Start a sound mode (lights following live audio); also <code>mode|Name</code>, <code>stop</code>; add <code>|1;3</code> for some lights only (<code>stop|3</code>); <code>tempo|160|185</code> sets the tempo range</td></tr>
+<tr><td><b>sound=start|Pulse</b></td><td>Start a sound mode (lights following live audio); also <code>mode|Name</code>, <code>stop</code>; add <code>|1;3</code> for some lights only (<code>stop|3</code>); <code>tempo|160|185</code> sets the tempo range; <code>midi|Input</code> follows a MIDI clock</td></tr>
 <tr><td><b>sequence=play|Name</b></td><td>Play a sequence (<code>play|Name|start|brightness|watchdog</code>); <code>song|Artist|Song</code> finds it by artist and song; also <code>pause</code>, <code>resume</code>, <code>stop</code></td></tr>
 <tr><td><b>status_json</b></td><td>Layers, sequence position, and each light's layer and approximate colour</td></tr>
 </table>
