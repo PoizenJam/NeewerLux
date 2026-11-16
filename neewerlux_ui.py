@@ -362,7 +362,10 @@ def fitColumnsToWidgets(table, columns):
 
 def widePopup(combo):
     """Let a drop-down's list be wider than the box, so its choices read in full."""
-    combo.view().setMinimumWidth(combo.view().sizeHintForColumn(0) + 24)
+    # the list's own measure can come out short before it's styled, so the box's font sets a floor
+    texts = [combo.itemText(i) for i in range(combo.count())]
+    widest = max([combo.fontMetrics().horizontalAdvance(t) for t in texts] + [0])
+    combo.view().setMinimumWidth(max(combo.view().sizeHintForColumn(0), widest) + 24)
 
 
 def DoubleSpinBoxWithButtons(parent=None, minVal=0.0, maxVal=100.0, value=0.0, suffix=""):
