@@ -707,6 +707,10 @@ class SequencePlayer:
         self._fromCache = {}
         self.timelines = {}
         self.soundPlayers = {}    # sound cue index -> SoundPlayer on that cue's lights
+        self.briScale = 1.0       # the play request's brightness, scaling everything it sends
+        self.watchdogMs = 0       # following an outside clock: pause when its positions stop coming
+        self.lastPositionAt = 0.0
+        self.watchdogPaused = False
         self._soundFrames = {}    # sound cue index -> its output this frame (while it plays)
         self._soundActive = set()
         for cue in seq.cues:
@@ -817,17 +821,28 @@ class SequencePlayer:
 
     @property
     def state(self):
+        if self.watchdogPaused:
+            return "waiting"
         if self.userPaused or self.autoPaused:
             return "paused"
         return "playing"
 
     def start(self, nowMs, posMs=0.0):
         self.clock.start(nowMs, posMs)
+        self.lastPositionAt = nowMs
+
+    def _watchdog(self, nowMs):
+        """Pause, as Pause does, once the outside clock has gone quiet for watchdogMs."""
+        if self.watchdogMs and not self.userPaused and nowMs - self.lastPositionAt > self.watchdogMs:
+            if not self.autoPaused:
+                self.clock.pause(nowMs)
+            self.userPaused = self.watchdogPaused = True
 
     def position(self, nowMs):
         return max(0.0, self.clock.position(nowMs))
 
     def frame(self, nowMs):
+        self._watchdog(nowMs)
         pos = self.position(nowMs)
         if pos >= self.seq.duration:
             return dict(self.lastOut), True
@@ -840,7 +855,7 @@ class SequencePlayer:
         for idx in self.lightCues:
             v = self._evalLight(idx, pos)
             if v is not None:
-                out[idx] = v
+                out[idx] = v if self.briScale == 1.0 else _scaled(v, self.briScale)
         self.lastOut = out
         return out, False
 
@@ -909,11 +924,15 @@ class SequencePlayer:
                 continue
             k = max(k, int((pos - cue.at) // self.frameMs) + 1)
             nxt = min(nxt, cue.at + k * self.frameMs)
-        return nowMs + (nxt - pos)
+        due = nowMs + (nxt - pos)
+        if self.watchdogMs and not self.userPaused:
+            due = min(due, self.lastPositionAt + self.watchdogMs + 1)
+        return due
 
     def describe(self, nowMs):
         return {"type": "sequence", "name": self.name, "state": self.state,
-                "position_ms": int(self.position(nowMs)), "duration_ms": int(self.seq.duration)}
+                "position_ms": int(self.position(nowMs)), "duration_ms": int(self.seq.duration),
+                "brightness": int(round(self.briScale * 100)), "watchdog_ms": int(self.watchdogMs)}
 
 
 def syntheticSoundFeatures(tMs, bpm=120.0, offsetMs=0):
@@ -2311,7 +2330,8 @@ class ShowCompositor:
             p = self._seq()
             if p is None or not p.userPaused:
                 return False
-            p.userPaused = False
+            p.userPaused = p.watchdogPaused = False
+            p.lastPositionAt = nowMs
             if not p.autoPaused:
                 p._fromCache = {}
                 p._precomputeFades()  # the base may have changed while paused
@@ -2334,6 +2354,17 @@ class ShowCompositor:
             p = self._seq()
             if p is None:
                 return None
+            p.lastPositionAt = nowMs
+            if p.watchdogPaused:
+                # the outside clock is back: carry on from where it says, not from where we stopped
+                p.watchdogPaused = p.userPaused = False
+                if not p.autoPaused:
+                    p._fromCache = {}
+                    p._precomputeFades()
+                    p.clock.resume(nowMs)
+                p.clock.seek(nowMs, max(0, posMs))
+                self._status("resume", LAYER_SHOW, p)
+                return "jump"
             return p.clock.setPosition(nowMs, max(0, posMs))
         return self._command(run, now)
 

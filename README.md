@@ -57,7 +57,7 @@ Sound modes need the optional audio packages (numpy, soundcard, soundfile); the 
 
 ### Controlling lights
 
-Scan, connect, then use the CCT, HSI or Scene tab. In Light Preferences you can give each light a name and a fixed number. Named lights keep their place in the table, and the name works anywhere a light is targeted: animations, presets and HTTP commands.
+Scan, connect, then use the CCT, HSI or Scene tab (the HSI tab also has a colour wheel and a row of ready colours; the Sound palette's colours open the same wheel). In Light Preferences you can give each light a name and a fixed number. Named lights keep their place in the table, and the name works anywhere a light is targeted: animations, presets and HTTP commands.
 
 Keyboard shortcuts for brightness and the sliders act on each selected light according to its own mode, so one brightness nudge reaches CCT, HSI and Scene lights together. All shortcuts are configurable in Global Preferences.
 
@@ -114,6 +114,8 @@ Five starter sequences ship alongside the example: an intro build, an outro wind
 
 Double-click a track to add a cue there (it starts from the colour the light already has). Drag a cue to move it, its right edge to change its length, and the notch at its top to change its fade; Ctrl or Shift selects several. Snap to a time grid or, with a tempo set, to beats, half beats or bars (a sequence that has a tempo, such as a song draft, opens snapping to beats). The panel on the right edits the selected cue: start, which lights, colour or clip, fade, length and label. Undo and redo, copy and paste at the playhead, and duplicate all have the usual shortcuts, and Space plays.
 
+Play has a brightness box that scales the whole sequence for that play (over HTTP, `brightness` on play). A program that knows where a song is, such as a game's song tracker, can play a sequence by artist and song and keep it in step with `set_position`; with a watchdog the sequence waits when the positions stop and carries on when they return ([docs/SEQUENCE_FORMAT.md](docs/SEQUENCE_FORMAT.md)).
+
 With a tempo set, **Change tempo...** sets a new one and can move and stretch every cue so it stays on its beat. Song sections, when a sequence has them, show as a coloured row above the ruler.
 
 Play previews the edit on screen, in a Stage view under the timeline, without touching the lights. Tick **Send to lights** to play it through the real lights from the playhead; edits made while it plays are sent within a moment. Check validates the sequence, Save writes it (saving under a new name renames it), and Settings holds the frame rate, what happens at the end, while paused and during effects, and the artist, song and description. Cues whose lights aren't connected show on a "No matching light" track so they don't vanish. The web dashboard has the same editor.
@@ -138,7 +140,7 @@ The thresholds come from WCAG, which was written for screens; lights fill more o
 
 ### Simulated lights and the Stage window
 
-Global Preferences can add a simulated rig of 1 to 4 lights (key, fill, rim, background), plus an optional CCT-only light, for trying sequences, effects, HTTP commands and Stream Deck buttons without hardware. Simulated lights take the same Bluetooth packets as real ones, answer status queries, and can be renamed, given roles and limits, and used alongside real lights. The setting takes effect at the next start; launching with `--simulate` (or `--simulate=2` and so on) does the same for one run, and `--simulate-faults` makes them drop the odd write and disconnect now and then, for testing reconnects.
+Global Preferences can add a simulated rig of 1 to 4 lights (key, fill, rim, background), plus an optional CCT-only light, for trying sequences, effects, HTTP commands and Stream Deck buttons without hardware. Simulated lights take the same Bluetooth packets as real ones, answer status queries, and can be renamed, given roles and limits, and used alongside real lights. The setting takes effect at the next start; launching with `--simulate` (or `--simulate=2` and so on) does the same for one run, and `--simulate-faults` makes them drop the odd write and disconnect now and then, for testing reconnects. A light that drops out is tried again at once, then after longer and longer waits (15 s up to 5 minutes) while it keeps failing, with a fresh scan for it after three failures, so a light switched off at the wall doesn't keep Bluetooth busy.
 
 The **Stage** button opens a window with one tile per light, in sweep order, showing roughly what each light is showing and which layer is driving it. Simulated lights show what they actually received; real lights show what was last sent to them, so a CCT-only light asked for a colour shows the white it was converted to. The light table also shows a colour swatch beside each light. Colours on screen are approximations of the real output, and dim lights are drawn brighter than a literal scale would (a panel at 5% is still obviously lit in a room); only 0% or off shows as dark. Tiles size themselves to the system font and display scaling; hover a tile for a name too long to fit. The Stage remembers its view, size and place; the first time it opens in **Plan** view, sized to your lights: the lights where they stand, on the same grid as Light Preferences (your left on the left, front at the top), with you in the middle, the camera where you put it, each light's height as one to three bars and a faint beam the way it points. **Height** view uses the same columns with high, middle and low rows; **Strip** is the older single row in sweep order. The web dashboard's Stage and both timeline editors' previews have the same views.
 
@@ -165,7 +167,7 @@ http://localhost:8080/NeewerLux/doAction?animate=Halloween|1.0|10|50|true|2|true
 http://localhost:8080/NeewerLux/doAction?stop_animate
 ```
 
-The `animate` value is `Name|speed|rate|brightness|loop|maxLoops|revert`. Only the name is required. The example plays Halloween twice at half brightness, then puts the lights back how they were.
+The `animate` value is `Name|speed|rate|brightness|loop|maxLoops|revert`. Only the name is required. The example plays Halloween twice at half brightness, then puts the lights back how they were. A preset can play the same way, as a temporary effect over whatever is running: `use_preset=3&layer=effect&hold=3000` shows preset 3 for three seconds, then the lights carry on.
 
 Three more optional fields choose a layer: `Name|speed|rate|brightness|loop|maxLoops|revert|layer|queue|target`. Layer is `override` (the default), `effect` or `show`; queue is `queue` (the default) or `replace`; target narrows the animation to some lights, such as `@rim`. On the effect and show layers, `revert` applies to that request only.
 
@@ -192,7 +194,7 @@ Light commands are never turned away as busy: if a light already has a command w
 
 The Info tab and the dashboard both carry a command reference.
 
-**Security:** the HTTP server has no authentication. Access is limited only by the IP allowlist in Global Preferences, which by default admits this machine and common private network ranges. Don't expose the port to the internet.
+**Security:** access is limited by the IP allowlist in Global Preferences, which by default admits this machine and common private network ranges, and optionally by an access token (Global Preferences > Simulation and HTTP, desktop only): other computers then add `?token=...` to the dashboard address and their commands, or send the `X-NeewerLux-Token` header; this computer never needs it. Don't expose the port to the internet.
 
 ## Other details
 

@@ -132,6 +132,7 @@ def main():
         got = {c: n for c, n in cells if n}
         check(got == {"left/beside": 2, "right/beside": 2}, "plan cells: " + str(got))
         check(js(page, "document.querySelectorAll('#stageGrid .hb').length") == 4, "height gauges")
+        check(js(page, "document.querySelectorAll('#stageGrid .beam').length") == 4, "beams: lights beside you point at you")
         js(page, "setStageView('height')")
         waitFor(page, "document.querySelector('#stageGrid .pc[data-cell=\"left/middle\"]') !== null", "height view rows")
         js(page, "document.getElementById('stageGrid').scrollIntoView()")
@@ -662,12 +663,28 @@ def main():
         check("Web Style" not in nl.savedDraftStyles, "gone")
         js(page, "dsClose(); songClose()")
 
+    def wheelAndBrightness():
+        js(page, "hsiPickSwatch(120, 100)")
+        check((js(page, "+document.getElementById('hsiHue').value"), js(page, "+document.getElementById('hsiSat').value")) == (120, 100), "a swatch sets the HSI sliders")
+        js(page, "document.querySelectorAll('.mode-pane').forEach(p => p.classList.remove('active')); document.getElementById('pane-hsi').classList.add('active'); document.getElementById('hsiWheel').scrollIntoView()")
+        js(page, """const cv = document.getElementById('hsiWheel'), r = cv.getBoundingClientRect();
+                    cv.dispatchEvent(new MouseEvent('mousedown', {clientX: r.left + r.width / 2 + r.width / 4, clientY: r.top + r.height / 2}));
+                    cv.dispatchEvent(new MouseEvent('mouseup', {}));""")
+        hue, sat = js(page, "+document.getElementById('hsiHue').value"), js(page, "+document.getElementById('hsiSat').value")
+        check(hue in (0, 359, 1) and 40 <= sat <= 60, "clicking the wheel right of centre picks red at half saturation: %s %s" % (hue, sat))
+        js(page, "selectedSeq = 'Starter - Countdown'; document.getElementById('seqBri').value = 40; seqPlay()")
+        until(lambda: (nl.getShowStatus()["sequence"] or {}).get("brightness") == 40, "the sequence playing at 40%")
+        js(page, "seqCmd('stop')")
+        if nl.audio.np is not None:
+            js(page, "pickOpen(0); pickSwatch(225, 100); pickClose(true)")
+            check(js(page, "JSON.stringify([sndDraft.palette[0].hue, sndDraft.palette[0].sat])") == "[225,100]", "the palette wheel sets the colour")
+
     for name, fn in [("stage tiles and swatches", stage), ("sequence list", sequenceList),
                      ("play, pause, resume, seek, stop", playPauseSeekStop), ("render", render),
                      ("reload", reload), ("light preferences", lightPrefs), ("global preferences", globalPrefs), ("flash guard setting", flashGuardSetting),
                      ("network settings stay desktop-only", securityPrefsRefused), ("preset editor and menu", presetEditor),
                      ("animation editor, import, duplicate, delete", animationEditor), ("timeline editor", timelineEditor),
-                     ("sound panel", soundPanel), ("draft from a song", songDraft), ("draft styles", draftStyles)]:
+                     ("sound panel", soundPanel), ("draft from a song", songDraft), ("draft styles", draftStyles), ("colour wheel and play brightness", wheelAndBrightness)]:
         step(name, fn)
     if page.errors:
         results.append(("FAIL", "no JavaScript errors", "; ".join(page.errors[:5])))

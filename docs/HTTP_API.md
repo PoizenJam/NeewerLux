@@ -5,7 +5,7 @@ The contract for anything that drives NeewerLux over HTTP: Stream Deck plugins, 
 ## Basics
 
 - **Base URL:** `http://<host>:<port>`, port 8080 unless changed in Global Preferences. Turn the server on from the toolbar, or have it start with the app.
-- **Access:** no authentication. Requests are accepted only from IP addresses matching the allowlist in Global Preferences (by default `127.0.0.1`, `192.168.` and `10.`); others get `403`. Don't expose the port to the internet.
+- **Access:** requests are accepted only from IP addresses matching the allowlist in Global Preferences (by default `127.0.0.1`, `192.168.` and `10.`); others get `403`. Optionally, Global Preferences > Simulation and HTTP > HTTP access token (desktop only) makes requests from other computers carry a token: the `X-NeewerLux-Token` header, or `token=...` in the address (GET commands, POST paths and the dashboard: open it as `http://<host>:8080/?token=...` and it sends the token with everything it does). Without it they get `401` with JSON `{"success": false, "errors": [...]}`. Requests from the computer NeewerLux runs on (`127.0.0.1`) never need it, so a Stream Deck or Streamer.bot there keeps working unchanged. Don't expose the port to the internet.
 - **CORS:** every response allows any origin (`Access-Control-Allow-Origin: *`), and `OPTIONS` preflight requests are answered, so browser pages on other origins can call the API.
 - **Feature detection:** `list_json`, `status_json` and `POST /NeewerLux/settings {"action": "get"}` include `"apiVersion"`. A response without it comes from API version 1. Additions bump the version; existing fields are not removed or changed in meaning.
 - **Old path:** `/NeewerLite-Python/` is accepted in place of `/NeewerLux/` for GET commands, `batch` and `animate`.
@@ -65,6 +65,7 @@ Parameters are joined with `&`. Add `nopage` to any command to get an empty resp
 | Request | Effect |
 |---|---|
 | `use_preset=3` | Recall preset 3 (1-based) |
+| `use_preset=3&layer=effect&hold=3000` | Recall preset 3 as a temporary effect: it plays on the effect layer for `hold` ms (over a sequence or sound mode), then the lights go back to what they were doing. Add `&queue=replace` to cut in instead of queueing behind other effects. Snapshot presets change only their lights; lights saved as off go off. |
 | `save_preset=3` | Save the current state of every light into preset 3 |
 | `add_preset` | Add an empty preset slot at the end |
 | `delete_preset=3` | Delete preset 3; later presets move up one |
@@ -86,6 +87,8 @@ Example, a five-loop strobe on the rim lights as an effect: `animate=Strobe|1|10
 | Request | Effect |
 |---|---|
 | `sequence=play\|Example%20-%20Four%20Light%20Demo` | Play a saved sequence from the start; add `\|12000` to start 12 s in |
+| `sequence=play\|Name\|start_ms\|brightness\|watchdog_ms` | The same with the optional fields of `POST /NeewerLux/sequence` `play` (leave one empty to skip it) |
+| `sequence=song\|Artist\|Song\|start_ms\|brightness\|watchdog_ms` | Play the saved sequence whose `artist` and `song` match (ignoring case; an empty artist matches any) |
 | `sequence=pause`, `sequence=resume`, `sequence=stop` | Pause returns the lights to where they were before the sequence; resume carries on from the same point |
 | `sequence=seek\|65000` | Jump to 65 s |
 | `sequence=position\|65120` | Sync to an external clock: offsets up to 250 ms are absorbed by running up to 5% fast or slow, larger ones jump |
@@ -161,7 +164,7 @@ Per light:
 {
   "apiVersion": 2,
   "layers": {"override": null, "effect": null, "show": null, "sound": null},
-  "sequence": {"type": "sequence", "name": "Example - Four Light Demo", "state": "playing", "position_ms": 12034, "duration_ms": 40000},
+  "sequence": {"type": "sequence", "name": "Example - Four Light Demo", "state": "playing", "position_ms": 12034, "duration_ms": 40000, "brightness": 100, "watchdog_ms": 0},
   "lights": [{"id": 1, "name": "Key", "role": "key", "side": "right", "depth": "front", "height": "middle", "aim": "you", "locked": false, "layer": "show",
               "linked": true, "simulated": false, "mode": "HSI", "bri": 45, "color": "#b04ce0"}],
   "flashGuard": {"enabled": true, "held": 0, "eyeline": "same"},
@@ -179,7 +182,7 @@ Per light:
 
 `sound` is the sound mode state, as `POST /NeewerLux/sound` `status` returns it: whether sound modes can run here (`available`, and `reason` when not, such as the audio packages missing), whether one is `running`, which `mode` with which `params` (the latest started), the `assignments` (each playing mode and the IDs of the lights given to it, `null` for a mode on its own targets), the capture `device` (`""` = whatever the default output plays) and its name, a capture `error` if the device failed (it retries every 2 s), and the live `levels` (`null` when not capturing): `level`, `low`, `mid`, `high` and `centroid` from 0 to 1, `bpm` (0 until there's a tempo), the tempo `confidence`, `beat` (counts up on each beat), `silent` and `rms_db`.
 
-`layers` holds whatever is playing on each layer (`null` when nothing is); the override entry includes `name`, `keyframe` and `keyframes`, the sound entry `name` and the levels. `sequence` is `null` when no sequence is loaded; `state` is `playing` or `paused`.
+`layers` holds whatever is playing on each layer (`null` when nothing is); the override entry includes `name`, `keyframe` and `keyframes`, the sound entry `name` and the levels. `sequence` is `null` when no sequence is loaded; `state` is `playing`, `paused`, or `waiting` (following an outside clock that stopped sending positions; see `watchdog_ms`), and `brightness` and `watchdog_ms` are the play request's.
 
 ## POST endpoints
 
@@ -229,7 +232,8 @@ Response:
 
 | Body | Effect |
 |---|---|
-| `{"action": "play", "name": "...", "start_ms": 0}` | Play a saved sequence. Optional `"fade_in_ms"` and `"handback_fade_ms"` override the sequence's and the global fades for this play. |
+| `{"action": "play", "name": "...", "start_ms": 0}` | Play a saved sequence. Optional `"fade_in_ms"` and `"handback_fade_ms"` override the sequence's and the global fades for this play; `"brightness"` (1 to 100, percent) scales everything the sequence sends for this play (brightness limits and the flash guard still apply); `"watchdog_ms"` (0, or at least 500) is for following an outside clock with `set_position`: when no position has come for that long the sequence pauses (state `waiting`, as Pause does), and the next `set_position` carries on from where it says. |
+| `{"action": "play", "artist": "...", "song": "..."}` | Play the saved sequence whose `artist` and `song` fields match, ignoring case (without `artist`, the first whose `song` matches); takes the same options. For a bridge that knows what's playing, such as a game's song tracker: play by artist and song, then send `set_position` as the song goes. |
 | `{"action": "play", "sequence": {...}}` | Play one sent inline, without saving it |
 | `{"action": "pause"}`, `{"action": "resume"}`, `{"action": "stop"}` | As on GET |
 | `{"action": "seek", "ms": 65000}` | Jump |
@@ -309,6 +313,7 @@ The desktop's preset menu and editor. Preset numbers are 1-based. Every reply th
 | `{"action": "add"}` | Add an empty preset at the end |
 | `{"action": "snapshot", "index": 3}` | Save every light's current state into it |
 | `{"action": "recall", "index": 3}` | Recall it, as `use_preset=3` |
+| `{"action": "recall", "index": 3, "layer": "effect", "hold_ms": 3000}` | Recall it as a temporary effect, as `use_preset=3&layer=effect&hold=3000`; optional `"queue": "replace"`, `"fade_in_ms"`, `"handback_fade_ms"`. `result` is `playing` or `queued`. |
 
 ### POST /NeewerLux/settings
 
@@ -322,7 +327,7 @@ Every value in a request is checked before any is applied; a request with an inv
 
 ## Changes by API version
 
-NeewerLux 1.4.0 adds, within version 2 (nothing changes for existing clients): the `sound` layer, `POST /NeewerLux/sound`, `sound=` requests, `stop_layer=sound` (and `all` includes it) and `sound` in `status_json` (with `assignments`: which lights follow which mode), sound on some lights only (`lights`, `sound=start|Mode|lights`, `sound=stop|lights`), saved palettes, colour `cycle` and `cycle_s`, `sound` on preset entries, song analysis and drafts (sequence `analyze` and `draft`, `POST /NeewerLux/song`), draft styles (`draft_styles`, `save_draft_style`, `delete_draft_style`, `style_for`, and `style` or `genres` on `draft`) and the sequence `sections` field drawn by the editors.
+NeewerLux 1.4.0 adds, within version 2 (nothing changes for existing clients): the `sound` layer, `POST /NeewerLux/sound`, `sound=` requests, `stop_layer=sound` (and `all` includes it) and `sound` in `status_json` (with `assignments`: which lights follow which mode), sound on some lights only (`lights`, `sound=start|Mode|lights`, `sound=stop|lights`), saved palettes, colour `cycle` and `cycle_s`, `sound` on preset entries, song analysis and drafts (sequence `analyze` and `draft`, `POST /NeewerLux/song`), draft styles (`draft_styles`, `save_draft_style`, `delete_draft_style`, `style_for`, and `style` or `genres` on `draft`), sequence play `brightness`, `watchdog_ms` and play by `artist` and `song` (`sequence=song|...`), the sequence state `waiting`, presets as temporary effects (`use_preset=N&layer=effect&hold=ms`, presets `recall` with `layer`), and the optional access token (`401`) and the sequence `sections` field drawn by the editors.
 
 **2** (NeewerLux 1.3.3): `apiVersion` and `version` fields; structured per-light state and `sequences` in `list_json`; JSON batch `temp` accepts Kelvin; light commands are coalesced per light instead of answered with "Server is busy"; POST batch stops an override animation like GET commands do; editing over HTTP: `/NeewerLux/presets`, animation `get`/`save`/`duplicate`/`delete`/`reload`, sequence `get`/`delete`/`editor` and renaming on save. Also part of this version, from 1.3.1 and 1.3.2: layers, sequences, `status_json`, `stop_layer`, `/NeewerLux/sequence` and `/NeewerLux/settings`.
 

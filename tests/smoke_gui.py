@@ -224,6 +224,46 @@ def checkSoundTab(nl, app, win, rig):
     print("Sound tab: PASS")
 
 
+def checkColourAndPresetFade(nl, app, win):
+    """1.4.0: the HSI tab's wheel and swatches set the sliders (and follow them); a global
+    preset recalled from its button with a fade goes through the compositor's fade and doesn't
+    send the sliders."""
+    win.Slider_HSI_1_H.setValue(10)
+    win.hsiSwatches.buttons[4].click()  # green
+    assert (win.Slider_HSI_1_H.value(), win.Slider_HSI_2_S.value()) == (120, 100), "a swatch sets the sliders"
+    win.hsiWheel.picked.emit(200, 40)
+    assert (win.Slider_HSI_1_H.value(), win.Slider_HSI_2_S.value()) == (200, 40), "the wheel sets the sliders"
+    win.Slider_HSI_1_H.setValue(300)
+    assert win.hsiWheel.hue == 300 and win.hsiWheel.sat == 40, "the sliders move the wheel's marker"
+    from neewerlux_ui import ColourPickDialog
+    dlg = ColourPickDialog(30, 80, win)
+    dlg.swatches.buttons[7].click()  # blue
+    assert dlg.value() == (225, 100), dlg.value()
+    dlg.close()
+    nl.customLightPresets[5] = [[-1, [4, 60, 270, 90]]]
+    nl.presetFades[5] = 400
+    fades, sends = [], []
+    realFade = nl.showEngine.fadeBase
+    nl.showEngine.fadeBase = lambda lights, ms, **kw: fades.append((sorted(lights), ms)) or set(lights)
+    win._holdSliderSend = False
+    nl.livePreview = True
+    realSend = win.startSend
+    try:
+        win.lightTable.selectAll()
+        app.processEvents()
+        nl.threadAction = ""
+        nl.recallCustomPreset(5)
+        app.processEvents()
+        assert fades == [(list(range(len(nl.availableLights))), 400)], "the global preset fades in: %s" % fades
+        assert nl.threadAction in ("", "HTTP"), "the sliders weren't sent: %r" % nl.threadAction
+        assert win.Slider_HSI_1_H.value() == 270 and win.Slider_HSI_3_L.value() == 60, "the sliders show the preset"
+    finally:
+        nl.showEngine.fadeBase = realFade
+        nl.presetFades.pop(5, None)
+        nl.customLightPresets[5] = nl.getDefaultPreset(5)
+    print("colour wheel and preset fades: PASS")
+
+
 def main():
     rig = harness.boot(os.path.dirname(HERE))
     nl = rig.nl
@@ -237,6 +277,7 @@ def main():
     checkWorkerUsesGuiThread(nl, app, win)
     checkSoundTab(nl, app, win, rig)
     checkFlashRates(nl, app, win)
+    checkColourAndPresetFade(nl, app, win)
 
     # Sequences panel and status timer
     nl.savedSequences["Smoke"] = {"format": 1, "name": "Smoke", "duration_ms": 1500,

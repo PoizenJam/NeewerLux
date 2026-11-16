@@ -4,10 +4,12 @@ Builds the widget tree and layouts. Widget attribute names are the
 contract with NeewerLux.py, which connects the signal handlers.
 """
 
+import secrets
+
 try:
     import PySide6
     from PySide6.QtCore import Qt, Signal, QSize, QRectF, QPointF, QRect, QPoint
-    from PySide6.QtGui import QFont, QColor, QLinearGradient, QBrush, QKeySequence, QIcon, QPainter, QPixmap, QPolygonF
+    from PySide6.QtGui import QFont, QColor, QLinearGradient, QBrush, QKeySequence, QIcon, QPainter, QPixmap, QPolygonF, QConicalGradient, QRadialGradient, QPen
     from PySide6.QtWidgets import (
         QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QFormLayout,
         QSplitter, QSizePolicy, QAbstractItemView, QAbstractScrollArea,
@@ -15,14 +17,14 @@ try:
         QTabWidget, QCheckBox, QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, QComboBox, QAbstractButton,
         QGraphicsView, QGraphicsScene, QScrollArea, QKeySequenceEdit,
         QListWidget, QListWidgetItem, QStatusBar, QHeaderView, QFrame,
-        QSystemTrayIcon, QMenu, QTextBrowser, QProgressBar, QLayout, QWidgetItem
+        QSystemTrayIcon, QMenu, QTextBrowser, QProgressBar, QLayout, QWidgetItem, QDialog, QDialogButtonBox
     )
     customSignal = Signal
 except ImportError:
     try:
         import PySide2
         from PySide2.QtCore import Qt, Signal, QSize, QRectF, QPointF, QRect, QPoint
-        from PySide2.QtGui import QFont, QColor, QLinearGradient, QBrush, QKeySequence, QIcon, QPainter, QPixmap, QPolygonF
+        from PySide2.QtGui import QFont, QColor, QLinearGradient, QBrush, QKeySequence, QIcon, QPainter, QPixmap, QPolygonF, QConicalGradient, QRadialGradient, QPen
         from PySide2.QtWidgets import (
             QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QFormLayout,
             QSplitter, QSizePolicy, QAbstractItemView, QAbstractScrollArea,
@@ -30,7 +32,7 @@ except ImportError:
             QTabWidget, QCheckBox, QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, QComboBox, QAbstractButton,
             QGraphicsView, QGraphicsScene, QScrollArea, QKeySequenceEdit,
             QListWidget, QListWidgetItem, QStatusBar, QHeaderView, QFrame,
-            QSystemTrayIcon, QMenu, QTextBrowser, QProgressBar, QLayout, QWidgetItem
+            QSystemTrayIcon, QMenu, QTextBrowser, QProgressBar, QLayout, QWidgetItem, QDialog, QDialogButtonBox
         )
         customSignal = Signal
     except ImportError:
@@ -358,6 +360,111 @@ def fitColumnsToWidgets(table, columns):
                     want = max(want, w.fontMetrics().horizontalAdvance(w.currentText()) + 48)
         if want > table.columnWidth(col):
             table.setColumnWidth(col, want)
+
+
+COLOUR_SWATCHES = [(0, 100, "Red"), (25, 100, "Orange"), (45, 100, "Amber"), (60, 100, "Yellow"), (120, 100, "Green"),
+                   (170, 100, "Teal"), (195, 100, "Cyan"), (225, 100, "Blue"), (265, 100, "Purple"), (300, 100, "Magenta"),
+                   (330, 65, "Pink"), (35, 20, "Warm white")]
+
+
+class ColourWheel(QWidget):
+    """Hue round the circle, saturation from the centre (white) out. Click or drag to pick;
+    picked(hue, sat) follows. setHueSat moves the marker without emitting."""
+    picked = customSignal(int, int)
+
+    def __init__(self, size=120, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(size, size)
+        self.hue, self.sat = 0, 100
+        self.setCursor(Qt.CrossCursor)
+        self.setToolTip("Click or drag to pick a hue (round the wheel) and saturation (white in the middle)")
+
+    def setHueSat(self, hue, sat):
+        self.hue, self.sat = int(hue) % 360, max(0, min(100, int(sat)))
+        self.update()
+
+    def paintEvent(self, event):
+        import math
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        r = min(self.width(), self.height()) / 2.0 - 3
+        c = QPointF(self.width() / 2.0, self.height() / 2.0)
+        cone = QConicalGradient(c, 0)
+        for k in range(13):
+            # conical gradients run anticlockwise from 3 o'clock, as hue does here
+            cone.setColorAt(k / 12.0, QColor.fromHsv((k * 30) % 360, 255, 255))
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(cone))
+        p.drawEllipse(c, r, r)
+        white = QRadialGradient(c, r)
+        white.setColorAt(0.0, QColor(255, 255, 255, 255))
+        white.setColorAt(1.0, QColor(255, 255, 255, 0))
+        p.setBrush(QBrush(white))
+        p.drawEllipse(c, r, r)
+        a = math.radians(self.hue)
+        m = QPointF(c.x() + math.cos(a) * r * self.sat / 100.0, c.y() - math.sin(a) * r * self.sat / 100.0)
+        p.setBrush(Qt.NoBrush)
+        p.setPen(QPen(QColor(0, 0, 0), 3))
+        p.drawEllipse(m, 5, 5)
+        p.setPen(QPen(QColor(255, 255, 255), 1.5))
+        p.drawEllipse(m, 5, 5)
+
+    def _pick(self, pos):
+        import math
+        r = min(self.width(), self.height()) / 2.0 - 3
+        dx, dy = pos.x() - self.width() / 2.0, self.height() / 2.0 - pos.y()
+        self.setHueSat(round(math.degrees(math.atan2(dy, dx))) % 360, round(min(1.0, math.hypot(dx, dy) / r) * 100))
+        self.picked.emit(self.hue, self.sat)
+
+    def mousePressEvent(self, event):
+        self._pick(event.position() if hasattr(event, "position") else event.pos())
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() & Qt.LeftButton:
+            self._pick(event.position() if hasattr(event, "position") else event.pos())
+
+
+class ColourSwatches(QWidget):
+    """A grid of ready colours (COLOUR_SWATCHES); picked(hue, sat) when one is clicked."""
+    picked = customSignal(int, int)
+
+    def __init__(self, columns=6, parent=None):
+        super().__init__(parent)
+        grid = QGridLayout(self)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setSpacing(3)
+        self.buttons = []
+        for n, (hue, sat, name) in enumerate(COLOUR_SWATCHES):
+            b = QPushButton()
+            b.setFixedSize(26, 22)
+            b.setToolTip(name)
+            b.setStyleSheet("QPushButton { background: %s; border: 1px solid #666; border-radius: 3px; padding: 0px; }"
+                            % QColor.fromHsv(hue % 360, int(sat * 2.55), 255).name())
+            b.clicked.connect(lambda _=False, h=hue, sa=sat: self.picked.emit(h, sa))
+            grid.addWidget(b, n // columns, n % columns)
+            self.buttons.append(b)
+
+
+class ColourPickDialog(QDialog):
+    """A wheel and the swatches, for picking one hue and saturation."""
+
+    def __init__(self, hue, sat, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Pick a colour")
+        lay = QVBoxLayout(self)
+        self.wheel = ColourWheel(180)
+        self.wheel.setHueSat(hue, sat)
+        lay.addWidget(self.wheel, 0, Qt.AlignHCenter)
+        self.swatches = ColourSwatches()
+        self.swatches.picked.connect(self.wheel.setHueSat)
+        lay.addWidget(self.swatches, 0, Qt.AlignHCenter)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        lay.addWidget(buttons)
+
+    def value(self):
+        return self.wheel.hue, self.wheel.sat
 
 
 def widePopup(combo):
@@ -843,6 +950,19 @@ class Ui_MainWindow(object):
         row = _addSliderRow(hsiGrid, row, "Intensity:", self.Slider_HSI_3_L, self.TFV_HSI_3_L,
                             self.TFV_HSI_3_L_Min, self.TFV_HSI_3_L_Max, self.HSI_Int_Gradient_BG, mainFont)
         hsiLay.addLayout(hsiGrid)
+        pickRow = QHBoxLayout()
+        self.hsiWheel = ColourWheel(110)
+        self.hsiWheel.setHueSat(self.Slider_HSI_1_H.value(), self.Slider_HSI_2_S.value())
+        self.hsiSwatches = ColourSwatches()
+        pickRow.addWidget(self.hsiWheel)
+        pickRow.addWidget(self.hsiSwatches, 0, Qt.AlignVCenter)
+        pickRow.addStretch(1)
+        hsiLay.addLayout(pickRow)
+        # the wheel and swatches set the sliders (which send as they always do); the sliders move the wheel's marker
+        for picker in (self.hsiWheel, self.hsiSwatches):
+            picker.picked.connect(lambda h, sa: (self.Slider_HSI_1_H.setValue(h), self.Slider_HSI_2_S.setValue(sa)))
+        for slider in (self.Slider_HSI_1_H, self.Slider_HSI_2_S):
+            slider.valueChanged.connect(lambda _v: self.hsiWheel.setHueSat(self.Slider_HSI_1_H.value(), self.Slider_HSI_2_S.value()))
         hsiLay.addStretch(1)
         self.ColorModeTabWidget.addTab(self.HSI, "HSI")
 
@@ -994,7 +1114,9 @@ class Ui_MainWindow(object):
         self.seqReloadButton.setToolTip("Reload sequence files from light_prefs/sequences")
         self.seqRenderButton = QPushButton("Render")
         self.seqRenderButton.setToolTip("Show the whole sequence as a strip, one row per light, without playing it")
-        for b in [self.seqPlayButton, self.seqPauseButton, self.seqStopButton, self.seqRenderButton, self.seqReloadButton]:
+        self.seqBrightnessSpin = SpinBoxWithButtons(minVal=1, maxVal=100, value=100, suffix="%")
+        self.seqBrightnessSpin.setToolTip("Brightness for the next Play: scales the whole sequence (limits and the flash guard still apply)")
+        for b in [self.seqPlayButton, self.seqBrightnessSpin, self.seqPauseButton, self.seqStopButton, self.seqRenderButton, self.seqReloadButton]:
             seqRow.addWidget(b)
         seqLeft.addLayout(seqRow)
         seqEditRow = QHBoxLayout()
@@ -1508,6 +1630,18 @@ class Ui_MainWindow(object):
         net.addRow(QLabel("<br><strong>HTTP server</strong>"))
         net.addRow(self.httpAutoStart_check)
         net.addRow("HTTP server port:", self.httpPortField)
+        tokenRow = QHBoxLayout()
+        self.httpTokenField = QLineEdit()
+        self.httpTokenField.setPlaceholderText("blank: no token")
+        self.httpTokenField.setToolTip("When set, requests from other computers must carry it: add ?token=... to the dashboard\n"
+                                       "address and to GET commands, or send the X-NeewerLux-Token header. This computer\n"
+                                       "(127.0.0.1) needn't. Letters, digits and - _ . ~ only. Set here only.")
+        self.httpTokenGenerate = QPushButton("Generate")
+        self.httpTokenGenerate.setToolTip("Fill in a new random token")
+        self.httpTokenGenerate.clicked.connect(lambda: self.httpTokenField.setText(secrets.token_urlsafe(18)))
+        tokenRow.addWidget(self.httpTokenField, 1)
+        tokenRow.addWidget(self.httpTokenGenerate)
+        net.addRow("HTTP access token:", tokenRow)
         net.addRow(QLabel("Acceptable IPs for the HTTP server:"))
         net.addRow(self.acceptable_HTTP_IPs_field)
 

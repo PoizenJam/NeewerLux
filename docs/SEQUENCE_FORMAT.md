@@ -405,6 +405,10 @@ POST `/NeewerLux/sequence` (body up to 256 KB):
 {"action": "draft", "analysis": {...}, "style": "Concert", "name": "Song"}  a drafted sequence, saved with "save": true
 ```
 
+### Following an outside clock
+
+A program that knows where a song is (a game's song tracker, a DAW bridge, a media player plug-in) can drive a sequence: play it by name, or by `artist` and `song` (the fields in the file), with `watchdog_ms`, then send `set_position` with the song's position as it goes, a few times a second. Small differences are absorbed by running up to 5% fast or slow, large ones jump. When positions stop coming for `watchdog_ms` (the song was paused, or the program closed), the sequence pauses as Pause does and its state reads `waiting`; the next position carries on from there. Pause, Resume and Stop work as usual. Give such sequences Fade in 0, since a fade in delays the start. See `play` in [HTTP_API.md](HTTP_API.md). A play request can also set `brightness` (percent), scaling the whole show for that play: a song played late at night, say.
+
 ### Render
 
 Render plays a sequence on a simulated clock against the lights NeewerLux currently has

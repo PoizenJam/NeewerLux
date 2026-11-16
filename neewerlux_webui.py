@@ -113,8 +113,13 @@ a:hover { text-decoration: underline; }
 .card.full-width { grid-column: 1 / -1; }
 .swatch { display:inline-block; width:14px; height:14px; border-radius:3px; border:1px solid var(--border); vertical-align:middle; }
 .stage-grid { display:flex; flex-wrap:wrap; gap:12px; }
-.stage-tile { width:150px; text-align:center; font-size:12px; }
-.stage-box { position:relative; height:84px; border-radius:10px; border:4px solid #5a5a5a; margin-bottom:4px; }
+.swatches { display:grid; grid-template-columns:repeat(6, 26px); gap:3px; }
+.swatches button { width:26px; height:22px; border:1px solid #666; border-radius:3px; padding:0; cursor:pointer; }
+.snd-swatch.pick { cursor:pointer; }
+.stage-tile { position:relative; width:150px; text-align:center; font-size:12px; }
+.stage-box { position:relative; z-index:1; height:84px; border-radius:10px; border:4px solid #5a5a5a; margin-bottom:4px; }
+.stage-tile .beam { position:absolute; left:50%; top:46px; width:130px; height:90px; margin-top:-45px; transform-origin:0 50%;
+    clip-path:polygon(0 50%, 100% 0, 100% 100%); opacity:.3; pointer-events:none; z-index:0; }
 .stage-box .sim { position:absolute; top:5px; left:5px; background:rgba(0,0,0,.6); color:#e6e6e6; font-size:10px; padding:1px 5px; border-radius:4px; }
 .stage-box .unknown { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#ccc; font-size:20px; }
 .stage-name { color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -520,6 +525,10 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
                     </div>
                 </div>
                 <div id="huePreview" style="height:8px;border-radius: var(--radius);margin-bottom:10px;background:hsl(240,100%,50%)"></div>
+                <div style="display:flex;gap:12px;align-items:center;margin-bottom:10px">
+                    <canvas id="hsiWheel" width="110" height="110" style="width:110px;height:110px;cursor:crosshair" title="Click or drag to pick a hue (round the wheel) and saturation (white in the middle)"></canvas>
+                    <div class="swatches" id="hsiSwatches"></div>
+                </div>
                 <button class="btn primary" style="width:100%" onclick="sendHSI()">Apply HSI</button>
             </div>
 
@@ -654,6 +663,7 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
             <div class="seq-progress" id="seqProgress" title="Click to seek" onclick="seqSeek(event)"><div id="seqProgressFill"></div></div>
             <div class="btn-row">
                 <button class="btn success" onclick="seqPlay()" title="Play the selected sequence from the start">&#x25B6; Play</button>
+                <input type="number" id="seqBri" min="1" max="100" value="100" style="width:64px" title="Brightness for the next Play: scales the whole sequence (limits and the flash guard still apply)">%
                 <button class="btn" id="seqPauseBtn" onclick="seqPauseResume()" title="Pause returns the lights to where they were; Resume carries on">Pause</button>
                 <button class="btn danger" onclick="seqCmd('stop')">&#x25A0; Stop</button>
             </div>
@@ -823,6 +833,8 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
                 <div class="api-code">GET /NeewerLux/doAction?sequence=play|Example%20-%20Four%20Light%20Demo</div>
                 <div class="api-desc">JSON API: list, reload, play, pause, resume, stop, seek, set_position, status, validate, save, render</div>
                 <div class="api-code">POST /NeewerLux/sequence {"action":"play","name":"Example - Four Light Demo"}</div>
+                <div class="api-code">POST /NeewerLux/sequence {"action":"play","artist":"Band","song":"Song","brightness":60,"watchdog_ms":2000} then {"action":"set_position","ms":65120}</div>
+                <div class="api-code">GET /NeewerLux/doAction?use_preset=2&amp;layer=effect&amp;hold=3000 (a preset as a temporary effect)</div>
                 <div class="api-code">POST /NeewerLux/sequence {"action":"seek","ms":12000}</div>
                 <div class="api-code">POST /NeewerLux/sequence {"action":"render","name":"Example - Four Light Demo","format":"png"}</div>
                 <div class="api-desc">Draft from a song: analyse a file (or upload it), then draft a sequence from the analysis</div>
@@ -944,6 +956,16 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
     </div>
 </div>
 
+<!-- COLOUR PICKER (Sound palette) -->
+<div class="modal-bg" id="pickModal">
+    <div class="modal" style="text-align:center">
+        <h3 style="margin-top:0;color:var(--accent)">Pick a colour</h3>
+        <canvas id="pickWheel" width="180" height="180" style="width:180px;height:180px;cursor:crosshair"></canvas>
+        <div class="swatches" id="pickSwatches" style="margin:8px auto;width:max-content"></div>
+        <div class="toolbar"><span style="flex:1"></span><button class="btn primary" onclick="pickClose(true)">OK</button><button class="btn" onclick="pickClose(false)">Cancel</button></div>
+    </div>
+</div>
+
 <!-- DRAFT FROM A SONG -->
 <div class="modal-bg" id="songModal">
     <div class="modal" style="width:min(920px, 95vw)">
@@ -1050,6 +1072,17 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
 
 <script>
 const BASE = '/NeewerLux/doAction?';
+// with an access token set, the dashboard is opened as ...?token=...; every request to NeewerLux carries it
+const NL_TOKEN = new URLSearchParams(location.search).get('token');
+if (NL_TOKEN) {
+    const plainFetch = window.fetch.bind(window);
+    window.fetch = (url, opts) => {
+        if (typeof url !== 'string' || !url.startsWith('/')) return plainFetch(url, opts);
+        opts = Object.assign({}, opts);
+        opts.headers = Object.assign({}, opts.headers, {'X-NeewerLux-Token': NL_TOKEN});
+        return plainFetch(url, opts);
+    };
+}
 let selectedAnim = '';
 let activeSceneBtn = null;
 
@@ -1065,6 +1098,52 @@ document.getElementById('hsiSat').oninput = e => {
     document.getElementById('huePreview').style.background = `hsl(${document.getElementById('hsiHue').value},${e.target.value}%,50%)`;
 };
 document.getElementById('hsiBri').oninput = e => document.getElementById('hsiBriVal').textContent = e.target.value + '%';
+
+// COLOUR WHEEL AND SWATCHES (as the desktop's): hue round the wheel, saturation out from white in the middle
+const COLOUR_SWATCHES = [[0, 100, 'Red'], [25, 100, 'Orange'], [45, 100, 'Amber'], [60, 100, 'Yellow'], [120, 100, 'Green'],
+    [170, 100, 'Teal'], [195, 100, 'Cyan'], [225, 100, 'Blue'], [265, 100, 'Purple'], [300, 100, 'Magenta'], [330, 65, 'Pink'], [35, 20, 'Warm white']];
+function drawWheel(cv, hue, sat) {
+    const ctx = cv.getContext('2d'), r = cv.width / 2 - 3, c = cv.width / 2;
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    for (let a = 0; a < 360; a += 2) {
+        // canvas angles run clockwise, hue anticlockwise from 3 o'clock
+        ctx.beginPath(); ctx.moveTo(c, c);
+        ctx.arc(c, c, r, -(a + 2.5) * Math.PI / 180, -a * Math.PI / 180);
+        ctx.fillStyle = 'hsl(' + a + ',100%,50%)'; ctx.fill();
+    }
+    const g = ctx.createRadialGradient(c, c, 0, c, c, r);
+    g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.beginPath(); ctx.arc(c, c, r, 0, 2 * Math.PI); ctx.fillStyle = g; ctx.fill();
+    const mx = c + Math.cos(hue * Math.PI / 180) * r * sat / 100, my = c - Math.sin(hue * Math.PI / 180) * r * sat / 100;
+    ctx.lineWidth = 3; ctx.strokeStyle = '#000'; ctx.beginPath(); ctx.arc(mx, my, 5, 0, 2 * Math.PI); ctx.stroke();
+    ctx.lineWidth = 1.5; ctx.strokeStyle = '#fff'; ctx.stroke();
+}
+function wheelAt(cv, ev) {
+    const b = cv.getBoundingClientRect(), r = b.width / 2 - 3;
+    const dx = ev.clientX - b.left - b.width / 2, dy = b.top + b.height / 2 - ev.clientY;
+    return [(Math.round(Math.atan2(dy, dx) * 180 / Math.PI) + 360) % 360, Math.round(Math.min(1, Math.hypot(dx, dy) / r) * 100)];
+}
+function wheelInit(cv, get, set) {
+    // get() gives [hue, sat]; set(hue, sat) is called on each pick
+    const pick = ev => { const [h, sa] = wheelAt(cv, ev); set(h, sa); drawWheel(cv, h, sa); };
+    cv.onmousedown = ev => { pick(ev); cv._drag = true; };
+    cv.onmousemove = ev => { if (cv._drag && ev.buttons & 1) pick(ev); };
+    cv.onmouseup = cv.onmouseleave = () => { cv._drag = false; };
+    drawWheel(cv, ...get());
+}
+function swatchesHTML(onpick) {
+    return COLOUR_SWATCHES.map(([h, sa, n]) => '<button type="button" title="' + n + '" style="background:hsl(' + h + ',' + sa + '%,' + (100 - sa / 2) + '%)" onclick="' + onpick + '(' + h + ',' + sa + ')"></button>').join('');
+}
+function hsiSetHueSat(h, sa) {
+    const hue = document.getElementById('hsiHue'), sat = document.getElementById('hsiSat');
+    hue.value = h; sat.value = sa;
+    hue.oninput({target: hue}); sat.oninput({target: sat});
+}
+['hsiHue', 'hsiSat'].forEach(id => document.getElementById(id).addEventListener('input', () =>
+    drawWheel(document.getElementById('hsiWheel'), +document.getElementById('hsiHue').value, +document.getElementById('hsiSat').value)));
+document.getElementById('hsiSwatches').innerHTML = swatchesHTML('hsiPickSwatch');
+function hsiPickSwatch(h, sa) { hsiSetHueSat(h, sa); drawWheel(document.getElementById('hsiWheel'), h, sa); }
+wheelInit(document.getElementById('hsiWheel'), () => [+document.getElementById('hsiHue').value, +document.getElementById('hsiSat').value], hsiSetHueSat);
 document.getElementById('sceneBri').oninput = e => document.getElementById('sceneBriVal').textContent = e.target.value + '%';
 
 // MODE TABS
@@ -1461,7 +1540,14 @@ function stageTileHTML(t) {
     if (t.mode) detail += '  ' + t.mode + (t.mode === 'OFF' || t.bri == null ? '' : ' ' + t.bri + '%');
     const pos = (t.side || 'centre') + ', ' + (t.depth || 'beside') + ', ' + (t.height || 'middle') + ' height, points ' + ((t.aim || 'you') === 'you' ? 'at you' : t.aim);
     const lvl = HEIGHT_LEVEL[t.height];
-    return '<div class="stage-tile" title="' + esc(t.name) + ' (' + esc(pos) + ')">'
+    // in the plan, a soft wedge in the light's colour points where it aims (at you: towards the middle)
+    let beam = '';
+    if (stageView === 'plan' && t.color) {
+        const COL = {left: -1, centre: 0, right: 1}, ROW = {front: -1, beside: 0, back: 1};
+        const v = AIM_VECTOR[t.aim] || [-(COL[t.side] || 0), -(ROW[t.depth] || 0)];
+        if (v[0] || v[1]) beam = '<span class="beam" style="background:' + t.color + ';transform:rotate(' + Math.round(Math.atan2(v[1], v[0]) * 180 / Math.PI) + 'deg)"></span>';
+    }
+    return '<div class="stage-tile" title="' + esc(t.name) + ' (' + esc(pos) + ')">' + beam
         + '<div class="stage-box layer-' + esc(t.layer || 'base') + '" style="background:' + (t.color || '#373737') + ';' + (t.linked === false ? 'filter:brightness(.4);' : '') + '">'
         + (t.simulated ? '<span class="sim">SIM</span>' : '')
         + (stageView === 'plan' && lvl ? '<span class="hb">' + [3, 2, 1].map(n => '<i class="' + (lvl >= n ? 'on' : '') + '"></i>').join('') + '</span>' : '')
@@ -1564,7 +1650,8 @@ function seqResult(label, d) {
 }
 async function seqPlay() {
     if (!selectedSeq) { logMsg('No sequence selected', 'err'); return; }
-    try { seqResult('▶ Sequence: ' + selectedSeq, await seqPost({action:'play', name:selectedSeq})); } catch(e) { logMsg('Sequence error: ' + e.message, 'err'); }
+    const bri = Math.max(1, Math.min(100, +document.getElementById('seqBri').value || 100));
+    try { seqResult('▶ Sequence: ' + selectedSeq, await seqPost({action:'play', name:selectedSeq, brightness:bri})); } catch(e) { logMsg('Sequence error: ' + e.message, 'err'); }
     pollStatus();
 }
 async function seqCmd(action, ms) {
@@ -1574,7 +1661,7 @@ async function seqCmd(action, ms) {
 function seqPauseResume() {
     const seq = lastStatus && lastStatus.sequence;
     if (!seq) { logMsg('No sequence playing', 'err'); return; }
-    seqCmd(seq.state === 'paused' ? 'resume' : 'pause');
+    seqCmd(seq.state === 'paused' || seq.state === 'waiting' ? 'resume' : 'pause');
 }
 function seqSeek(ev) {
     const seq = lastStatus && lastStatus.sequence;
@@ -1589,9 +1676,9 @@ function renderSeqStatus() {
     const fill = document.getElementById('seqProgressFill');
     const btn = document.getElementById('seqPauseBtn');
     if (!seq) { label.textContent = 'No sequence playing'; fill.style.width = '0'; btn.textContent = 'Pause'; return; }
-    label.textContent = cap(seq.state) + ': ' + seq.name + '  ' + fmtMs(seq.position_ms) + ' / ' + fmtMs(seq.duration_ms);
+    label.textContent = (seq.state === 'waiting' ? 'Waiting for position' : cap(seq.state)) + ': ' + seq.name + '  ' + fmtMs(seq.position_ms) + ' / ' + fmtMs(seq.duration_ms);
     fill.style.width = (seq.duration_ms ? Math.min(100, 100 * seq.position_ms / seq.duration_ms) : 0) + '%';
-    btn.textContent = seq.state === 'paused' ? 'Resume' : 'Pause';
+    btn.textContent = seq.state === 'paused' || seq.state === 'waiting' ? 'Resume' : 'Pause';
 }
 
 // Render: drawn here from the JSON render, so it also works when NeewerLux runs without its window
@@ -1774,6 +1861,8 @@ let lpPos = {side: 'centre', depth: 'beside', height: 'middle', aim: 'you'};
 const AIM_PAD = [['front-left', '\u2196'], ['front', '\u2191'], ['front-right', '\u2197'], ['left', '\u2190'], ['you', '\u25cf'],
                  ['right', '\u2192'], ['back-left', '\u2199'], ['back', '\u2193'], ['back-right', '\u2198']];
 const AIM_ARROW = Object.fromEntries(AIM_PAD);
+// directions on the plan (x right, y towards the back), as the desktop Stage's AIM_VECTORS
+const AIM_VECTOR = {front: [0, -1], 'front-right': [1, -1], right: [1, 0], 'back-right': [1, 1], back: [0, 1], 'back-left': [-1, 1], left: [-1, 0], 'front-left': [-1, -1]};
 // a top-down head and shoulders facing the front (up), with a faint view cone
 const PERSON_SVG = '<svg width="44" height="40" viewBox="0 0 44 40" aria-label="you"><polygon points="22,18 6,0 38,0" fill="rgba(255,255,255,.07)"/>'
     + '<rect x="6" y="20" width="32" height="12" rx="6" fill="#6a6a6a"/><ellipse cx="22" cy="20" rx="7" ry="8" fill="#9a9a9a"/><polygon points="19,13 25,13 22,8" fill="#9a9a9a"/></svg>';
@@ -3453,7 +3542,8 @@ function sndRender() {
     cyc.value = Math.max(minCycle, Math.round(d.cycle_s !== undefined ? d.cycle_s : Math.max(20, minCycle)));
     if (d.cycle_s !== undefined && d.cycle_s < minCycle) d.cycle_s = minCycle;
     document.getElementById('sndPalette').innerHTML = pal.map((e, i) => {
-        const sw = '<span class="snd-swatch" style="background:' + sndColour(e) + '"></span>';
+        const sw = white ? '<span class="snd-swatch" style="background:' + sndColour(e) + '"></span>'
+            : '<span class="snd-swatch pick" style="background:' + sndColour(e) + '" title="Pick this colour on a wheel" onclick="pickOpen(' + i + ')"></span>';
         const inputs = white
             ? '<input type="number" min="2700" max="10000" step="100" value="' + e.temp + '" onchange="sndPal(' + i + ',\'temp\',this.value)"> K'
             : 'Hue <input type="number" min="0" max="360" value="' + e.hue + '" onchange="sndPal(' + i + ',\'hue\',this.value)"> Sat <input type="number" min="0" max="100" value="' + e.sat + '" onchange="sndPal(' + i + ',\'sat\',this.value)">';
@@ -3487,6 +3577,22 @@ function sndSlider(k, raw) {
     if (k === 'ceiling' && v < (sndDraft.floor !== undefined ? sndDraft.floor : 10)) { changes.floor = v; document.getElementById('snd_floor').value = v; document.getElementById('snd_floor_v').textContent = v + '%'; }
     Object.assign(sndDraft, changes);
     sndLive(changes);
+}
+// the wheel popup for a Sound palette colour
+let pickIndex = -1, pickHS = [0, 100];
+function pickOpen(i) {
+    pickIndex = i;
+    pickHS = [sndDraft.palette[i].hue, sndDraft.palette[i].sat];
+    document.getElementById('pickSwatches').innerHTML = swatchesHTML('pickSwatch');
+    wheelInit(document.getElementById('pickWheel'), () => pickHS, (h, sa) => { pickHS = [h, sa]; });
+    document.getElementById('pickModal').classList.add('open');
+}
+function pickSwatch(h, sa) { pickHS = [h, sa]; drawWheel(document.getElementById('pickWheel'), h, sa); }
+function pickClose(ok) {
+    document.getElementById('pickModal').classList.remove('open');
+    if (!ok || pickIndex < 0 || !sndDraft) return;
+    Object.assign(sndDraft.palette[pickIndex], {hue: pickHS[0], sat: pickHS[1]});
+    sndRender(); sndLive({palette: sndDraft.palette});
 }
 function sndPal(i, key, v) { sndDraft.palette[i][key] = Number(v); sndRender(); sndLive({palette: sndDraft.palette}); }
 function sndPalRemove(i) {

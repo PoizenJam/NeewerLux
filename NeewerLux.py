@@ -31,6 +31,7 @@ if sys.stderr is None:
 
 import math # used for calculating the RGB values of color temperatures
 import json # used for animation files and HTTP batch/animation APIs
+import hmac  # comparing the HTTP access token in constant time
 import tomllib # reads the light model table
 import shutil # used to seed the default preset file on first run
 import tempfile
@@ -109,7 +110,7 @@ except Exception as e:
 
 # IMPORT THE GUI ITSELF
 try:
-    from neewerlux_ui import Ui_MainWindow, SpinBoxWithButtons, hideSpinArrows, adjustableColumns, fitColumnsToWidgets, widePopup
+    from neewerlux_ui import Ui_MainWindow, SpinBoxWithButtons, hideSpinArrows, adjustableColumns, fitColumnsToWidgets, widePopup, ColourPickDialog
     from neewerlux_theme import getThemeQSS
     from neewerlux_webui import getWebDashboardHTML
 except Exception as e:
@@ -367,6 +368,8 @@ hideConsoleOnLaunch = False # whether to auto-hide the console window on GUI sta
 minimizeToTrayOnClose = True # whether closing the window minimizes to tray (True) or quits (False)
 httpAutoStart = False # whether to automatically start the HTTP server on launch
 httpPort = 8080 # port the HTTP server listens on
+httpAccessToken = ""  # when set, other computers must send it (this computer needn't); desktop-only
+HTTP_TOKEN_EXEMPT = ("127.0.0.1", "::1")  # this computer: Stream Deck and Streamer.bot here keep working unchanged
 cctFallbackMode = "convert" # how to handle HSI/ANM commands sent to CCT-only lights: "ignore" or "convert"
 enableLogTab = True # whether to show and populate the Log tab
 logToFile = False # whether to also write log entries to a file
@@ -386,6 +389,49 @@ soundDevice = ""
 songSectionCommand = ""   # another section finder to run on songs (Global Preferences only: it runs a program)
 songFinderNames = False   # name sections with that finder's labels instead of NeewerLux's
 songSectionCommandOn = True  # off: the built-in analysis, keeping the command for later
+SEQ_WATCHDOG_MIN_MS = 500  # an outside clock sends positions at least this often
+RECONNECT_BACKOFF_S = (15, 30, 60, 120, 240, 300)  # waits between tries at a light that won't reconnect
+RECONNECT_RESCUE_AFTER = 3   # failed tries before a fresh scan for it (its Bluetooth address may have changed)
+RECONNECT_RESCUE_GAP_S = 120 # at most one such scan this often
+
+
+class ReconnectBackoff:
+    """When to try a disconnected light again: at once, then after longer and longer waits
+    while it keeps failing (RECONNECT_BACKOFF_S), so a light switched off at the wall doesn't
+    tie up Bluetooth every minute. A light that has failed RECONNECT_RESCUE_AFTER times asks for
+    a fresh scan (a rescue scan), at most every RECONNECT_RESCUE_GAP_S. Keyed by MAC address."""
+
+    def __init__(self, clock=time.monotonic):
+        self.clock = clock
+        self.failures = {}
+        self.nextTry = {}
+        self.lastRescue = None
+
+    def due(self, mac):
+        return self.clock() >= self.nextTry.get(mac, 0.0)
+
+    def tried(self, mac, ok):
+        """Record a try. Returns the seconds until the next one, or 0 when it worked."""
+        if ok:
+            self.forget(mac)
+            return 0
+        n = self.failures.get(mac, 0) + 1
+        self.failures[mac] = n
+        wait = RECONNECT_BACKOFF_S[min(n, len(RECONNECT_BACKOFF_S)) - 1]
+        self.nextTry[mac] = self.clock() + wait
+        return wait
+
+    def forget(self, mac):
+        self.failures.pop(mac, None)
+        self.nextTry.pop(mac, None)
+
+    def rescueDue(self):
+        now = self.clock()
+        if any(n >= RECONNECT_RESCUE_AFTER for n in self.failures.values()) and \
+                (self.lastRescue is None or now - self.lastRescue >= RECONNECT_RESCUE_GAP_S):
+            self.lastRescue = now
+            return True
+        return False
 stageView = "plan"        # the desktop Stage window's view, and its size and place ("x,y,w,h"), remembered
 stageGeometry = ""
 fadeInMs = 0              # fade when a preset, animation or sequence takes lights over; 0 = cut (each can set its own)
@@ -538,6 +584,7 @@ try: # try to load the GUI
             self._presetsChangedSignal.connect(self.createPresetButtons)
             self._animationListSignal.connect(self.animRefreshList)
             self._lastShowLabels = None
+            self._holdSliderSend = False  # set while a preset fading in moves the sliders
             self._stageWindow = None
             self._seqEditors = []
             self._swatches = {}
@@ -1764,7 +1811,7 @@ try: # try to load the GUI
                 row = QWidget()
                 lay = QHBoxLayout(row)
                 lay.setContentsMargins(0, 0, 0, 0)
-                swatch = QLabel()
+                swatch = QLabel() if white else QPushButton()
                 swatch.setFixedSize(22, 22)
                 lay.addWidget(QLabel(str(i + 1)))
                 lay.addWidget(swatch)
@@ -1782,6 +1829,8 @@ try: # try to load the GUI
                     lay.addWidget(QLabel("Sat"))
                     lay.addWidget(sat, 1)
                     spins += [("hue", h), ("sat", sat)]
+                    swatch.setToolTip("Pick this colour on a wheel")
+                    swatch.clicked.connect(lambda _=False, h=h, sat=sat: self.soundPaletteWheel(h, sat))
                 remove = QPushButton("x")
                 remove.setFixedWidth(26)
                 remove.setStyleSheet("QPushButton { padding: 0px; }")
@@ -1793,6 +1842,13 @@ try: # try to load the GUI
                     spin.valueChanged.connect(lambda v, i=i, key=key, sw=swatch: self.soundPaletteChanged(i, key, v, sw))
                 self._soundSwatch(swatch, entry)
                 self.soundPaletteBox.addWidget(row)
+
+        def soundPaletteWheel(self, hueSpin, satSpin):
+            dlg = ColourPickDialog(hueSpin.value(), satSpin.value(), self)
+            if pyside_exec(dlg):
+                hue, sat = dlg.value()
+                hueSpin.setValue(hue)
+                satSpin.setValue(sat)
 
         def _soundSwatch(self, swatch, entry):
             cmd = {"mode": "CCT", "temp": entry["temp"] // 100, "bri": 100} if "temp" in entry else \
@@ -2083,7 +2139,7 @@ try: # try to load the GUI
             if not items:
                 self.seqStatusLabel.setText("Select a sequence first")
                 return
-            result = startSequence(items[0].data(Qt.UserRole))
+            result = startSequence(items[0].data(Qt.UserRole), brightness=self.seqBrightnessSpin.value())
             if not result["success"]:
                 self.seqStatusLabel.setText("Can't play: " + result["errors"][0])
                 printDebugString("Sequence errors: " + "; ".join(result["errors"]))
@@ -2112,7 +2168,7 @@ try: # try to load the GUI
             seqStatus = getShowStatus()["sequence"]
             if seqStatus is None:
                 return
-            sequenceControl("resume" if seqStatus["state"] == "paused" else "pause")
+            sequenceControl("resume" if seqStatus["state"] in ("paused", "waiting") else "pause")
 
         def openStage(self):
             from neewerlux_stage import StageWindow
@@ -2154,8 +2210,8 @@ try: # try to load the GUI
             if seq is not None:
                 def _fmt(ms):
                     return str(int(ms // 60000)) + ":" + ("%04.1f" % ((ms % 60000) / 1000.0))
-                seqText = seq["name"] + ": " + _fmt(seq["position_ms"]) + " / " + _fmt(seq["duration_ms"]) + " (" + seq["state"] + ")"
-                pauseText = "Resume" if seq["state"] == "paused" else "Pause"
+                seqText = seq["name"] + ": " + _fmt(seq["position_ms"]) + " / " + _fmt(seq["duration_ms"]) + " (" + ("waiting for position" if seq["state"] == "waiting" else seq["state"]) + ")"
+                pauseText = "Resume" if seq["state"] in ("paused", "waiting") else "Pause"
             else:
                 seqText, pauseText = "No sequence playing", "Pause"
             if effectText:
@@ -3177,6 +3233,7 @@ try: # try to load the GUI
                 self.minimizeToTrayOnClose_check.setChecked(minimizeToTrayOnClose)
                 self.httpAutoStart_check.setChecked(httpAutoStart)
                 self.httpPortField.setText(str(httpPort))
+                self.httpTokenField.setText(httpAccessToken)
                 self.cctFallbackCombo.setCurrentIndex(0 if cctFallbackMode == "convert" else 1)
                 self.enableLogTab_check.setChecked(enableLogTab)
                 self.logToFile_check.setChecked(logToFile)
@@ -3238,6 +3295,7 @@ try: # try to load the GUI
                 self.minimizeToTrayOnClose_check.setChecked(True)
                 self.httpAutoStart_check.setChecked(False)
                 self.httpPortField.setText("8080")
+                self.httpTokenField.setText("")
                 self.cctFallbackCombo.setCurrentIndex(0)  # Convert
                 self.enableLogTab_check.setChecked(True)
                 self.logToFile_check.setChecked(False)
@@ -3290,7 +3348,7 @@ try: # try to load the GUI
 
         def saveGlobalPrefs(self):
             # change these global values to the new values in Prefs
-            global customKeys, autoConnectToLights, printDebug, rememberLightsOnExit, rememberPresetsOnExit, autoReconnectOnDisconnect, maxNumOfAttempts, acceptable_HTTP_IPs, whiteListedMACs, hideConsoleOnLaunch, minimizeToTrayOnClose, httpAutoStart, httpPort, cctFallbackMode, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, globalCCTMin, globalCCTMax, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, cctFallbackMode, envMaxBri, envMinBri, seqFrameRate, effectMaxSeconds, simulatedLights, simulatedCCTOnly, flashGuardEnabled, cameraPosition, eyelineFlash, handbackFadeMs, fadeInMs, songSectionCommand, songFinderNames, songSectionCommandOn
+            global customKeys, autoConnectToLights, printDebug, rememberLightsOnExit, rememberPresetsOnExit, autoReconnectOnDisconnect, maxNumOfAttempts, acceptable_HTTP_IPs, whiteListedMACs, hideConsoleOnLaunch, minimizeToTrayOnClose, httpAutoStart, httpPort, httpAccessToken, cctFallbackMode, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, globalCCTMin, globalCCTMax, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, cctFallbackMode, envMaxBri, envMinBri, seqFrameRate, effectMaxSeconds, simulatedLights, simulatedCCTOnly, flashGuardEnabled, cameraPosition, eyelineFlash, handbackFadeMs, fadeInMs, songSectionCommand, songFinderNames, songSectionCommandOn
 
             finalPrefs = [] # list of final prefs to merge together at the end
 
@@ -3373,6 +3431,10 @@ try: # try to load the GUI
             httpPort = _port
             if httpPort != 8080: # only save non-default
                 finalPrefs.append("httpPort=" + str(httpPort))
+            httpAccessToken = "".join(c for c in self.httpTokenField.text().strip() if c.isalnum() or c in "-_.~")
+            self.httpTokenField.setText(httpAccessToken)
+            if httpAccessToken:
+                finalPrefs.append("httpAccessToken=" + httpAccessToken)
 
             cctFallbackMode = "convert" if self.cctFallbackCombo.currentIndex() == 0 else "ignore"
             if cctFallbackMode != "convert":  # only save non-default
@@ -3937,8 +3999,9 @@ try: # try to load the GUI
         def startSend(self):
             global threadAction
 
-            # If live preview is off, don't auto-send, user clicks Apply instead
-            if not livePreview:
+            # If live preview is off, don't auto-send, user clicks Apply instead; a preset fading
+            # in moves the sliders without sending
+            if not livePreview or self._holdSliderSend:
                 return
 
             # If an animation is playing, stop it, user is taking manual control
@@ -4832,6 +4895,38 @@ def customPresetInfoBuilder(numOfPreset, formatForHTTP = False):
     else:
         return "<BR>".join(toolTipBuilder)
 
+def presetAnimation(presetIdx, holdMs):
+    """A preset as a one-frame animation held for holdMs: every light it sets, as it sets them
+    (a global preset on every light, a snapshot on its own lights; lights it saved as off go off)."""
+    lights = {}
+    for e in presetToEntries(presetIdx):
+        key = "*" if e["target"] == "-1" else e["target"]
+        if e.get("off"):
+            lights[key] = {"mode": "OFF"}
+        elif e["mode"] == "HSI":
+            lights[key] = {"mode": "HSI", "hue": e["hue"], "sat": e["sat"], "bri": e["bri"]}
+        elif e["mode"] == "Scene":
+            lights[key] = {"mode": "ANM", "scene": e["scene"], "bri": e["bri"]}
+        else:
+            lights[key] = {"mode": "CCT", "temp": e["temp"], "bri": e["bri"]}
+    return {"name": "Preset " + str(presetIdx + 1), "loop": False,
+            "keyframes": [{"hold_ms": int(holdMs), "fade_ms": 0, "lights": lights}]}
+
+
+def playPresetEffect(presetIdx, holdMs, queueMode="queue", fadeIn=None, fadeOut=None):
+    """Recall a preset as a temporary effect: it plays on the effect layer for holdMs (over
+    sequences and sound), then the lights go back to what they were doing. Returns
+    "playing", "queued" or False."""
+    try:
+        holdMs = int(float(holdMs))
+    except (TypeError, ValueError):
+        return False
+    if holdMs < 1 or not 0 <= presetIdx < numOfPresets:
+        return False
+    return startAnimation(presetAnimation(presetIdx, holdMs), asyncioEventLoop, layer="effect", revert=True,
+                          queueMode="replace" if str(queueMode).lower() == "replace" else "queue", fadeIn=fadeIn, fadeOut=fadeOut)
+
+
 def recallCustomPreset(numOfPreset, updateGUI=True, loop=None):
     global availableLights
     global lastSelection
@@ -4843,6 +4938,16 @@ def recallCustomPreset(numOfPreset, updateGUI=True, loop=None):
         stopAnimation()
 
     changedLights = [] # if a snapshot preset exists in this setting, log the lights that are to be changed here
+    # a global preset recalled from the window with a fade goes through the fade below, so the
+    # sliders follow it without sending
+    guiFade = updateGUI and mainWindow is not None and presetFades.get(numOfPreset, fadeInMs) > 0
+
+    def showOnSliders(**modeArgs):
+        mainWindow._holdSliderSend = guiFade
+        try:
+            mainWindow.setUpGUI(**modeArgs)
+        finally:
+            mainWindow._holdSliderSend = False
 
     for a in range(len(customLightPresets[numOfPreset])): # check all the entries stored in this preset
         if customLightPresets[numOfPreset][0][0] == -1: # we're looking at a global preset, so set the light(s) up accordingly
@@ -4857,10 +4962,9 @@ def recallCustomPreset(numOfPreset, updateGUI=True, loop=None):
                 p_brightness = customLightPresets[numOfPreset][0][1][1]
                 p_temp = customLightPresets[numOfPreset][0][1][2]
 
-                if updateGUI == True:
-                    if mainWindow is not None: mainWindow.setUpGUI(colorMode=p_colorMode, brightness=p_brightness, temp=p_temp)
-                else:
-                    computedValue = calculateByteString(True, colorMode=p_colorMode, brightness=p_brightness, temp=p_temp)
+                if updateGUI == True and mainWindow is not None:
+                    showOnSliders(colorMode=p_colorMode, brightness=p_brightness, temp=p_temp)
+                computedValue = calculateByteString(True, colorMode=p_colorMode, brightness=p_brightness, temp=p_temp)
             elif customLightPresets[numOfPreset][0][1][0] == 4: # the preset is in HSI mode
                 p_colorMode = "HSI"
                 # Due to the way the custom presets store information (brightness is always first),
@@ -4869,24 +4973,22 @@ def recallCustomPreset(numOfPreset, updateGUI=True, loop=None):
                 p_sat = customLightPresets[numOfPreset][0][1][3]
                 p_int = customLightPresets[numOfPreset][0][1][1]
 
-                if updateGUI == True:
-                    if mainWindow is not None: mainWindow.setUpGUI(colorMode=p_colorMode, hue=p_hue, sat=p_sat, brightness=p_int)
-                else:
-                    computedValue = calculateByteString(True, colorMode=p_colorMode, HSI_H=p_hue, HSI_S=p_sat, HSI_I=p_int)
+                if updateGUI == True and mainWindow is not None:
+                    showOnSliders(colorMode=p_colorMode, hue=p_hue, sat=p_sat, brightness=p_int)
+                computedValue = calculateByteString(True, colorMode=p_colorMode, HSI_H=p_hue, HSI_S=p_sat, HSI_I=p_int)
             elif customLightPresets[numOfPreset][0][1][0] == 6: # the preset is in ANM/SCENE mode
                 p_colorMode = "ANM"
                 p_brightness = customLightPresets[numOfPreset][0][1][1]
                 p_scene = customLightPresets[numOfPreset][0][1][2]
 
-                if updateGUI == True:
-                    if mainWindow is not None: mainWindow.setUpGUI(colorMode=p_colorMode, brightness=p_brightness, scene=p_scene)
-                else:
-                    computedValue = calculateByteString(True, colorMode=p_colorMode, brightness=p_brightness, scene=p_scene)
+                if updateGUI == True and mainWindow is not None:
+                    showOnSliders(colorMode=p_colorMode, brightness=p_brightness, scene=p_scene)
+                computedValue = calculateByteString(True, colorMode=p_colorMode, brightness=p_brightness, scene=p_scene)
 
-            if updateGUI == False:
-                for b in range(len(availableLights)):
+            if updateGUI == False or guiFade:
+                for b in (mainWindow.selectedLights() if guiFade else range(len(availableLights))):
                     changedLights.append(b) # add each light to changedLights
-                    availableLights[b][3] = computedValue # set each light's "last" parameter to the computed value above
+                    availableLights[b][3] = list(computedValue) # set each light's "last" parameter to the computed value above
             else:
                 # Presets always send immediately, force a send even if livePreview is off
                 if not livePreview:
@@ -4927,7 +5029,13 @@ def recallCustomPreset(numOfPreset, updateGUI=True, loop=None):
             lastSelection = [] # clear the last selection if you've clicked on a snapshot preset (which, if we're here, you did)
 
             mainWindow.lightTable.setFocus() # set the focus to the light table, in order to show which rows are selected
-            mainWindow.selectRows(changedLights) # select those rows affected by the lights above
+            # selecting a light loads its value onto the sliders, which would send it at once: the
+            # preset itself is sent (or faded) below
+            mainWindow._holdSliderSend = True
+            try:
+                mainWindow.selectRows(changedLights) # select those rows affected by the lights above
+            finally:
+                mainWindow._holdSliderSend = False
 
         # Lights the preset sets following a sound mode aren't written: their colour becomes what
         # they return to when the sound stops (a write would take them out of the sound layer)
@@ -5146,6 +5254,10 @@ def presetEditAction(action, body):
     elif action == "snapshot":
         saveCustomPreset("snapshot", idx)
     elif action == "recall":
+        if str(body.get("layer", "")).lower() == "effect":
+            played = playPresetEffect(idx, body.get("hold_ms"), body.get("queue", "queue"), body.get("fade_in_ms"), body.get("handback_fade_ms"))
+            return {"success": bool(played), "preset": info(idx), "result": played or None,
+                    "errors": [] if played else ["the effect queue is full, or hold_ms isn't 1 or more"]}
         processHTMLCommands([None, False, idx + 1, "use_preset"], asyncioEventLoop)
         return {"success": True, "preset": info(idx)}
     else:
@@ -6313,7 +6425,7 @@ def workerThread(_loop):
         threadAction = "discover"
 
     delayTicks = 1 # count a few ticks before checking light information
-    reconnectCooldown = {} # {light_index: ticks_remaining} to avoid spamming reconnect attempts
+    backoff = ReconnectBackoff()
     allDisconnectedSince = 0  # ticks since all known lights were seen as disconnected (for rescan-after-wake)
 
     while True:
@@ -6349,13 +6461,12 @@ def workerThread(_loop):
                                 _forgetNotify(availableLights[a][0].address)
 
                                 # Queue this light for auto-reconnect if enabled
-                                if autoReconnectOnDisconnect and a not in reconnectCooldown:
+                                if autoReconnectOnDisconnect and backoff.due(availableLights[a][0].address):
                                     lightsNeedingReconnect.append(a)
-                                    reconnectCooldown[a] = 20  # cooldown: skip ~20 cycles (~60s) before retrying this light again
                                     printDebugString("Light " + str(a + 1) + " disconnected - will attempt auto-reconnect")
                             else:
                                 anyConnected = True
-                                reconnectCooldown.pop(a, None)  # light is connected, clear any cooldown
+                                backoff.forget(availableLights[a][0].address)
                                 showStarted = showEngine is not None and showEngine.anyActive() # re-checked per light: a show may start mid-poll
                                 if getLightCaps(availableLights[a][0].name)["reports_status"] and not showStarted: # lights that answer status queries, outside shows
                                     try:
@@ -6366,16 +6477,9 @@ def workerThread(_loop):
                                 else: # if the light we're scanning doesn't supply power or channel status, then just show "LINKED"
                                     if hasGUI: mainWindow._tableUpdateSignal.emit(["", "", "LINKED", "Waiting to send..."], a)
                         else:
-                            # Bleak object is empty - light was previously cleared; check cooldown for retry
-                            if autoReconnectOnDisconnect and a not in reconnectCooldown:
+                            # Bleak object is empty - light was previously cleared; retry when its wait is up
+                            if autoReconnectOnDisconnect and backoff.due(availableLights[a][0].address):
                                 lightsNeedingReconnect.append(a)
-                                reconnectCooldown[a] = 20
-
-                # Tick down cooldowns
-                for lightIdx in list(reconnectCooldown.keys()):
-                    reconnectCooldown[lightIdx] -= 1
-                    if reconnectCooldown[lightIdx] <= 0:
-                        del reconnectCooldown[lightIdx]
 
                 # ATTEMPT AUTO-RECONNECT FOR DISCONNECTED LIGHTS
                 if lightsNeedingReconnect and threadAction == "":
@@ -6392,6 +6496,10 @@ def workerThread(_loop):
                             allDisconnectedSince = 0
                     else:
                         allDisconnectedSince = 0
+                        if backoff.rescueDue():
+                            printDebugString("Auto-reconnect: a light keeps failing - rescanning for it...")
+                            _loop.run_until_complete(findDevices())
+                            if hasGUI: mainWindow.runOnGui(mainWindow.updateLights)
 
                     # Now try connecting to each disconnected light
                     for lightIdx in lightsNeedingReconnect:
@@ -6406,6 +6514,12 @@ def workerThread(_loop):
                             printDebugString("Auto-reconnect attempt complete")
                     except Exception as e:
                         printDebugString("Auto-reconnect error: " + str(e))
+                    for lightIdx in lightsNeedingReconnect:
+                        if lightIdx < len(availableLights):
+                            client = availableLights[lightIdx][1]
+                            wait = backoff.tried(availableLights[lightIdx][0].address, client != "" and client.is_connected)
+                            if wait and hasGUI:
+                                mainWindow._tableUpdateSignal.emit(["", "", "NOT\nLINKED", "Couldn't reconnect; trying again in " + str(wait) + " s"], lightIdx)
 
         if threadAction == "quit":
             printDebugString("Stopping the background thread")
@@ -6571,7 +6685,7 @@ def processCommands(listToProcess=[]):
     if inStartupMode == True: # if we're using the GUI or CLI, then add these arguments to the list
         acceptable_arguments.extend(["--http", "--cli", "--silent", "--help"])
     else: # if we're using the HTTP server, then add these arguments to the list
-        acceptable_arguments.extend(["--custom_name", "--discover", "--nopage", "--link", "--use_preset", "--save_preset", "--add_preset", "--delete_preset", "--batch", "--animate", "--stop_animate", "--list_animations", "--sequence", "--stop_layer", "--sound"])
+        acceptable_arguments.extend(["--custom_name", "--discover", "--nopage", "--link", "--use_preset", "--save_preset", "--add_preset", "--delete_preset", "--batch", "--animate", "--stop_animate", "--list_animations", "--sequence", "--stop_layer", "--sound", "--layer", "--hold", "--queue"])
 
     # KICK OUT ANY PARAMETERS THAT AREN'T IN THE "ACCEPTABLE ARGUMENTS" LIST
     for a in range(len(listToProcess) - 1, -1, -1):
@@ -6650,6 +6764,9 @@ def processCommands(listToProcess=[]):
         parser.add_argument("--sequence", default=-1) # sequence control: play|Name|start_ms, pause, resume, stop, seek|ms, position|ms
         parser.add_argument("--stop_layer", default=-1) # stop an animation layer: override, effect, effect_all, show, sound, all
         parser.add_argument("--sound", default=-1) # sound mode: start|Mode, stop, mode|Mode
+        parser.add_argument("--layer", default="") # use_preset on the effect layer, as a temporary effect
+        parser.add_argument("--hold", default="0") # how long that effect lasts (ms)
+        parser.add_argument("--queue", default="queue") # queue behind other effects, or replace them
 
     parser.add_argument("--on", action="store_true", help="Turn the light on")
     parser.add_argument("--off", action="store_true", help="Turn the light off")
@@ -6694,7 +6811,10 @@ def processCommands(listToProcess=[]):
             return [None, args.nopage, None, "list"]
 
         if args.use_preset != -1:
-            return[None, args.nopage, testValid("use_preset", int(args.use_preset), 1, 1, numOfPresets), "use_preset"]
+            presetNum = testValid("use_preset", int(args.use_preset), 1, 1, numOfPresets)
+            if str(args.layer).lower() == "effect":
+                return [None, args.nopage, (presetNum, args.hold, args.queue), "preset_effect"]
+            return[None, args.nopage, presetNum, "use_preset"]
 
         if args.save_preset != -1:
             return[None, args.nopage, testValid("save_preset", int(args.save_preset), 1, 1, numOfPresets), "save_preset"]
@@ -6781,7 +6901,7 @@ def processHTMLCommands(paramsList, loop):
             return
 
     # Stop the override animation for non-animation HTTP commands (sequences and effects keep running)
-    if paramsList[3] not in ("animate", "stop_animate", "list_animations", "sequence", "stop_layer", "sound") and animationRunning:
+    if paramsList[3] not in ("animate", "stop_animate", "list_animations", "sequence", "stop_layer", "sound", "preset_effect") and animationRunning:
         stopAnimation()
 
     if paramsList[3] == "discover":
@@ -6796,6 +6916,11 @@ def processHTMLCommands(paramsList, loop):
 
     elif paramsList[3] == "use_preset":
         recallCustomPreset(paramsList[2] - 1, False, loop)
+
+    elif paramsList[3] == "preset_effect":
+        presetNum, holdMs, queueMode = paramsList[2]
+        if not playPresetEffect(presetNum - 1, holdMs, queueMode):
+            printDebugString("HTTP: preset " + str(presetNum) + " as an effect needs hold=ms (1 or more), or the effect queue is full")
 
     elif paramsList[3] == "save_preset":
         presetIdx = paramsList[2] - 1
@@ -6936,13 +7061,16 @@ def processHTMLCommands(paramsList, loop):
             printDebugString("HTTP: sound " + soundVerb + " failed: " + "; ".join(result.get("errors", [result.get("error", "")])))
 
     elif paramsList[3] == "sequence":
-        # sequence=play|Name|start_ms, pause, resume, stop, seek|ms, position|ms
+        # sequence=play|Name|start_ms|brightness|watchdog_ms, song|Artist|Song|start_ms|brightness|watchdog_ms,
+        # pause, resume, stop, seek|ms, position|ms
         seqParts = str(paramsList[2]).split("|")
         seqAction = seqParts[0].strip().lower()
-        if seqAction == "play":
-            seqName = seqParts[1].strip() if len(seqParts) > 1 else ""
-            startMsVal = seqParts[2].strip() if len(seqParts) > 2 else 0
-            result = startSequence(seqName, startMsVal)
+        if seqAction in ("play", "song"):
+            field = lambda i: seqParts[i].strip() if len(seqParts) > i else ""
+            if seqAction == "song":
+                result = startSequence("", field(3) or 0, brightness=field(4), watchdogMs=field(5), artist=field(1), song=field(2))
+            else:
+                result = startSequence(field(1), field(2) or 0, brightness=field(3), watchdogMs=field(4))
             if not result["success"]:
                 printDebugString("HTTP: sequence play failed: " + "; ".join(result["errors"]))
         else:
@@ -7597,7 +7725,8 @@ def startAnimation(animName, loop, speedMultiplier=1.0, loopOverride=None, fps=5
     Returns "playing", "queued", or False when the name is unknown or the queue is full.
     """
     initShowEngine()
-    resolvedName = resolveAnimationName(animName)
+    # an animation dict plays as it is (a preset recalled as an effect)
+    resolvedName = animName.get("name", "Animation") if isinstance(animName, dict) else resolveAnimationName(animName)
     if resolvedName is None:
         printDebugString("Animation '" + str(animName) + "' not found")
         return False
@@ -7605,7 +7734,7 @@ def startAnimation(animName, loop, speedMultiplier=1.0, loopOverride=None, fps=5
     if layerNum in (show.LAYER_BASE, show.LAYER_SOUND):
         layerNum = show.LAYER_OVERRIDE
 
-    animation = savedAnimations[resolvedName]
+    animation = animName if isinstance(animName, dict) else savedAnimations[resolvedName]
     timeline = show.AnimationTimeline(animation, speed=speedMultiplier, fps=fps, briScale=briScale,
                                       loop=loopOverride, maxLoops=maxLoops,
                                       legacy=legacyAnimationTiming, stepped=not legacyAnimationTiming)
@@ -8014,11 +8143,37 @@ def _sequenceBaseCommand(lightIdx):
     return show.bytesToCommand(base)
 
 
-def startSequence(nameOrData, startMs=0, fadeIn=None, fadeOut=None):
-    """Play a saved sequence by name, or an inline sequence dict (never saved). fadeIn and
-    fadeOut (ms) override the file's fade_in_ms and handback_fade_ms for this play.
-    Returns a dict with success, sequence name, errors and warnings."""
+def findSequenceForSong(artist, song):
+    """The saved sequence whose song (and artist, when given) match, ignoring case, or None."""
+    want = (str(artist or "").strip().lower(), str(song or "").strip().lower())
+    for name in sorted(savedSequences, key=str.lower):
+        data = savedSequences[name]
+        if str(data.get("song", "")).strip().lower() == want[1] and (not want[0] or str(data.get("artist", "")).strip().lower() == want[0]):
+            return name
+    return None
+
+
+def startSequence(nameOrData, startMs=0, fadeIn=None, fadeOut=None, brightness=None, watchdogMs=None, artist=None, song=None):
+    """Play a saved sequence by name, or an inline sequence dict (never saved), or the saved one
+    for a song (artist and song, with no name). fadeIn and fadeOut (ms) override the file's
+    fade_in_ms and handback_fade_ms for this play; brightness (1 to 100%) scales the whole show;
+    watchdogMs pauses it when set_position stops coming for that long (an outside clock that
+    went quiet) until the next one. Returns a dict with success, sequence name, errors and warnings."""
     initShowEngine()
+    try:
+        briScale = 1.0 if brightness in (None, "") else int(float(brightness)) / 100.0
+        watchdogMs = 0 if watchdogMs in (None, "") else int(float(watchdogMs))
+    except (TypeError, ValueError):
+        return {"success": False, "errors": ["brightness and watchdog_ms must be numbers"], "warnings": []}
+    if not 0.01 <= briScale <= 1.0:
+        return {"success": False, "errors": ["brightness must be 1 to 100"], "warnings": []}
+    if watchdogMs and watchdogMs < SEQ_WATCHDOG_MIN_MS:
+        return {"success": False, "errors": ["watchdog_ms must be 0 (off) or at least %d" % SEQ_WATCHDOG_MIN_MS], "warnings": []}
+    if not nameOrData and song:
+        nameOrData = findSequenceForSong(artist, song)
+        if nameOrData is None:
+            return {"success": False, "errors": ["no sequence for " + " - ".join(x for x in (str(artist or "").strip(), str(song).strip()) if x)],
+                    "warnings": [], "available": sorted(savedSequences.keys())}
     if isinstance(nameOrData, dict):
         data = nameOrData
     else:
@@ -8038,12 +8193,15 @@ def startSequence(nameOrData, startMs=0, fadeIn=None, fadeOut=None):
         player.fadeInMs = _fadeValue(fadeIn)
     if _fadeValue(fadeOut) is not None:
         player.fadeOutMs = _fadeValue(fadeOut)
+    player.briScale = briScale
+    player.watchdogMs = watchdogMs
     try:
         startMs = max(0, int(startMs or 0))
     except (TypeError, ValueError):
         startMs = 0
     showEngine.playSequence(player, startMs)
-    printDebugString("Sequence '" + seq.name + "' playing from " + str(startMs) + " ms (" + str(len(seq.cues)) + " cues, " + str(seq.duration) + " ms, " + str(seq.fps) + " fps)")
+    printDebugString("Sequence '" + seq.name + "' playing from " + str(startMs) + " ms (" + str(len(seq.cues)) + " cues, " + str(seq.duration) + " ms, " + str(seq.fps) + " fps"
+                     + (", " + str(int(briScale * 100)) + "% brightness" if briScale != 1.0 else "") + (", watchdog " + str(watchdogMs) + " ms" if watchdogMs else "") + ")")
     return {"success": True, "sequence": seq.name, "errors": [], "warnings": seqWarnings}
 
 
@@ -9407,7 +9565,30 @@ class NLPythonServer(BaseHTTPRequestHandler):
     def _send_cors_headers(self):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-NeewerLux-Token")
+
+    def _tokenChecked(self):
+        """With an access token set, a request from another computer must carry it (header
+        X-NeewerLux-Token, or token= in the URL). Takes token= out of the path either way.
+        Returns False, having answered 401, when it's missing or wrong."""
+        parts = urllib.parse.urlsplit(self.path)
+        query = urllib.parse.parse_qsl(parts.query, keep_blank_values=True)
+        given = self.headers.get("X-NeewerLux-Token") or next((v for k, v in query if k == "token"), "")
+        rest = [(k, v) for k, v in query if k != "token"]
+        if len(rest) != len(query):
+            self.path = parts.path + ("?" + urllib.parse.urlencode(rest) if rest else "")
+        if not httpAccessToken or self.client_address[0] in HTTP_TOKEN_EXEMPT:
+            return True
+        if hmac.compare_digest(str(given).encode("utf-8"), httpAccessToken.encode("utf-8")):
+            return True
+        body = json.dumps({"success": False, "errors": ["this NeewerLux needs its access token: add ?token=... to the address, or send the X-NeewerLux-Token header"]}).encode("utf-8")
+        self.send_response(401)
+        self._send_cors_headers()
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+        return False
 
     def do_OPTIONS(self):
         self.send_response(200)
@@ -9447,6 +9628,8 @@ class NLPythonServer(BaseHTTPRequestHandler):
             # IF THE IP MAKING THE REQUEST IS NOT IN THE LIST OF APPROVED ADDRESSES, THEN RETURN A "FORBIDDEN" ERROR
             if acceptedIP == False:
                 self.send_error(403, "The IP of the device you're making the request from (" + clientIP + ") has to be in the list of accepted IP addresses in order to use the NeewerLux HTTP Server, any outside addresses will generate this Forbidden error.  To use this device with NeewerLux, add its IP address (or range of IP addresses) to the list of acceptable IPs")
+                return
+            if not self._tokenChecked():
                 return
 
             acceptableURL = "/NeewerLux/doAction?"
@@ -9784,6 +9967,8 @@ class NLPythonServer(BaseHTTPRequestHandler):
         if acceptedIP == False:
             self.send_error(403, "Forbidden - IP " + clientIP + " is not in the list of accepted addresses")
             return
+        if not self._tokenChecked():
+            return
 
         if self.path.split("?", 1)[0] == "/NeewerLux/song":
             self._songUpload(clientIP)
@@ -9924,7 +10109,8 @@ class NLPythonServer(BaseHTTPRequestHandler):
             if action == "play":
                 source = body.get("sequence") if isinstance(body.get("sequence"), dict) else body.get("name", "")
                 resultData = startSequence(source, body.get("start_ms", 0), fadeIn=body.get("fade_in_ms"),
-                                           fadeOut=body.get("handback_fade_ms"))
+                                           fadeOut=body.get("handback_fade_ms"), brightness=body.get("brightness"),
+                                           watchdogMs=body.get("watchdog_ms"), artist=body.get("artist"), song=body.get("song"))
                 resultData["action"] = "play"
             elif action in ("pause", "resume", "stop", "seek", "set_position", "position", "status"):
                 resultData = sequenceControl(action, body.get("ms", body.get("position_ms")))
@@ -10103,6 +10289,7 @@ def writeHTMLSections(self, theSection, errorMsg = ""):
         self.wfile.write(bytes("&nbsp;&nbsp;&nbsp;&nbsp;Example: <EM>http://(server address)/NeewerLux/doAction?mode=CCT</EM><BR>\n", "utf-8"))
         self.wfile.write(bytes("<STRONG>use_preset=</STRONG> - (value: <EM>1-" + str(numOfPresets) + "</EM>) - use a custom global or snapshot preset<BR>\n", "utf-8"))
         self.wfile.write(bytes("&nbsp;&nbsp;&nbsp;&nbsp;Example: <EM>http://(server address)/NeewerLux/doAction?use_preset=2</EM><BR>\n", "utf-8"))
+        self.wfile.write(bytes("&nbsp;&nbsp;&nbsp;&nbsp;As a temporary effect for 3 s: <EM>http://(server address)/NeewerLux/doAction?use_preset=2&layer=effect&hold=3000</EM><BR>\n", "utf-8"))
         self.wfile.write(bytes("(CCT mode only) <STRONG>temp=</STRONG> or <STRONG>temperature=</STRONG> - (value: <EM>3200 to 8500</EM>) the color temperature in CCT mode to set the light to<BR>\n", "utf-8"))
         self.wfile.write(bytes("&nbsp;&nbsp;&nbsp;&nbsp;Example: <EM>http://(server address)/NeewerLux/doAction?temp=5200</EM><BR>\n", "utf-8"))
         self.wfile.write(bytes("(HSI mode only) <STRONG>hue=</STRONG> - (value: <EM>0 to 360</EM>) the hue value in HSI mode to set the light to<BR>\n", "utf-8"))
@@ -10156,6 +10343,7 @@ def writeHTMLSections(self, theSection, errorMsg = ""):
         self.wfile.write(bytes("&nbsp;&nbsp;Create: <EM>{\"action\": \"create\", \"animation\": {\"name\": \"...\", \"loop\": true, \"keyframes\": [...]}}</EM><BR>\n", "utf-8"))
         self.wfile.write(bytes("<STRONG>sequence=</STRONG> - play|Name, pause, resume or stop a sequence<BR>\n", "utf-8"))
         self.wfile.write(bytes("&nbsp;&nbsp;&nbsp;&nbsp;Example: <EM>http://(server address)/NeewerLux/doAction?sequence=play|Example%20-%20Four%20Light%20Demo</EM><BR>\n", "utf-8"))
+        self.wfile.write(bytes("&nbsp;&nbsp;&nbsp;&nbsp;Also <EM>sequence=play|Name|start_ms|brightness|watchdog_ms</EM> and <EM>sequence=song|Artist|Song|start_ms|brightness|watchdog_ms</EM><BR>\n", "utf-8"))
         self.wfile.write(bytes("<STRONG>sound=</STRONG> - start|Mode, mode|Mode or stop a sound mode (lights following live audio)<BR>\n", "utf-8"))
         self.wfile.write(bytes("<STRONG>status_json</STRONG> - layers, sequence position, and each light's layer and approximate colour<BR>\n", "utf-8"))
         self.wfile.write(bytes("<STRONG>POST /NeewerLux/sequence</STRONG> - list, reload, play, pause, resume, stop, seek, set_position, status, validate, save, render<BR>\n", "utf-8"))
@@ -10252,7 +10440,7 @@ def resolveCustomPresetsFile():
 def loadPrefsFile(globalPrefsFile = ""):
     global findLightsOnStartup, autoConnectToLights, printDebug, maxNumOfAttempts, \
            rememberLightsOnExit, acceptable_HTTP_IPs, customKeys, enableTabsOnLaunch, \
-           whiteListedMACs, rememberPresetsOnExit, autoReconnectOnDisconnect, livePreview, hideConsoleOnLaunch, minimizeToTrayOnClose, httpAutoStart, httpPort, cctFallbackMode, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, \
+           whiteListedMACs, rememberPresetsOnExit, autoReconnectOnDisconnect, livePreview, hideConsoleOnLaunch, minimizeToTrayOnClose, httpAutoStart, httpPort, httpAccessToken, cctFallbackMode, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, \
            envMaxBri, envMinBri, seqFrameRate, effectMaxSeconds, simulatedLights, simulatedCCTOnly, flashGuardEnabled, \
            cameraPosition, eyelineFlash, handbackFadeMs, fadeInMs, stageView, stageGeometry, soundMode, soundDevice, songSectionCommand, songFinderNames, songSectionCommandOn
 
@@ -10267,7 +10455,7 @@ def loadPrefsFile(globalPrefsFile = ""):
             "SC_Dec_Bri_Small", "SC_Inc_Bri_Small", "SC_Dec_Bri_Large", "SC_Inc_Bri_Large", \
             "SC_Dec_1_Small", "SC_Inc_1_Small", "SC_Dec_2_Small", "SC_Inc_2_Small", "SC_Dec_3_Small", "SC_Inc_3_Small", \
             "SC_Dec_1_Large", "SC_Inc_1_Large", "SC_Dec_2_Large", "SC_Inc_2_Large", "SC_Dec_3_Large", "SC_Inc_3_Large", \
-            "enableTabsOnLaunch", "whiteListedMACs", "rememberPresetsOnExit", "autoReconnectOnDisconnect", "hideConsoleOnLaunch", "minimizeToTrayOnClose", "livePreview", "httpAutoStart", "httpPort", "cctFallbackMode", "enableLogTab", "logToFile", "logHeartbeat", "globalCCTMin", "globalCCTMax", \
+            "enableTabsOnLaunch", "whiteListedMACs", "rememberPresetsOnExit", "autoReconnectOnDisconnect", "hideConsoleOnLaunch", "minimizeToTrayOnClose", "livePreview", "httpAutoStart", "httpPort", "httpAccessToken", "cctFallbackMode", "enableLogTab", "logToFile", "logHeartbeat", "globalCCTMin", "globalCCTMax", \
             "envMaxBri", "envMinBri", "seqFrameRate", "effectMaxSeconds", "simulatedLights", "simulatedCCTOnly", "flashGuard", \
             "cameraPosition", "eyelineFlash", "handbackFadeMs", "fadeInMs", "stageView", "stageGeometry", "soundMode", "soundDevice", "songSectionCommand", "songFinderNames", "songSectionCommandOn"]
 
@@ -10301,6 +10489,7 @@ def loadPrefsFile(globalPrefsFile = ""):
     prefsParser.add_argument("--minimizeToTrayOnClose", default=1)
     prefsParser.add_argument("--httpAutoStart", default=0)
     prefsParser.add_argument("--httpPort", default=8080)
+    prefsParser.add_argument("--httpAccessToken", default="")
     prefsParser.add_argument("--cctFallbackMode", default="convert")
     prefsParser.add_argument("--enableLogTab", default=1)
     prefsParser.add_argument("--logToFile", default=0)
@@ -10372,6 +10561,7 @@ def loadPrefsFile(globalPrefsFile = ""):
     minimizeToTrayOnClose = bool(int(mainPrefs.minimizeToTrayOnClose))
     httpAutoStart = bool(int(mainPrefs.httpAutoStart))
     try:
+        httpAccessToken = str(mainPrefs.httpAccessToken or "").strip()
         httpPort = int(mainPrefs.httpPort)
         if not 1024 <= httpPort <= 65535:
             httpPort = 8080

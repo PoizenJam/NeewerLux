@@ -2052,6 +2052,142 @@ def t_draftStyles(rig):
           and show.draftPoolText({"tags": ["calm"], "exclude": ["hard"], "names": ["Heartbeat"]}) == "calm, -hard, Heartbeat", "pool text round-trips")
 
 
+def _until(cond, timeout, step=0.02):
+    end = time.monotonic() + timeout
+    while not cond() and time.monotonic() < end:
+        time.sleep(step)
+    return cond()
+
+
+def t_playBrightness(rig):
+    """1.4.0: brightness on a sequence play scales everything it sends; it shows in the status."""
+    nl = rig.nl
+    seq = stepSequence("dim", [200], 3000)
+    rig.post("/NeewerLux/sequence", {"action": "save", "sequence": seq, "overwrite": True})
+    t0 = time.monotonic()
+    r = rig.post("/NeewerLux/sequence", {"action": "play", "name": "dim", "brightness": 50})
+    check(r["success"], str(r))
+    w = waitFor(rig, FILL, t0, lambda d: d[1] == 134, 2)
+    check([bri(d) for d in w if d[1] == 134][-1:] == [30], "60%% at half brightness is 30%%: %s" % [bri(d) for d in w][-3:])
+    st = rig.getJSON("status_json")["sequence"]
+    check(st["brightness"] == 50 and st["watchdog_ms"] == 0, "status: %s" % st)
+    for bad in (0, 150, "x"):
+        check(not rig.post("/NeewerLux/sequence", {"action": "play", "name": "dim", "brightness": bad})["success"], "brightness %r refused" % bad)
+    rig.get("sequence=play|dim|0|25")
+    check(_until(lambda: rig.getJSON("status_json")["sequence"]["brightness"] == 25, 2), "GET sequence=play|Name|start|brightness")
+    rig.post("/NeewerLux/sequence", {"action": "delete", "name": "dim"})
+
+
+def t_clockFollow(rig):
+    """1.4.0: following an outside clock: play by artist and song, set_position, and a watchdog
+    that pauses when positions stop coming and carries on from the next one."""
+    nl = rig.nl
+    seq = stepSequence("Follow", [0, 120, 240, 60], 2000, artist="Some Band", song="Some Song")
+    rig.post("/NeewerLux/sequence", {"action": "save", "sequence": seq, "overwrite": True})
+    r = rig.post("/NeewerLux/sequence", {"action": "play", "artist": "some band", "song": "SOME SONG", "watchdog_ms": 600})
+    check(r["success"] and r["sequence"] == "Follow", str(r))
+    status = lambda: rig.getJSON("status_json")["sequence"]
+    for k in range(6):
+        rig.post("/NeewerLux/sequence", {"action": "set_position", "ms": 200 * k})
+        time.sleep(0.2)
+    check(status()["state"] == "playing", "positions keep it playing: %s" % status())
+    check(_until(lambda: status()["state"] == "waiting", 2.5), "it waits when the positions stop: %s" % status())
+    held = status()["position_ms"]
+    time.sleep(0.4)
+    check(abs(status()["position_ms"] - held) < 5, "and stays put while waiting")
+    rig.post("/NeewerLux/sequence", {"action": "set_position", "ms": 5000})
+    st = status()
+    check(st["state"] == "playing" and 4950 <= st["position_ms"] <= 5300, "the next position carries on from there: %s" % st)
+    rig.post("/NeewerLux/sequence", {"action": "pause"})
+    rig.post("/NeewerLux/sequence", {"action": "resume"})
+    check(status()["state"] == "playing", "Resume works too")
+    check(not rig.post("/NeewerLux/sequence", {"action": "play", "song": "Unknown"})["success"], "no sequence for an unknown song")
+    check(not rig.post("/NeewerLux/sequence", {"action": "play", "name": "Follow", "watchdog_ms": 100})["success"], "too short a watchdog is refused")
+    check(nl.findSequenceForSong("", "some song") == "Follow" and nl.findSequenceForSong("Other", "Some Song") is None, "artist optional, but must match when given")
+    rig.get("sequence=song|Some%20Band|Some%20Song|0|80|1000")
+    check(_until(lambda: (status() or {}).get("watchdog_ms") == 1000 and status()["brightness"] == 80, 2), "GET sequence=song|Artist|Song|start|brightness|watchdog: %s" % status())
+    rig.post("/NeewerLux/sequence", {"action": "stop"})
+    rig.post("/NeewerLux/sequence", {"action": "delete", "name": "Follow"})
+
+
+def t_presetAsEffect(rig):
+    """1.4.0: a preset recalled on the effect layer plays for hold ms over whatever is running,
+    then the lights go back to it."""
+    nl = rig.nl
+    P = "/NeewerLux/presets"
+    rig.post(P, {"action": "save", "index": 3, "entries": [{"target": "-1", "mode": "HSI", "hue": 300, "sat": 100, "bri": 70}]})
+    rig.post("/NeewerLux/sequence", {"action": "play", "sequence": stepSequence("under", [120], 6000)}, 0.4)
+    t0 = time.monotonic()
+    rig.get("use_preset=3&layer=effect&hold=500")
+    w = waitFor(rig, RIM, t0, lambda d: hueOf(d) == 300, 2)
+    check(any(hueOf(d) == 300 and bri(d) == 70 for d in w), "the preset shows: %s" % w[-2:])
+    w = waitFor(rig, RIM, t0, lambda d: hueOf(d) == 120 and any(hueOf(x) == 300 for x in [y for y in w]), 2.5)
+    check(hueOf(w[-1]) == 120, "then the sequence comes back: %s" % w[-3:])
+    check(rig.getJSON("status_json")["sequence"]["state"] == "playing", "the sequence kept playing underneath")
+    t1 = time.monotonic()
+    r = rig.post(P, {"action": "recall", "index": 3, "layer": "effect", "hold_ms": 400, "queue": "replace"})
+    check(r["success"] and r["result"] == "playing", str(r))
+    check(any(hueOf(d) == 300 for d in waitFor(rig, RIM, t1, lambda d: hueOf(d) == 300, 2)), "over POST too")
+    check(not rig.post(P, {"action": "recall", "index": 3, "layer": "effect"})["success"], "hold_ms is needed")
+    anim = nl.presetAnimation(2, 300)
+    check(anim["keyframes"][0]["lights"] == {"*": {"mode": "HSI", "hue": 300, "sat": 100, "bri": 70}} and anim["keyframes"][0]["hold_ms"] == 300, str(anim))
+
+
+def t_accessToken(rig):
+    """1.4.0: with an access token set, other computers need it (header or token=); this
+    computer doesn't; token= never reaches the commands."""
+    nl = rig.nl
+    import urllib.error
+    def code(url, headers=None, data=None):
+        req = urllib.request.Request("http://127.0.0.1:%d%s" % (rig.port, url), data=data, headers=headers or {}, method="POST" if data else "GET")
+        try:
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return r.status, r.read()
+        except urllib.error.HTTPError as e:
+            return e.code, e.read()
+    nl.httpAccessToken = "s3cret-Token"
+    try:
+        check(code("/NeewerLux/doAction?status_json")[0] == 200, "this computer needs no token")
+        nl.HTTP_TOKEN_EXEMPT = ()  # as if from another computer
+        c, body = code("/NeewerLux/doAction?status_json")
+        check(c == 401 and b"access token" in body, "without it: %s %s" % (c, body[:80]))
+        check(code("/NeewerLux/doAction?status_json&token=wrong")[0] == 401, "a wrong one")
+        check(code("/NeewerLux/doAction?status_json&token=s3cret-Token")[0] == 200, "token= in the address")
+        check(code("/NeewerLux/doAction?status_json", {"X-NeewerLux-Token": "s3cret-Token"})[0] == 200, "or the header")
+        c, body = code("/NeewerLux/sequence?token=s3cret-Token", {"Content-Type": "application/json"}, json.dumps({"action": "list"}).encode())
+        check(c == 200 and json.loads(body)["success"], "POST with token= (taken out of the path): %s" % body[:80])
+        check(code("/NeewerLux/sequence", {"Content-Type": "application/json"}, json.dumps({"action": "list"}).encode())[0] == 401, "POST without")
+        c, page = code("/?token=s3cret-Token")
+        check(c == 200 and b"X-NeewerLux-Token" in page, "the dashboard opens with it and sends it on")
+    finally:
+        nl.HTTP_TOKEN_EXEMPT = ("127.0.0.1", "::1")
+        nl.httpAccessToken = ""
+
+
+def t_reconnectBackoff(rig):
+    """1.4.0: a light that won't reconnect is tried at once, then after longer and longer
+    waits; after three failures a rescue scan is due, at most every two minutes."""
+    nl = rig.nl
+    now = [1000.0]
+    b = nl.ReconnectBackoff(clock=lambda: now[0])
+    mac = "AA:BB"
+    check(b.due(mac), "at once")
+    waits = []
+    for k in range(8):
+        waits.append(b.tried(mac, False))
+        check(not b.due(mac), "not straight after a failure")
+        now[0] += waits[-1]
+        check(b.due(mac), "due when the wait is up")
+    check(waits == [15, 30, 60, 120, 240, 300, 300, 300], "waits grow to 5 minutes: %s" % waits)
+    check(b.rescueDue() and not b.rescueDue(), "a rescue scan once")
+    now[0] += 121
+    check(b.rescueDue(), "and again after two minutes")
+    check(b.tried(mac, True) == 0 and b.due(mac) and not b.failures, "success clears it")
+    b.tried(mac, False)
+    b.forget(mac)
+    check(b.due(mac), "forget (it reconnected by itself) clears it")
+
+
 def _songFile(path, bpm=128.0, seconds=40.0, sr=22050):
     """A WAV with kicks on the beat (accented each bar) and a louder half."""
     import numpy as np
@@ -2223,7 +2359,7 @@ TESTS = [t_maxBrightnessHTTP, t_maxBrightnessAnimationAndSequence, t_minBrightne
          t_addSimulatedRig, t_compositorWakesOnlyWhenDue, t_handBackToRunningLayerFades,
          t_soundModeHTTP, t_soundUnderShowAndEffects, t_soundRespectsLimitsAndLocks, t_soundUnavailable, t_soundModeFilesHTTP,
          t_offWinsDuringShows, t_animationFlashRates, t_shippedAnimationTags, t_soundCues, t_soundHandsBackToBase, t_manualWriteReleasesSound, t_presetFadeTakesLightsFromSound, t_soundOnSomeLights,
-         t_presetSounds, t_paletteLibrary, t_songDrafts, t_draftStyles, t_songHTTP]
+         t_presetSounds, t_paletteLibrary, t_songDrafts, t_draftStyles, t_playBrightness, t_clockFollow, t_presetAsEffect, t_accessToken, t_reconnectBackoff, t_songHTTP]
 
 
 def main():
