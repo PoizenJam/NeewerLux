@@ -110,7 +110,8 @@ except Exception as e:
 
 # IMPORT THE GUI ITSELF
 try:
-    from neewerlux_ui import Ui_MainWindow, SpinBoxWithButtons, hideSpinArrows, adjustableColumns, fitColumnsToWidgets, widePopup, ColourPickDialog
+    import neewerlux_ui
+    from neewerlux_ui import Ui_MainWindow, SpinBoxWithButtons, hideSpinArrows, adjustableColumns, fitColumnsToWidgets, widePopup, ColourPickDialog, ColourPickRow
     from neewerlux_theme import getThemeQSS
     from neewerlux_webui import getWebDashboardHTML
 except Exception as e:
@@ -300,6 +301,7 @@ sequencesDir = os.path.dirname(os.path.abspath(sys.argv[0])) + os.sep + "light_p
 soundModesDir = os.path.dirname(os.path.abspath(sys.argv[0])) + os.sep + "light_prefs" + os.sep + "sound_modes"
 savedSoundModes = {}           # dict of {name: sound mode dict} loaded from disk
 palettesDir = os.path.dirname(os.path.abspath(sys.argv[0])) + os.sep + "light_prefs" + os.sep + "palettes"
+swatchesFile = os.path.dirname(os.path.abspath(sys.argv[0])) + os.sep + "light_prefs" + os.sep + "swatches.json"
 savedPalettes = {}             # dict of {name: [colours]} loaded from disk
 draftStylesDir = os.path.dirname(os.path.abspath(sys.argv[0])) + os.sep + "light_prefs" + os.sep + "draft_styles"
 savedDraftStyles = {}          # dict of {name: draft style dict} loaded from disk
@@ -985,6 +987,10 @@ try: # try to load the GUI
             formGrid.addWidget(soundCombo, 5, 1)
 
             editorLay.addLayout(formGrid)
+            pickRow = ColourPickRow(lambda: (p1Slider.value(), p2Slider.value()),
+                                    lambda h, sa: (p1Slider.setValue(h), p2Slider.setValue(sa)))
+            pickRow.setVisible(False)
+            editorLay.addWidget(pickRow)
 
             # Color preview
             colorPreview = QLabel("")
@@ -1043,6 +1049,7 @@ try: # try to load the GUI
                     p2Slider.setGradientStops(_stopsBri); p2Slider.setMinMaxLabels("0","100")
                     p2Slider.setVisible(True)
                     p3Label.setText(""); p3Slider.setVisible(False)
+                pickRow.setVisible(mode == "HSI")
                 _updatePreview()
 
             def _updatePreview():
@@ -7894,9 +7901,10 @@ def saveSequenceFromEditor(seqData, original=None, overwrite=False):
 SONG_UPLOAD_MAX = 200 * 1024 * 1024  # an uncompressed 15-minute song is about 160 MB
 
 
-def analyzeSongFile(path, bpm=None, offsetMs=None):
+def analyzeSongFile(path, bpm=None, offsetMs=None, displayName=None):
     """Analyse a song file (neewerlux_audio.analyzeSong). Returns the analysis with success,
-    or success False and errors."""
+    and "artist" and "title" from its tags or file name (displayName for an upload), or success
+    False and errors."""
     ok, why = audio.songAvailable()
     if not ok:
         return {"success": False, "errors": [why]}
@@ -7924,7 +7932,9 @@ def analyzeSongFile(path, bpm=None, offsetMs=None):
                 # NeewerLux's name stays as the kind, which draft styles go by
                 sec["kind"], sec["label"] = sec["label"], sec["ai_label"][:1].upper() + sec["ai_label"][1:]
     result.update({"success": True, "errors": [], "warnings": notes, "sections_from": "command" if segments else "analysis",
-                   "song": os.path.splitext(os.path.basename(path))[0]})
+                   "song": os.path.splitext(os.path.basename(displayName or path))[0]})
+    tags = audio.songTags(path, displayName)
+    result.update(artist=tags["artist"], title=tags["song"])
     return result
 
 
@@ -7937,11 +7947,9 @@ def analyzeSongBytes(data, filename, bpm=None, offsetMs=None):
     try:
         with os.fdopen(handle, "wb") as f:
             f.write(data)
-        result = analyzeSongFile(path, bpm, offsetMs)
+        result = analyzeSongFile(path, bpm, offsetMs, displayName=str(filename))
     finally:
         os.remove(path)
-    if result["success"]:
-        result["song"] = os.path.splitext(os.path.basename(str(filename)))[0]
     return result
 
 
@@ -7969,9 +7977,11 @@ def draftFromSong(body):
                                      animations=savedAnimations, soundModes=savedSoundModes, roles=_draftRoles())
     if seq is None:
         return {"success": False, "errors": errors}
-    for key in ("artist", "song"):
-        if body.get(key):
-            seq[key] = str(body[key])
+    # sent values win (even empty ones: cleared in the dialog); else the song's tags
+    for key, tag in (("artist", "artist"), ("song", "title")):
+        value = str(body[key] if key in body else analysis.get(tag) or "").strip()
+        if value:
+            seq[key] = value
     rendered = renderSequence(seq)
     result = {"success": rendered["success"], "sequence": seq, "style": style["name"], "errors": rendered.get("errors", []),
               "warnings": rendered.get("warnings", []), "flashes": rendered.get("flashes")}
@@ -8211,8 +8221,9 @@ class SongDraftHost:
     def analyze(self, path, bpm=None, offsetMs=None):
         return analyzeSongFile(path, bpm, offsetMs)
 
-    def draft(self, analysis, style, name, bpm=None, offsetMs=None):
-        return draftFromSong({"analysis": analysis, "style": style, "name": name, "bpm": bpm, "offset_ms": offsetMs})
+    def draft(self, analysis, style, name, bpm=None, offsetMs=None, artist="", song=""):
+        return draftFromSong({"analysis": analysis, "style": style, "name": name, "bpm": bpm, "offset_ms": offsetMs,
+                              "artist": artist, "song": song})
 
     def styles(self):
         return draftStyleList()
@@ -8612,10 +8623,62 @@ def loadAllSoundModes():
             printDebugString("Could not load sound mode " + filename + ": " + str(e))
 
 
+def _saveSwatches(items):
+    os.makedirs(os.path.dirname(swatchesFile), exist_ok=True)
+    with open(swatchesFile, "w", encoding="utf-8") as f:
+        json.dump(items, f, indent=1)
+
+
+def loadSwatches():
+    """The user's own swatches (light_prefs/swatches.json, a list of {"hue", "sat"}) into the
+    store every colour picker shows."""
+    items = []
+    if os.path.isfile(swatchesFile):
+        try:
+            with open(swatchesFile, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            items = [{"hue": int(x["hue"]) % 360, "sat": max(0, min(100, int(x["sat"])))} for x in data if isinstance(x, dict)][:neewerlux_ui.SwatchStore.LIMIT]
+        except (IOError, OSError, ValueError, KeyError, TypeError) as e:
+            printDebugString("Could not load swatches: " + str(e))
+    neewerlux_ui.SWATCH_STORE.save = _saveSwatches
+    neewerlux_ui.SWATCH_STORE.replace(items)
+
+
+def swatchAction(body):
+    """POST /NeewerLux/settings swatch actions: swatches, add_swatch, delete_swatch."""
+    store = neewerlux_ui.SWATCH_STORE
+    action = str(body.get("action", "")).lower()
+    box = {"ok": True, "errors": []}
+
+    def change():
+        if action == "add_swatch":
+            try:
+                box["ok"] = store.add(int(body["hue"]), int(body["sat"]))
+            except (KeyError, TypeError, ValueError):
+                box["ok"] = False
+            if not box["ok"]:
+                box["errors"] = ["needs hue and sat; it may be there already, or you have %d (the most)" % store.LIMIT]
+        elif action == "delete_swatch":
+            try:
+                box["ok"] = store.remove(int(body.get("index", -1)))
+            except (TypeError, ValueError):
+                box["ok"] = False
+            if not box["ok"]:
+                box["errors"] = ["no swatch at that index"]
+    # a change redraws every swatch widget, which only the GUI thread may touch
+    if action != "swatches" and mainWindow is not None:
+        mainWindow.runOnGui(change)
+    else:
+        change()
+    return {"success": box["ok"], "errors": box["errors"], "swatches": list(store.items), "limit": store.LIMIT,
+            "builtin": [{"hue": h, "sat": sa, "name": n} for h, sa, n in neewerlux_ui.COLOUR_SWATCHES]}
+
+
 def loadAllPalettes():
-    """Load every palette JSON file in light_prefs/palettes/ ({"name", "palette"})."""
+    """Load every palette JSON file in light_prefs/palettes/ ({"name", "palette"}), and the swatches."""
     global savedPalettes
     savedPalettes = {}
+    loadSwatches()
     if not os.path.isdir(palettesDir):
         return
     for filename in sorted(os.listdir(palettesDir)):
@@ -10219,6 +10282,8 @@ class NLPythonServer(BaseHTTPRequestHandler):
                 resultData = setWebGlobalSettings(body.get("settings"))
             elif action == "set_light":
                 resultData = setWebLightSettings(_lightIndexFromWeb(body.get("light")), body.get("settings"))
+            elif action in ("swatches", "add_swatch", "delete_swatch"):
+                resultData = swatchAction(body)
             else:
                 resultData = {"success": False, "errors": ["Unknown action: " + action]}
             resultData["action"] = action

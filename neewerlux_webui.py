@@ -115,6 +115,7 @@ a:hover { text-decoration: underline; }
 .stage-grid { display:flex; flex-wrap:wrap; gap:12px; }
 .swatches { display:grid; grid-template-columns:repeat(6, 26px); gap:3px; }
 .swatches button { width:26px; height:22px; border:1px solid #666; border-radius:3px; padding:0; cursor:pointer; }
+.swatches button.swatch-add { background:transparent; color:var(--muted); border-style:dashed; font-weight:bold; }
 .snd-swatch.pick { cursor:pointer; }
 .stage-tile { position:relative; width:150px; text-align:center; font-size:12px; }
 .stage-box { position:relative; z-index:1; height:84px; border-radius:10px; border:4px solid #5a5a5a; margin-bottom:4px; }
@@ -527,7 +528,7 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
                 <div id="huePreview" style="height:8px;border-radius: var(--radius);margin-bottom:10px;background:hsl(240,100%,50%)"></div>
                 <div style="display:flex;gap:12px;align-items:center;margin-bottom:10px">
                     <canvas id="hsiWheel" width="110" height="110" style="width:110px;height:110px;cursor:crosshair" title="Click or drag to pick a hue (round the wheel) and saturation (white in the middle)"></canvas>
-                    <div class="swatches" id="hsiSwatches"></div>
+                    <div class="swatches" id="hsiSwatches" data-pick="hsiPickSwatch" data-current="hsiCurrent"></div>
                 </div>
                 <button class="btn primary" style="width:100%" onclick="sendHSI()">Apply HSI</button>
             </div>
@@ -956,12 +957,12 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
     </div>
 </div>
 
-<!-- COLOUR PICKER (Sound palette) -->
-<div class="modal-bg" id="pickModal">
+<!-- COLOUR PICKER (Sound palette, preset, animation and timeline editors, draft styles) -->
+<div class="modal-bg" id="pickModal" style="z-index:60">
     <div class="modal" style="text-align:center">
         <h3 style="margin-top:0;color:var(--accent)">Pick a colour</h3>
         <canvas id="pickWheel" width="180" height="180" style="width:180px;height:180px;cursor:crosshair"></canvas>
-        <div class="swatches" id="pickSwatches" style="margin:8px auto;width:max-content"></div>
+        <div class="swatches" id="pickSwatches" data-pick="pickSwatch" data-current="pickCurrent" style="margin:8px auto;width:max-content"></div>
         <div class="toolbar"><span style="flex:1"></span><button class="btn primary" onclick="pickClose(true)">OK</button><button class="btn" onclick="pickClose(false)">Cancel</button></div>
     </div>
 </div>
@@ -984,7 +985,9 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
             or by genre <input type="text" id="songGenre" style="flex:1" placeholder="e.g. thrash metal, deep house" title="Genres, most important first; picks the style whose genres fit best" onkeydown="if (event.key === 'Enter') songPickGenre()">
             <button class="btn small" onclick="songPickGenre()">Pick</button></div>
         <div id="songStyleNote" class="tl-hint"></div>
-        <div class="toolbar">Name <input type="text" id="songName" style="flex:1"></div>
+        <div class="toolbar">Name <input type="text" id="songName" style="flex:1">
+            Artist <input type="text" id="songArtist" style="flex:1" title="From the song's tags or an Artist - Title file name; playing a show by artist and song matches these">
+            Song <input type="text" id="songTitle" style="flex:1"></div>
         <div class="tl-hint">The draft drives the fill, rim, background and practical lights, never the key, and stays under the flash limit. It opens unsaved in the timeline editor for you to change and save.</div>
         <div class="toolbar"><span style="flex:1"></span><button class="btn primary" id="songDraftBtn" disabled onclick="songDraft()">Create draft</button><button class="btn" onclick="songClose()">Close</button></div>
     </div>
@@ -999,7 +1002,8 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
         <div class="toolbar">Description <input type="text" id="dsDesc" style="flex:1"></div>
         <div class="toolbar">Genres <input type="text" id="dsGenres" style="flex:1" title="Genres this style suits, separated by commas; Pick by genre and the HTTP style_for action match them"></div>
         <div class="toolbar">Palette <select id="dsPalette" onchange="dsPaletteShown()"></select>
-            <input type="text" id="dsColours" style="flex:1" title="Hue/saturation pairs (35/90, 215/85) or whites in Kelvin (2700K, 5600K), separated by commas"></div>
+            <input type="text" id="dsColours" style="flex:1" title="Hue/saturation pairs (35/90, 215/85) or whites in Kelvin (2700K, 5600K), separated by commas">
+            <button class="btn small" id="dsAddColour" onclick="dsAddColour()" title="Pick a colour on the wheel or a swatch and add it to the list">Add colour...</button></div>
         <div class="toolbar">Intensity <select id="dsIntensity"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select>
             <label><input type="checkbox" id="dsAnims" onchange="dsCountAll()"> Use animations</label>
             <label><input type="checkbox" id="dsSounds" onchange="dsCountAll()"> Use sound modes</label></div>
@@ -1131,9 +1135,33 @@ function wheelInit(cv, get, set) {
     cv.onmouseup = cv.onmouseleave = () => { cv._drag = false; };
     drawWheel(cv, ...get());
 }
-function swatchesHTML(onpick) {
-    return COLOUR_SWATCHES.map(([h, sa, n]) => '<button type="button" title="' + n + '" style="background:hsl(' + h + ',' + sa + '%,' + (100 - sa / 2) + '%)" onclick="' + onpick + '(' + h + ',' + sa + ')"></button>').join('');
+// your own swatches follow the built-in ones (light_prefs/swatches.json, shared with the desktop)
+let userSwatches = [], USER_SWATCH_LIMIT = 24;
+function swatchButton(h, sa, tip, onpick, extra) {
+    return '<button type="button" title="' + esc(tip) + '" style="background:hsl(' + h + ',' + sa + '%,' + (100 - sa / 2) + '%)" onclick="' + onpick + '(' + h + ',' + sa + ')"' + (extra || '') + '></button>';
 }
+function swatchesHTML(onpick, current) {
+    // current names a function giving [hue, sat]; with it a + button saves that colour
+    return COLOUR_SWATCHES.map(([h, sa, n]) => swatchButton(h, sa, n, onpick)).join('')
+        + userSwatches.map((x, i) => swatchButton(x.hue, x.sat, 'Hue ' + x.hue + ', saturation ' + x.sat + ' (right-click to remove)', onpick,
+            ' class="user-swatch" oncontextmenu="swatchRemove(' + i + '); return false"')).join('')
+        + (current && userSwatches.length < USER_SWATCH_LIMIT ? '<button type="button" class="swatch-add" title="Save the current colour as a swatch" onclick="swatchAdd(' + current + '())">+</button>' : '');
+}
+function swatchesRefresh() {
+    document.querySelectorAll('.swatches[data-pick]').forEach(el => el.innerHTML = swatchesHTML(el.dataset.pick, el.dataset.current));
+}
+function swatchesSet(d) {
+    if (d.swatches) { userSwatches = d.swatches; USER_SWATCH_LIMIT = d.limit; }
+    swatchesRefresh();
+    return d;
+}
+async function swatchAdd(hs) { return swatchesSet(await settingsPost({action: 'add_swatch', hue: hs[0], sat: hs[1]})); }
+async function swatchRemove(i) {
+    if (!confirm('Remove this swatch?')) return;
+    return swatchesSet(await settingsPost({action: 'delete_swatch', index: i}));
+}
+async function swatchesLoad() { return swatchesSet(await settingsPost({action: 'swatches'})); }
+function hsiCurrent() { return [+document.getElementById('hsiHue').value, +document.getElementById('hsiSat').value]; }
 function hsiSetHueSat(h, sa) {
     const hue = document.getElementById('hsiHue'), sat = document.getElementById('hsiSat');
     hue.value = h; sat.value = sa;
@@ -1141,7 +1169,8 @@ function hsiSetHueSat(h, sa) {
 }
 ['hsiHue', 'hsiSat'].forEach(id => document.getElementById(id).addEventListener('input', () =>
     drawWheel(document.getElementById('hsiWheel'), +document.getElementById('hsiHue').value, +document.getElementById('hsiSat').value)));
-document.getElementById('hsiSwatches').innerHTML = swatchesHTML('hsiPickSwatch');
+swatchesRefresh();
+setTimeout(swatchesLoad);  // settingsPost is defined further down the script
 function hsiPickSwatch(h, sa) { hsiSetHueSat(h, sa); drawWheel(document.getElementById('hsiWheel'), h, sa); }
 wheelInit(document.getElementById('hsiWheel'), () => [+document.getElementById('hsiHue').value, +document.getElementById('hsiSat').value], hsiSetHueSat);
 document.getElementById('sceneBri').oninput = e => document.getElementById('sceneBriVal').textContent = e.target.value + '%';
@@ -2023,7 +2052,8 @@ async function peOpen(idx) {
 function peClose() { document.getElementById('presetModal').classList.remove('open'); pe = null; }
 function peValues(e) {
     const m = (e.mode || 'CCT').toUpperCase();
-    if (m === 'HSI') return 'Hue ' + numInput('pe-hue', e.hue != null ? e.hue : 240, 0, 360) + ' Sat ' + numInput('pe-sat', e.sat != null ? e.sat : 100, 0, 100) + ' Bri ' + numInput('pe-bri', e.bri != null ? e.bri : 100, 0, 100);
+    if (m === 'HSI') return 'Hue ' + numInput('pe-hue', e.hue != null ? e.hue : 240, 0, 360) + ' Sat ' + numInput('pe-sat', e.sat != null ? e.sat : 100, 0, 100) + ' Bri ' + numInput('pe-bri', e.bri != null ? e.bri : 100, 0, 100)
+        + ' <button type="button" class="btn small pe-pick" onclick="pickInRow(this, \'pe\')" title="Pick the hue and saturation on the colour wheel or a swatch">Wheel...</button>';
     if (m === 'SCENE') return '<select class="pe-scene">' + SCENES.map((s, i) => '<option value="' + (i + 1) + '"' + ((e.scene || 1) === i + 1 ? ' selected' : '') + '>' + s + '</option>').join('') + '</select> Bri ' + numInput('pe-bri', e.bri != null ? e.bri : 100, 0, 100);
     return 'Temp ' + numInput('pe-temp', (e.temp || 56) * 100, 2700, 8500, 100) + ' K Bri ' + numInput('pe-bri', e.bri != null ? e.bri : 100, 0, 100);
 }
@@ -2209,7 +2239,8 @@ function aeRender() {
     lb.innerHTML = k ? Object.entries(k.lights || {}).map(([key, p]) => {
         const m = (p.mode || 'HSI').toUpperCase() === 'SCENE' ? 'ANM' : (p.mode || 'HSI').toUpperCase();
         let vals = '';
-        if (m === 'HSI') vals = 'Hue ' + numInput('ae-hue', p.hue != null ? p.hue : 0, 0, 360) + ' Sat ' + numInput('ae-sat', p.sat != null ? p.sat : 100, 0, 100) + ' Bri ' + numInput('ae-bri', p.bri != null ? p.bri : 100, 0, 100);
+        if (m === 'HSI') vals = 'Hue ' + numInput('ae-hue', p.hue != null ? p.hue : 0, 0, 360) + ' Sat ' + numInput('ae-sat', p.sat != null ? p.sat : 100, 0, 100) + ' Bri ' + numInput('ae-bri', p.bri != null ? p.bri : 100, 0, 100)
+            + ' <button type="button" class="btn small ae-pick" onclick="pickInRow(this, \'ae\')" title="Pick the hue and saturation on the colour wheel or a swatch">Wheel...</button>';
         else if (m === 'CCT') vals = 'Temp ' + numInput('ae-temp', (p.temp || 56) * 100, 2700, 8500, 100) + ' K Bri ' + numInput('ae-bri', p.bri != null ? p.bri : 100, 0, 100);
         else if (m === 'ANM') vals = '<select class="ae-scene">' + SCENES.map((s, i) => '<option value="' + (i + 1) + '"' + ((p.scene || 1) === i + 1 ? ' selected' : '') + '>' + s + '</option>').join('') + '</select> Bri ' + numInput('ae-bri', p.bri != null ? p.bri : 100, 0, 100);
         return '<tr data-key="' + esc(key) + '"><td><input type="text" class="ae-key" value="' + esc(key) + '" style="width:110px"></td><td><select class="ae-mode">'
@@ -2970,7 +3001,9 @@ function tlProps() {
     if (kind === 'state') {
         const mode = st.mode || 'HSI';
         html += '<label>Mode</label><select id="tpMode"><option' + (mode === 'HSI' ? ' selected' : '') + '>HSI</option><option' + (mode === 'CCT' ? ' selected' : '') + '>CCT</option></select>';
-        if (mode === 'HSI') html += '<label>Hue</label><input type="number" id="tpHue" min="0" max="360" value="' + (st.hue || 0) + '"><label>Saturation</label><input type="number" id="tpSat" min="0" max="100" value="' + (st.sat != null ? st.sat : 100) + '">';
+        if (mode === 'HSI') html += '<label>Hue</label><input type="number" id="tpHue" min="0" max="360" value="' + (st.hue || 0) + '"><label>Saturation</label><input type="number" id="tpSat" min="0" max="100" value="' + (st.sat != null ? st.sat : 100) + '">'
+            + '<span><button type="button" class="btn small" id="tpWheel" onclick="pickForEls(document.getElementById(\'tpHue\'), document.getElementById(\'tpSat\'))" title="Pick on the colour wheel">Wheel...</button></span>'
+            + '<div class="swatches" id="tpSwatches" data-pick="tpPickSwatch" data-current="tpCurrent"></div>';
         else html += '<label>Colour temp (K)</label><input type="number" id="tpTemp" min="3200" max="8500" step="100" value="' + ((st.temp || 56) * 100) + '">';
         html += '<label>Brightness</label><input type="number" id="tpBri" min="0" max="100" value="' + (st.bri != null ? st.bri : 100) + '">'
             + '<label>Fade in (ms)</label><input type="number" id="tpFade" min="0" step="100" value="' + (st.fade_ms || 0) + '">'
@@ -2992,7 +3025,14 @@ function tlProps() {
     }
     html += '<label>Label</label><input type="text" id="tpLabel" placeholder="(optional)" value="' + esc(c.label || '') + '"></div>';
     el.innerHTML = html;
+    swatchesRefresh();
     el.querySelectorAll('input,select').forEach(inp => inp.onchange = tlPropChanged);
+}
+function tpCurrent() { return [+document.getElementById('tpHue').value, +document.getElementById('tpSat').value]; }
+function tpPickSwatch(h, sa) {
+    document.getElementById('tpHue').value = h;
+    document.getElementById('tpSat').value = sa;
+    tlPropChanged();
 }
 function tlPropChanged(ev) {
     const i = tl.sel[0];
@@ -3074,7 +3114,7 @@ async function songOpen() {
     document.getElementById('songFile').value = '';
     document.getElementById('songInfo').textContent = 'Choose a song file to analyse.';
     document.getElementById('songDraftBtn').disabled = true;
-    document.getElementById('songName').value = '';
+    ['songName', 'songArtist', 'songTitle'].forEach(id => document.getElementById(id).value = '');
     document.getElementById('songModal').classList.add('open');
     songDraw();
     await songStyles();
@@ -3102,7 +3142,16 @@ async function dsOpen(current) {
     dsLoad(document.getElementById('dsStyle').value);
 }
 function dsClose() { document.getElementById('dsModal').classList.remove('open'); songStyles(); }
-function dsPaletteShown() { document.getElementById('dsColours').style.display = document.getElementById('dsPalette').value === 'Own colours' ? '' : 'none'; }
+function dsPaletteShown() {
+    const own = document.getElementById('dsPalette').value === 'Own colours';
+    ['dsColours', 'dsAddColour'].forEach(id => document.getElementById(id).style.display = own ? '' : 'none');
+}
+function dsAddColour() {
+    pickOpenWith(200, 90, (h, sa) => {
+        const box = document.getElementById('dsColours');
+        box.value = (box.value.trim() ? box.value.trim().replace(/,$/, '') + ', ' : '') + h + '/' + sa;
+    });
+}
 function dsPoolText(p) { p = p || {}; return [...(p.tags || []), ...(p.exclude || []).map(t => '-' + t), ...(p.names || [])].join(', '); }
 function dsPoolFromText(text, names) {
     const known = {}, pool = {tags: [], exclude: [], names: []};
@@ -3232,6 +3281,9 @@ function songSetAnalysis(d) {
     document.getElementById('songBpm').value = d.bpm;
     document.getElementById('songOffset').value = (d.bars && d.bars.length) ? d.bars[0] : d.offset_ms;
     if (!document.getElementById('songName').value.trim()) document.getElementById('songName').value = d.song || '';
+    // a new song replaces what the last one filled in
+    document.getElementById('songArtist').value = d.artist || '';
+    document.getElementById('songTitle').value = d.title || '';
     const conf = d.confidence == null ? '' : ' (' + Math.round(d.confidence * 100) + '% of the song agrees)';
     document.getElementById('songInfo').textContent = tlFmt(d.duration_ms) + ' long, ' + d.bpm + ' BPM' + conf + ', ' + d.sections.length +
         ' sections. If the beat ticks don\'t match the song, correct the tempo (x 1/2 or x 2 for the commonest mistake) and when the first bar falls.' +
@@ -3290,7 +3342,8 @@ async function songDraft() {
     const changed = Math.abs(bpm - a.bpm) > 0.005 || off !== first;
     const {waveform, ...lean} = a;  // the draft needs the beats, sections and energy, not the waveform
     const body = {action: 'draft', analysis: lean, style: document.getElementById('songStyle').value,
-                  name: document.getElementById('songName').value.trim() || a.song || 'Draft'};
+                  name: document.getElementById('songName').value.trim() || a.song || 'Draft',
+                  artist: document.getElementById('songArtist').value.trim(), song: document.getElementById('songTitle').value.trim()};
     if (changed) { body.bpm = bpm; body.offset_ms = off; }
     const d = await seqPost(body);
     if (!d.success) { document.getElementById('songInfo').textContent = 'Couldn\'t draft it: ' + errText(d); return; }
@@ -3578,21 +3631,35 @@ function sndSlider(k, raw) {
     Object.assign(sndDraft, changes);
     sndLive(changes);
 }
-// the wheel popup for a Sound palette colour
-let pickIndex = -1, pickHS = [0, 100];
-function pickOpen(i) {
-    pickIndex = i;
-    pickHS = [sndDraft.palette[i].hue, sndDraft.palette[i].sat];
-    document.getElementById('pickSwatches').innerHTML = swatchesHTML('pickSwatch');
-    wheelInit(document.getElementById('pickWheel'), () => pickHS, (h, sa) => { pickHS = [h, sa]; });
+// the wheel popup: OK calls back with the hue and saturation
+let pickHS = [0, 100], pickDone = null;
+function pickOpenWith(h, sa, done) {
+    pickHS = [h, sa];
+    pickDone = done;
+    swatchesLoad();  // picks up swatches saved on the desktop since
+    wheelInit(document.getElementById('pickWheel'), () => pickHS, (hh, ss) => { pickHS = [hh, ss]; });
     document.getElementById('pickModal').classList.add('open');
 }
+function pickCurrent() { return pickHS; }
 function pickSwatch(h, sa) { pickHS = [h, sa]; drawWheel(document.getElementById('pickWheel'), h, sa); }
 function pickClose(ok) {
     document.getElementById('pickModal').classList.remove('open');
-    if (!ok || pickIndex < 0 || !sndDraft) return;
-    Object.assign(sndDraft.palette[pickIndex], {hue: pickHS[0], sat: pickHS[1]});
-    sndRender(); sndLive({palette: sndDraft.palette});
+    const done = pickDone;
+    pickDone = null;
+    if (ok && done) done(pickHS[0], pickHS[1]);
+}
+function pickForEls(hueEl, satEl) {
+    // one change event after both values are in, so an editor reads (and undoes) the pick as one edit
+    pickOpenWith(+hueEl.value, +satEl.value, (h, sa) => { hueEl.value = h; satEl.value = sa; satEl.dispatchEvent(new Event('change')); });
+}
+function pickInRow(btn, prefix) { const tr = btn.closest('tr'); pickForEls(tr.querySelector('.' + prefix + '-hue'), tr.querySelector('.' + prefix + '-sat')); }
+function pickOpen(i) {
+    // a Sound palette colour
+    pickOpenWith(sndDraft.palette[i].hue, sndDraft.palette[i].sat, (h, sa) => {
+        if (!sndDraft) return;
+        Object.assign(sndDraft.palette[i], {hue: h, sat: sa});
+        sndRender(); sndLive({palette: sndDraft.palette});
+    });
 }
 function sndPal(i, key, v) { sndDraft.palette[i][key] = Number(v); sndRender(); sndLive({palette: sndDraft.palette}); }
 function sndPalRemove(i) {

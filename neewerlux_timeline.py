@@ -17,7 +17,7 @@ import time
 
 import neewerlux_show as show
 from neewerlux_stage import StageView
-from neewerlux_ui import SpinBoxWithButtons, DoubleSpinBoxWithButtons, FlowLayout, adjustableColumns
+from neewerlux_ui import SpinBoxWithButtons, DoubleSpinBoxWithButtons, FlowLayout, adjustableColumns, ColourPickRow, ColourPickDialog, _exec
 
 try:
     from PySide6.QtCore import Qt, QTimer, QRectF, QPointF, QSize, Signal
@@ -889,6 +889,13 @@ class SongDraftDialog(QDialog):
         nameRow.addWidget(QLabel("Name:"))
         self.nameEdit = QLineEdit()
         nameRow.addWidget(self.nameEdit, 1)
+        # filled from the song's tags or an "Artist - Title" file name; playing a show by artist and song matches these
+        nameRow.addWidget(QLabel("Artist:"))
+        self.artistEdit = QLineEdit()
+        nameRow.addWidget(self.artistEdit, 1)
+        nameRow.addWidget(QLabel("Song:"))
+        self.songEdit = QLineEdit()
+        nameRow.addWidget(self.songEdit, 1)
         lay.addLayout(nameRow)
         note = QLabel("The draft drives the fill, rim, background and practical lights, never the key, and stays under the "
                       "flash limit. It opens unsaved in the timeline editor for you to change and save.")
@@ -999,6 +1006,9 @@ class SongDraftDialog(QDialog):
         self.view.setAnalysis(result)
         if not self.nameEdit.text().strip():
             self.nameEdit.setText(result.get("song", ""))
+        # a new song replaces what the last one filled in
+        self.artistEdit.setText(result.get("artist", ""))
+        self.songEdit.setText(result.get("title", ""))
         conf = result.get("confidence")
         self.infoLabel.setText("%s long, %g BPM%s, %d sections. If the beat ticks don't match the song, correct the tempo "
                                "(x 1/2 or x 2 for the commonest mistake) and when the first bar falls." % (
@@ -1022,7 +1032,8 @@ class SongDraftDialog(QDialog):
             return None
         changed = self._gridChanged()
         result = self.host.draft(self.analysis, self.styleCombo.currentText(), self.nameEdit.text().strip() or self.analysis.get("song") or "Draft",
-                                 self.bpmSpin.value() if changed else None, self.offsetSpin.value() if changed else None)
+                                 self.bpmSpin.value() if changed else None, self.offsetSpin.value() if changed else None,
+                                 self.artistEdit.text().strip(), self.songEdit.text().strip())
         if not result.get("success"):
             self.infoLabel.setText("Couldn't draft it: " + "; ".join(result.get("errors", [])))
             return None
@@ -1069,6 +1080,10 @@ class DraftStyleDialog(QDialog):
         self.coloursEdit = QLineEdit()
         self.coloursEdit.setToolTip("Hue/saturation pairs (35/90, 215/85) or whites in Kelvin (2700K, 5600K), separated by commas")
         palRow.addWidget(self.coloursEdit, 1)
+        self.addColourButton = QPushButton("Add colour...")
+        self.addColourButton.setToolTip("Pick a colour on the wheel and add it to the style's own colours")
+        self.addColourButton.clicked.connect(self.addColour)
+        palRow.addWidget(self.addColourButton)
         form.addRow("Palette:", palRow)
         optRow = QHBoxLayout()
         self.intensityCombo = QComboBox()
@@ -1136,7 +1151,7 @@ class DraftStyleDialog(QDialog):
         bottom.addWidget(closeButton)
         lay.addLayout(bottom)
 
-        self.paletteCombo.currentTextChanged.connect(lambda t: self.coloursEdit.setVisible(t == self.OWN))
+        self.paletteCombo.currentTextChanged.connect(self._ownShown)
         for check in (self.animCheck, self.soundCheck):
             check.toggled.connect(lambda _on: [self._counts(k) for k in show.DRAFT_SECTIONS])
         self.styleCombo.currentTextChanged.connect(self.load)
@@ -1195,7 +1210,7 @@ class DraftStyleDialog(QDialog):
         else:
             self.paletteCombo.setCurrentText(self.OWN)
             self.coloursEdit.setText(self.coloursText(palette or []))
-        self.coloursEdit.setVisible(self.paletteCombo.currentText() == self.OWN)
+        self._ownShown(self.paletteCombo.currentText())
         self.intensityCombo.setCurrentText(str(st.get("intensity", "medium")).capitalize())
         self.animCheck.setChecked(bool(st.get("use_animations", True)))
         self.soundCheck.setChecked(bool(st.get("use_sound_modes", True)))
@@ -1217,6 +1232,20 @@ class DraftStyleDialog(QDialog):
         # the behaviour column fits its longest list (within reason), leaving Matches the rest
         want = max(b.sizeHint().width() for b in self.behaviourButtons.values()) + 12
         self.table.setColumnWidth(1, max(self.table.columnWidth(1), min(280, want)))
+
+    def _ownShown(self, palette):
+        self.coloursEdit.setVisible(palette == self.OWN)
+        self.addColourButton.setVisible(palette == self.OWN)
+
+    def addColour(self, hue=None, sat=None):
+        """Append a wheel-picked colour (or the one given) to the own colours."""
+        if hue is None:
+            dlg = ColourPickDialog(35, 90, self)
+            if not _exec(dlg):
+                return
+            hue, sat = dlg.value()
+        text = self.coloursEdit.text().strip().rstrip(",").strip()
+        self.coloursEdit.setText((text + ", " if text else "") + "%d/%d" % (hue, sat))
 
     def _behavioursChanged(self, kind):
         # kept in the order chosen: sections of the kind take them in turn from the first
@@ -1604,6 +1633,7 @@ class SequenceEditor(QWidget):
         self.pBri = SpinBoxWithButtons(); self.pBri.setRange(0, 100); self.pBri.setSuffix(" %")
         self.pFade = SpinBoxWithButtons(); self.pFade.setRange(0, 600000); self.pFade.setSingleStep(100); self.pFade.setSuffix(" ms")
         self.pSwatch = QLabel(); self.pSwatch.setFixedHeight(16)
+        self.pPick = ColourPickRow(lambda: (self.pHue.value(), self.pSat.value()), self._pickColour, columns=6)
         self.pClip = QComboBox()
         self.pSound = QComboBox()
         self.pSound.setToolTip("The sound mode these lights follow for the cue's length (live sound, while the sequence plays)")
@@ -1614,7 +1644,7 @@ class SequenceEditor(QWidget):
         self.pLabel = QLineEdit(); self.pLabel.setPlaceholderText("(optional)")
         self._rows = {}
         for key, label, w in (("hue", "Hue", self.pHue), ("sat", "Saturation", self.pSat), ("temp", "Colour temp", self.pTemp),
-                              ("bri", "Brightness", self.pBri), ("fade", "Fade in", self.pFade), ("swatch", "", self.pSwatch),
+                              ("pick", "", self.pPick), ("bri", "Brightness", self.pBri), ("fade", "Fade in", self.pFade), ("swatch", "", self.pSwatch),
                               ("clip", "Animation", self.pClip), ("sound", "Sound mode", self.pSound), ("fit", "Fit", self.pFit), ("speed", "Speed", self.pSpeed),
                               ("clipbri", "Brightness", self.pClipBri), ("duration", "Length", self.pDuration), ("label", "Label", self.pLabel)):
             form.addRow(label, w)
@@ -1647,6 +1677,14 @@ class SequenceEditor(QWidget):
         self.pTarget.activated.connect(self._targetPicked)
         self.pLabel.editingFinished.connect(self._propChanged)
         return panel
+
+    def _pickColour(self, hue, sat):
+        # one edit (one undo step) for both values
+        for w, v in ((self.pHue, hue), (self.pSat, sat)):
+            w.blockSignals(True)
+            w.setValue(v)
+            w.blockSignals(False)
+        self._propChanged()
 
     def _targetPicked(self, index):
         # the list shows friendly labels; the cue stores the target itself
@@ -1701,7 +1739,7 @@ class SequenceEditor(QWidget):
                 self.pFade.setValue(int(st.get("fade_ms", 0) or 0))
                 rgb = cueColour(cue)
                 self.pSwatch.setStyleSheet("background: %s; border: 1px solid #555;" % show.rgbHex(rgb))
-                self._showRows({"mode", "hue", "sat", "bri", "fade", "swatch", "duration", "label"} if mode == "HSI"
+                self._showRows({"mode", "hue", "sat", "pick", "bri", "fade", "swatch", "duration", "label"} if mode == "HSI"
                                else {"mode", "temp", "bri", "fade", "swatch", "duration", "label"})
                 self._rows["duration"][0].setText("Length (0 = hold)")
             elif kind == "sound":

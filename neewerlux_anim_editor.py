@@ -45,7 +45,7 @@ def _colorForCCT(temp, bri):
     return QColor(int(r * factor), int(g * factor), int(b * factor))
 
 
-from neewerlux_ui import SpinBoxWithButtons, hideSpinArrows, adjustableColumns
+from neewerlux_ui import SpinBoxWithButtons, hideSpinArrows, adjustableColumns, ColourPickRow
 
 try:
     from neewerlux_ui import GradientSlider
@@ -287,12 +287,18 @@ class AnimationEditorDialog(QDialog):
         formGrid.addWidget(self._sceneCombo, 2, 1)
 
         editorLay.addLayout(formGrid)
+        self._pickRow = ColourPickRow(lambda: (self._p1Spin.value(), self._p2Spin.value()),
+                                      lambda h, sa: (self._p1Spin.setValue(h), self._p2Spin.setValue(sa)))
+        # the preview shares the pick row's line (the editor has to fit a 720-pixel screen)
+        pickLine = QHBoxLayout()
+        pickLine.addWidget(self._pickRow)
 
         # Color preview
         self._colorPreview = QLabel("")
         self._colorPreview.setFixedHeight(24)
         self._colorPreview.setStyleSheet("background-color: #3c3cf0; border-radius: 4px;")
-        editorLay.addWidget(self._colorPreview)
+        pickLine.addWidget(self._colorPreview, 1, Qt.AlignTop)
+        editorLay.addLayout(pickLine)
 
         # Apply button
         applyBtn = QPushButton("Apply to Selected Frame")
@@ -582,6 +588,7 @@ class AnimationEditorDialog(QDialog):
             self._p3Label.setText("")
             self._p3Spin.setVisible(False)
 
+        self._pickRow.setVisible(mode == "HSI")
         self._updatePreview()
 
     def _updatePreview(self):

@@ -424,25 +424,146 @@ class ColourWheel(QWidget):
             self._pick(event.position() if hasattr(event, "position") else event.pos())
 
 
-class ColourSwatches(QWidget):
-    """A grid of ready colours (COLOUR_SWATCHES); picked(hue, sat) when one is clicked."""
-    picked = customSignal(int, int)
+def _exec(obj, *args):
+    # PySide2 names it exec_
+    return obj.exec(*args) if hasattr(obj, "exec") else obj.exec_(*args)
 
-    def __init__(self, columns=6, parent=None):
+
+class SwatchStore:
+    """The user's own swatches, shown after COLOUR_SWATCHES everywhere there are swatches.
+    NeewerLux.py sets SWATCH_STORE to one that saves them (light_prefs/swatches.json); every
+    ColourSwatches redraws when they change."""
+    LIMIT = 24
+
+    def __init__(self, items=None, save=None):
+        self.items = [dict(x) for x in (items or [])]
+        self.save = save
+
+    def add(self, hue, sat):
+        item = {"hue": int(hue) % 360, "sat": max(0, min(100, int(sat)))}
+        if item in self.items or len(self.items) >= self.LIMIT:
+            return False
+        self.items.append(item)
+        self._changed()
+        return True
+
+    def remove(self, index):
+        if not 0 <= index < len(self.items):
+            return False
+        del self.items[index]
+        self._changed()
+        return True
+
+    def replace(self, items):
+        self.items = [dict(x) for x in items]
+        for w in list(ColourSwatches.live):
+            w.rebuild()
+
+    def _changed(self):
+        if self.save:
+            self.save(self.items)
+        for w in list(ColourSwatches.live):
+            w.rebuild()
+
+
+SWATCH_STORE = SwatchStore()
+
+
+def _swatchButton(hue, sat, tip):
+    b = QPushButton()
+    b.setFixedSize(26, 22)
+    b.setToolTip(tip)
+    b.setStyleSheet("QPushButton { background: %s; border: 1px solid #666; border-radius: 3px; padding: 0px; }"
+                    % QColor.fromHsv(hue % 360, int(sat * 2.55), 255).name())
+    return b
+
+
+class ColourSwatches(QWidget):
+    """A grid of ready colours (COLOUR_SWATCHES) and the user's own (SWATCH_STORE); picked(hue,
+    sat) when one is clicked. With current (a function giving the colour being edited), a +
+    button saves it as a swatch; right-click one of your own to remove it."""
+    picked = customSignal(int, int)
+    live = []
+
+    def __init__(self, columns=6, parent=None, current=None):
         super().__init__(parent)
-        grid = QGridLayout(self)
-        grid.setContentsMargins(0, 0, 0, 0)
-        grid.setSpacing(3)
+        self.columns = columns
+        self.current = current
+        self.grid = QGridLayout(self)
+        self.grid.setContentsMargins(0, 0, 0, 0)
+        self.grid.setSpacing(3)
         self.buttons = []
-        for n, (hue, sat, name) in enumerate(COLOUR_SWATCHES):
-            b = QPushButton()
-            b.setFixedSize(26, 22)
-            b.setToolTip(name)
-            b.setStyleSheet("QPushButton { background: %s; border: 1px solid #666; border-radius: 3px; padding: 0px; }"
-                            % QColor.fromHsv(hue % 360, int(sat * 2.55), 255).name())
+        self.userButtons = []
+        self.addButton = None
+        ColourSwatches.live.append(self)
+        self.destroyed.connect(lambda *_: ColourSwatches.live.remove(self) if self in ColourSwatches.live else None)
+        self.rebuild()
+
+    def rebuild(self):
+        while self.grid.count():
+            w = self.grid.takeAt(0).widget()
+            if w is not None:
+                w.deleteLater()
+        self.buttons, self.userButtons = [], []
+        n = 0
+        for hue, sat, name in COLOUR_SWATCHES:
+            b = _swatchButton(hue, sat, name)
             b.clicked.connect(lambda _=False, h=hue, sa=sat: self.picked.emit(h, sa))
-            grid.addWidget(b, n // columns, n % columns)
+            self.grid.addWidget(b, n // self.columns, n % self.columns)
             self.buttons.append(b)
+            n += 1
+        for i, item in enumerate(SWATCH_STORE.items):
+            b = _swatchButton(item["hue"], item["sat"], "Your colour: hue %d, saturation %d (right-click to remove)" % (item["hue"], item["sat"]))
+            b.clicked.connect(lambda _=False, h=item["hue"], sa=item["sat"]: self.picked.emit(h, sa))
+            b.setContextMenuPolicy(Qt.CustomContextMenu)
+            b.customContextMenuRequested.connect(lambda _pos, i=i, b=b: self._removeMenu(i, b))
+            self.grid.addWidget(b, n // self.columns, n % self.columns)
+            self.userButtons.append(b)
+            n += 1
+        if self.current is not None:
+            self.addButton = QPushButton("+")
+            self.addButton.setFixedSize(26, 22)
+            self.addButton.setToolTip("Save the current colour as a swatch (up to %d of your own)" % SwatchStore.LIMIT)
+            self.addButton.clicked.connect(lambda: SWATCH_STORE.add(*self.current()))
+            self.grid.addWidget(self.addButton, n // self.columns, n % self.columns)
+
+    def _removeMenu(self, index, button):
+        menu = QMenu(button)
+        act = menu.addAction("Remove this swatch")
+        act.triggered.connect(lambda: SWATCH_STORE.remove(index))
+        _exec(menu, button.mapToGlobal(button.rect().bottomLeft()))
+
+
+class ColourPickRow(QWidget):
+    """For an editor's hue and saturation fields: a Wheel... button and the swatches. get()
+    gives (hue, sat); set(hue, sat) puts a picked colour back into the fields. The swatches
+    show rows rows at a time and scroll past that, so saving swatches never grows the editor."""
+
+    def __init__(self, get, set, columns=12, rows=2, parent=None):
+        super().__init__(parent)
+        self.get, self.set = get, set
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        self.wheelButton = QPushButton("Wheel...")
+        self.wheelButton.setToolTip("Pick the hue and saturation on a colour wheel")
+        self.wheelButton.clicked.connect(self.openWheel)
+        lay.addWidget(self.wheelButton, 0, Qt.AlignTop)
+        self.swatches = ColourSwatches(columns, current=get)
+        self.swatches.picked.connect(lambda h, sa: self.set(h, sa))
+        self.scroll = QScrollArea()
+        self.scroll.setFrameShape(QFrame.NoFrame)
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.scroll.setWidget(self.swatches)
+        bar = self.scroll.verticalScrollBar().sizeHint().width()
+        self.scroll.setFixedSize(columns * 26 + (columns - 1) * 3 + bar + 2, rows * 22 + (rows - 1) * 3)
+        lay.addWidget(self.scroll, 0, Qt.AlignTop)
+        lay.addStretch(1)
+
+    def openWheel(self):
+        dlg = ColourPickDialog(*self.get(), parent=self)
+        if _exec(dlg):
+            self.set(*dlg.value())
 
 
 class ColourPickDialog(QDialog):
@@ -455,7 +576,7 @@ class ColourPickDialog(QDialog):
         self.wheel = ColourWheel(180)
         self.wheel.setHueSat(hue, sat)
         lay.addWidget(self.wheel, 0, Qt.AlignHCenter)
-        self.swatches = ColourSwatches()
+        self.swatches = ColourSwatches(current=lambda: (self.wheel.hue, self.wheel.sat))
         self.swatches.picked.connect(self.wheel.setHueSat)
         lay.addWidget(self.swatches, 0, Qt.AlignHCenter)
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -953,7 +1074,7 @@ class Ui_MainWindow(object):
         pickRow = QHBoxLayout()
         self.hsiWheel = ColourWheel(110)
         self.hsiWheel.setHueSat(self.Slider_HSI_1_H.value(), self.Slider_HSI_2_S.value())
-        self.hsiSwatches = ColourSwatches()
+        self.hsiSwatches = ColourSwatches(current=lambda: (self.Slider_HSI_1_H.value(), self.Slider_HSI_2_S.value()))
         pickRow.addWidget(self.hsiWheel)
         pickRow.addWidget(self.hsiSwatches, 0, Qt.AlignVCenter)
         pickRow.addStretch(1)

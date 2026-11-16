@@ -2232,6 +2232,15 @@ def t_songHTTP(rig):
                                      headers={"Content-Type": "application/octet-stream"}, method="POST")
         up = json.loads(urllib.request.urlopen(req, timeout=30).read().decode("utf-8"))
         check(up["success"] and up["song"] == "Uploaded Song" and up["bpm"] == 64, "upload with a given tempo: %s" % {k: up.get(k) for k in ("success", "bpm", "song", "errors")})
+        check(up["artist"] == "" and up["title"] == "Uploaded Song", "no tags, no dash: the name is the title: %s" % {k: up.get(k) for k in ("artist", "title")})
+        req = urllib.request.Request("http://127.0.0.1:%d/NeewerLux/song?name=Poizen%%20Jam%%20-%%20Insomnia.wav&bpm=128" % rig.port, data=data,
+                                     headers={"Content-Type": "application/octet-stream"}, method="POST")
+        up = json.loads(urllib.request.urlopen(req, timeout=30).read().decode("utf-8"))
+        check(up["artist"] == "Poizen Jam" and up["title"] == "Insomnia", "Artist - Title from the upload's name: %s" % {k: up.get(k) for k in ("artist", "title")})
+        dr = rig.post("/NeewerLux/sequence", {"action": "draft", "analysis": up, "style": "Neon", "name": "Tagged"})
+        check(dr["sequence"].get("artist") == "Poizen Jam" and dr["sequence"].get("song") == "Insomnia", "a draft takes them by default: %s" % {k: dr["sequence"].get(k) for k in ("artist", "song")})
+        dr = rig.post("/NeewerLux/sequence", {"action": "draft", "analysis": up, "style": "Neon", "name": "Tagged", "artist": "", "song": "Insomnia (Live)"})
+        check("artist" not in dr["sequence"] and dr["sequence"]["song"] == "Insomnia (Live)", "sent values win, an empty one clears: %s" % {k: dr["sequence"].get(k) for k in ("artist", "song")})
         check(not [f for f in os.listdir(tempfile.gettempdir()) if f.endswith(".wav") and os.path.getsize(os.path.join(tempfile.gettempdir(), f)) == len(data)],
               "the upload's temporary file is removed")
 
@@ -2272,6 +2281,69 @@ def t_songHTTP(rig):
                   "a failing finder falls back, with a warning: %s" % got.get("warnings"))
         finally:
             nl.songSectionCommand = ""
+
+
+def t_swatches(rig):
+    """1.4.0: your own swatches over HTTP (list, add, delete), kept in light_prefs/swatches.json,
+    no duplicates and at most 24."""
+    nl, ui = rig.nl, rig.nl.neewerlux_ui
+    ui.SWATCH_STORE.replace([])
+    got = rig.post("/NeewerLux/settings", {"action": "swatches"})
+    check(got["success"] and got["swatches"] == [] and got["limit"] == 24 and len(got["builtin"]) == 12, str(got))
+    got = rig.post("/NeewerLux/settings", {"action": "add_swatch", "hue": 400, "sat": 120})
+    check(got["success"] and got["swatches"] == [{"hue": 40, "sat": 100}], "hue wraps and saturation clamps: %s" % got)
+    dup = rig.post("/NeewerLux/settings", {"action": "add_swatch", "hue": 40, "sat": 100})
+    check(not dup["success"] and len(dup["swatches"]) == 1, "a duplicate is refused: %s" % dup)
+    check(not rig.post("/NeewerLux/settings", {"action": "add_swatch", "hue": 10})["success"], "needs both values")
+    with open(nl.swatchesFile, encoding="utf-8") as f:
+        check(json.load(f) == [{"hue": 40, "sat": 100}], "written to swatches.json")
+    for h in range(1, 30):
+        rig.post("/NeewerLux/settings", {"action": "add_swatch", "hue": h, "sat": 50})
+    full = rig.post("/NeewerLux/settings", {"action": "add_swatch", "hue": 200, "sat": 50})
+    check(not full["success"] and len(full["swatches"]) == 24 and "24" in full["errors"][0], "at most 24: %s" % full["errors"])
+    gone = rig.post("/NeewerLux/settings", {"action": "delete_swatch", "index": 0})
+    check(gone["success"] and len(gone["swatches"]) == 23 and gone["swatches"][0] == {"hue": 1, "sat": 50}, "delete by index")
+    check(not rig.post("/NeewerLux/settings", {"action": "delete_swatch", "index": 99})["success"], "no swatch there")
+    ui.SWATCH_STORE.replace([])
+    nl.loadSwatches()
+    check(len(ui.SWATCH_STORE.items) == 23, "reloaded from disk: %d" % len(ui.SWATCH_STORE.items))
+    rig.post("/NeewerLux/settings", {"action": "swatches"})
+    ui.SWATCH_STORE.replace([])
+    nl._saveSwatches([])
+
+
+def _id3File(path, version, frames, extended=False):
+    """An MP3-named file that's only an ID3v2 tag: enough for the tag reader."""
+    def size(n, syncsafe):
+        return bytes(((n >> 21) & 127, (n >> 14) & 127, (n >> 7) & 127, n & 127)) if syncsafe else n.to_bytes(4, "big")
+    body = b""
+    if extended:  # the v2.3 form: a size that leaves itself out, then six bytes
+        body += (6).to_bytes(4, "big") + b"\x00" * 6
+    for fid, enc, text in frames:
+        data = bytes([enc]) + text.encode({0: "latin-1", 1: "utf-16", 3: "utf-8"}[enc])
+        body += fid + size(len(data), version == 4) + b"\x00\x00" + data
+    body += b"\x00" * 20  # padding
+    with open(path, "wb") as f:
+        f.write(b"ID3" + bytes([version, 0, 0x40 if extended else 0]) + size(len(body), True) + body + b"\xff\xfb" * 50)
+
+
+def t_songTags(rig):
+    """1.4.0: artist and song from ID3 tags (v2.3, v2.4, UTF-16, extended header) or the file name."""
+    import tempfile
+    audio = rig.nl.audio
+    with tempfile.TemporaryDirectory() as d:
+        p = os.path.join(d, "whatever.mp3")
+        _id3File(p, 3, [(b"TIT2", 1, "Insomnia"), (b"TPE1", 0, "Poizen Jam")])
+        check(audio.songTags(p) == {"artist": "Poizen Jam", "song": "Insomnia"}, "v2.3, UTF-16: %s" % audio.songTags(p))
+        _id3File(p, 4, [(b"TALB", 3, "x" * 200), (b"TPE1", 3, "Bj\u00f6rk"), (b"TIT2", 3, "J\u00f3ga")])
+        check(audio.songTags(p) == {"artist": "Bj\u00f6rk", "song": "J\u00f3ga"}, "v2.4 syncsafe sizes past a 200-byte frame: %s" % audio.songTags(p))
+        _id3File(p, 3, [(b"TPE1", 0, "Extended")], extended=True)
+        check(audio.songTags(p)["artist"] == "Extended", "after an extended header: %s" % audio.songTags(p))
+        named = os.path.join(d, "03 - Daft Punk - One More Time.mp3")
+        _id3File(named, 3, [(b"TIT2", 0, "")])
+        check(audio.songTags(named) == {"artist": "Daft Punk", "song": "One More Time"}, "no tags: the file name: %s" % audio.songTags(named))
+        check(audio.songTags(os.path.join(d, "nothing.wav"), "07_Some_Song.wav") == {"artist": "", "song": "Some Song"},
+              "the upload's name, track number and underscores dropped: %s" % audio.songTags(os.path.join(d, "nothing.wav"), "07_Some_Song.wav"))
 
 
 def t_paletteLibrary(rig):
@@ -2359,7 +2431,7 @@ TESTS = [t_maxBrightnessHTTP, t_maxBrightnessAnimationAndSequence, t_minBrightne
          t_addSimulatedRig, t_compositorWakesOnlyWhenDue, t_handBackToRunningLayerFades,
          t_soundModeHTTP, t_soundUnderShowAndEffects, t_soundRespectsLimitsAndLocks, t_soundUnavailable, t_soundModeFilesHTTP,
          t_offWinsDuringShows, t_animationFlashRates, t_shippedAnimationTags, t_soundCues, t_soundHandsBackToBase, t_manualWriteReleasesSound, t_presetFadeTakesLightsFromSound, t_soundOnSomeLights,
-         t_presetSounds, t_paletteLibrary, t_songDrafts, t_draftStyles, t_playBrightness, t_clockFollow, t_presetAsEffect, t_accessToken, t_reconnectBackoff, t_songHTTP]
+         t_presetSounds, t_paletteLibrary, t_songDrafts, t_draftStyles, t_playBrightness, t_clockFollow, t_presetAsEffect, t_accessToken, t_reconnectBackoff, t_songHTTP, t_swatches, t_songTags]
 
 
 def main():

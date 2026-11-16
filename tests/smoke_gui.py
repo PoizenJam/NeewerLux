@@ -224,6 +224,48 @@ def checkSoundTab(nl, app, win, rig):
     print("Sound tab: PASS")
 
 
+def checkOwnSwatches(nl, app, win):
+    """1.4.0: + saves the colour being edited as a swatch, every swatch grid redraws, a click
+    on yours picks it, removing one redraws them all; the animation editor has the wheel and
+    swatches for an HSI frame."""
+    import json
+    from neewerlux_ui import SWATCH_STORE, ColourPickDialog
+    from neewerlux_anim_editor import AnimationEditorDialog
+    SWATCH_STORE.replace([])
+    dlg = ColourPickDialog(30, 80, win)
+    for slider, v in ((win.Slider_HSI_1_H, 200), (win.Slider_HSI_2_S, 40)):
+        slider.blockSignals(True)  # no send to the lights: only the + button is under test
+        slider.setValue(v)
+        slider.blockSignals(False)
+    win.hsiSwatches.addButton.click()
+    assert SWATCH_STORE.items == [{"hue": 200, "sat": 40}], SWATCH_STORE.items
+    assert len(win.hsiSwatches.userButtons) == 1 and len(dlg.swatches.userButtons) == 1, "every swatch grid shows it"
+    with open(nl.swatchesFile, encoding="utf-8") as f:
+        assert json.load(f) == [{"hue": 200, "sat": 40}], "saved to swatches.json"
+    dlg.swatches.userButtons[0].click()
+    assert dlg.value() == (200, 40), dlg.value()
+    dlg.swatches.addButton.click()
+    assert len(SWATCH_STORE.items) == 1, "the same colour isn't saved twice"
+    ed = AnimationEditorDialog(win, {"name": "Spin", "loop": True, "keyframes": [
+        {"hold_ms": 100, "fade_ms": 0, "lights": {"*": {"mode": "HSI", "hue": 0, "sat": 100, "bri": 50}}}]}, "Spin")
+    ed._table.selectRow(0)
+    assert not ed._pickRow.isHidden(), "the animation editor shows the wheel and swatches for HSI"
+    assert len(ed._pickRow.swatches.userButtons) == 1, "with your swatches"
+    ed._pickRow.swatches.userButtons[0].click()
+    assert (ed._p1Spin.value(), ed._p2Spin.value()) == (200, 40), (ed._p1Spin.value(), ed._p2Spin.value())
+    SWATCH_STORE.remove(0)
+    assert not win.hsiSwatches.userButtons and not dlg.swatches.userButtons and not ed._pickRow.swatches.userButtons, "removed everywhere"
+    for i in range(30):
+        SWATCH_STORE.add(i * 7, 60)
+    assert len(SWATCH_STORE.items) == SWATCH_STORE.LIMIT, "at most %d" % SWATCH_STORE.LIMIT
+    assert ed._pickRow.scroll.height() == ed._pickRow.scroll.maximumHeight() and ed._pickRow.sizeHint().height() <= 50, \
+        "a full set of swatches scrolls in the editor rather than growing it"
+    ed.close()
+    dlg.close()
+    SWATCH_STORE.replace([])
+    nl._saveSwatches([])
+
+
 def checkColourAndPresetFade(nl, app, win):
     """1.4.0: the HSI tab's wheel and swatches set the sliders (and follow them); a global
     preset recalled from its button with a fade goes through the compositor's fade and doesn't
@@ -278,6 +320,7 @@ def main():
     checkSoundTab(nl, app, win, rig)
     checkFlashRates(nl, app, win)
     checkColourAndPresetFade(nl, app, win)
+    checkOwnSwatches(nl, app, win)
 
     # Sequences panel and status timer
     nl.savedSequences["Smoke"] = {"format": 1, "name": "Smoke", "duration_ms": 1500,
@@ -472,6 +515,14 @@ def main():
         if dlg.windowTitle().startswith("Edit Preset"):
             sound = [c for c in dlg.findChildren(QComboBox) if c.findData("Pulse") >= 0]
             assert sound and sound[0].itemData(0) == "", "the preset editor offers a sound mode per light"
+            from neewerlux_ui import ColourPickRow
+            rows = dlg.findChildren(ColourPickRow)
+            assert len(rows) == 1, "the preset editor has the wheel and swatches"
+            modes = [c for c in dlg.findChildren(QComboBox) if c.findText("HSI") >= 0]
+            modes[0].setCurrentText("HSI")
+            assert not rows[0].isHidden(), "shown for an HSI light"
+            rows[0].set(30, 70)
+            assert rows[0].get() == (30, 70), "they set the hue and saturation: %s" % (rows[0].get(),)
         return 0
     nl.pyside_exec = inspect
     try:

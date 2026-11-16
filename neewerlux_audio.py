@@ -20,6 +20,7 @@ import glob
 import json
 import math
 import os
+import re
 import shlex
 import subprocess
 import tempfile
@@ -999,3 +1000,58 @@ class AudioEngine:
                     self._latest = None
                 self._retry.wait(2.0)
                 self._retry.clear()
+
+
+def _id3Text(data):
+    """A text frame's value (first string), in its declared encoding."""
+    if not data:
+        return ""
+    enc, raw = data[0], data[1:]
+    codec = {0: "latin-1", 1: "utf-16", 2: "utf-16-be", 3: "utf-8"}.get(enc, "latin-1")
+    text = raw.decode(codec, errors="replace")
+    return text.split("\x00")[0].strip()
+
+
+def _id3Tags(path):
+    """Artist and title from an MP3's ID3v2 tag (v2.3 and v2.4 text frames), or {}."""
+    with open(path, "rb") as f:
+        head = f.read(10)
+        if len(head) < 10 or head[:3] != b"ID3" or head[3] not in (3, 4):
+            return {}
+        size = (head[6] << 21) | (head[7] << 14) | (head[8] << 7) | head[9]
+        body = f.read(size)
+    if head[5] & 0x40:  # an extended header comes first
+        ext = int.from_bytes(body[:4], "big")
+        body = body[(ext if head[3] == 4 else ext + 4):]
+    found, pos = {}, 0
+    while pos + 10 <= len(body):
+        fid = body[pos:pos + 4]
+        if not fid.strip(b"\x00"):
+            break
+        raw = body[pos + 4:pos + 8]
+        # v2.4 frame sizes are syncsafe, v2.3 plain
+        n = ((raw[0] << 21) | (raw[1] << 14) | (raw[2] << 7) | raw[3]) if head[3] == 4 else int.from_bytes(raw, "big")
+        if fid in (b"TPE1", b"TIT2"):
+            found["artist" if fid == b"TPE1" else "song"] = _id3Text(body[pos + 10:pos + 10 + n])
+        pos += 10 + n
+    return {k: v for k, v in found.items() if v}
+
+
+def songTags(path, name=None):
+    """{"artist", "song"} for a song file: from its tags (ID3 in MP3s; the title and artist
+    soundfile reads from WAV, FLAC, OGG), else from its file name (or name, for an upload kept
+    under a temporary one) like "Artist - Title" or "02 Title". Either may be empty."""
+    tags = {}
+    try:
+        if str(path).lower().endswith(".mp3"):
+            tags = _id3Tags(path)
+        elif songAvailable():
+            import soundfile
+            with soundfile.SoundFile(path) as f:
+                tags = {k: (getattr(f, a, "") or "").strip() for k, a in (("artist", "artist"), ("song", "title"))}
+    except (OSError, RuntimeError, ValueError):
+        tags = {}
+    stem = re.sub(r"^\d{1,3}[\s._-]+", "", os.path.splitext(os.path.basename(str(name or path)))[0]).replace("_", " ").strip()
+    artist, sep, title = stem.partition(" - ")
+    guess = {"artist": artist.strip(), "song": title.strip()} if sep else {"artist": "", "song": stem}
+    return {"artist": tags.get("artist") or guess["artist"], "song": tags.get("song") or guess["song"]}

@@ -305,6 +305,11 @@ def main():
                     const rows = document.querySelectorAll('#peRows tr'); const last = rows[rows.length - 1];
                     last.querySelector('.pe-target').value = '2'; last.querySelector('.pe-mode').value = 'HSI';
                     last.querySelector('.pe-mode').onchange();""")
+        js(page, """const rows = document.querySelectorAll('#peRows tr'); rows[rows.length - 1].querySelector('.pe-pick').click();""")
+        waitFor(page, "document.getElementById('pickModal').classList.contains('open')", "the wheel from a preset row")
+        js(page, "pickSwatch(60, 100); pickClose(true)")
+        check(json.loads(js(page, "JSON.stringify([pe.entries[pe.entries.length - 1].hue, pe.entries[pe.entries.length - 1].sat])")) == [60, 100],
+              "the wheel sets the row's hue and saturation")
         js(page, """const rows = document.querySelectorAll('#peRows tr'); const last = rows[rows.length - 1];
                     last.querySelector('.pe-hue').value = '275'; last.querySelector('.pe-bri').value = '35';
                     last.querySelector('.pe-sound').value = 'Pulse';
@@ -340,6 +345,9 @@ def main():
                     aeAddFrame();
                     document.getElementById('aeHold').value = '750'; aeFrameField();
                     aeAddLight();""")
+        js(page, "document.querySelector('#aeLights tr .ae-pick').click(); pickSwatch(45, 100); pickClose(true)")
+        check(js(page, "JSON.stringify([ae.anim.keyframes[ae.sel].lights[Object.keys(ae.anim.keyframes[ae.sel].lights)[0]].hue, ae.anim.keyframes[ae.sel].lights[Object.keys(ae.anim.keyframes[ae.sel].lights)[0]].sat])") == "[45,100]",
+              "the wheel sets an HSI light's colour in the frame")
         js(page, """const rows = document.querySelectorAll('#aeLights tr'); const r = rows[rows.length - 1];
                     r.querySelector('.ae-mode').value = 'CCT'; r.querySelector('.ae-mode').onchange();""")
         js(page, """const rows = document.querySelectorAll('#aeLights tr'); const r = rows[rows.length - 1];
@@ -500,6 +508,15 @@ def main():
                     document.getElementById('tpFade').value = '1200'; tlPropChanged();""")
         st = json.loads(js(page, "JSON.stringify(tl.seq.cues[tl.seq.cues.length - 1].state)"))
         check(st.get("hue") == 200 and st.get("bri") == 55 and st.get("fade_ms") == 1200, "colour properties: " + str(st))
+        n = js(page, "tl.undo.length")
+        js(page, "document.getElementById('tpWheel').click(); pickSwatch(300, 70); pickClose(true)")
+        st = json.loads(js(page, "JSON.stringify(tl.seq.cues[tl.seq.cues.length - 1].state)"))
+        check((st.get("hue"), st.get("sat")) == (300, 70) and js(page, "tl.undo.length") == n + 1, "the wheel sets the cue's colour as one edit: %s" % st)
+        check(js(page, "document.querySelectorAll('#tpSwatches button').length") >= 12, "and the swatches are there")
+        js(page, "document.querySelectorAll('#tpSwatches button')[0].click()")  # red
+        check(js(page, "JSON.stringify([tl.seq.cues[tl.seq.cues.length - 1].state.hue, tl.seq.cues[tl.seq.cues.length - 1].state.sat])") == "[0,100]", "a swatch sets it")
+        js(page, "tlUndo(); tlUndo(); tlProps()")
+        check(js(page, "tl.seq.cues[tl.seq.cues.length - 1].state.hue") == 200, "two undos take both picks back")
         js(page, "document.getElementById('tpTarget').value = '@rim'; tlPropChanged();")
         spin(400)
         check(js(page, "tl.seq.cues[tl.seq.cues.length - 1].target") == "@rim", "target")
@@ -589,6 +606,9 @@ def main():
         waitFor(page, "!!songAnalysis && !document.getElementById('songDraftBtn').disabled", "the song analysed", timeout=20)
         got = json.loads(js(page, "JSON.stringify({bpm: +document.getElementById('songBpm').value, name: document.getElementById('songName').value, secs: songAnalysis.sections.length})"))
         check(abs(got["bpm"] - 128) < 0.3 and got["name"] == "Web Song" and got["secs"] >= 1, "analysis in the dialog: %s" % got)
+        tags = json.loads(js(page, "JSON.stringify([document.getElementById('songArtist').value, document.getElementById('songTitle').value])"))
+        check(tags == ["", "Web Song"], "artist and song from the file name: %s" % tags)
+        js(page, "document.getElementById('songArtist').value = 'Poizen Jam'")
         spin(200)
         view.grab().save(os.path.join(rig.workdir, "webui_song.png"))
         title = js(page, """const cv = document.getElementById('songCanvas'), r = cv.getBoundingClientRect(), s = songAnalysis.sections[0];
@@ -599,6 +619,7 @@ def main():
         waitFor(page, "!!(tl && tl.render && tl.original === null && (tl.seq.sections || []).length && document.getElementById('tlModal').classList.contains('open'))", "the draft in the editor", timeout=15)
         seq = json.loads(js(page, "JSON.stringify(tl.seq)"))
         check(abs(seq["tempo"]["bpm"] - got["bpm"] / 2) < 0.02 and seq["name"] == "Web Song" and "Neon" in seq["description"], "the draft: %s" % {k: seq.get(k) for k in ("tempo", "name", "description")})
+        check(seq.get("artist") == "Poizen Jam" and seq.get("song") == "Web Song", "the artist and song go into the draft: %s" % {k: seq.get(k) for k in ("artist", "song")})
         check(not any("key" in c["target"] for c in seq["cues"]) and js(page, "tl.dirty") and js(page, "tlMetrics().secH") == 18, "never the key; unsaved; sections row")
         check(js(page, "document.getElementById('tlTime').textContent") == "0:00.000 / " + js(page, "tlFmt(tl.seq.duration_ms, true)"), "the time shows this sequence")
         check(js(page, "document.getElementById('songModal').classList.contains('open')") is False, "the song dialog closes")
@@ -651,8 +672,14 @@ def main():
         js(page, row + ".querySelector('input[value=\"hit_chase\"]').click(); " + row + ".querySelector('input[value=\"drift\"]').click(); " +
            row + ".querySelector('input[value=\"hit_chase\"]').click()")
         js(page, row + ".querySelector('.ds-sound').value = 'calm, -warm, Pulse'; dsCount('Breakdown')")
-        js(page, "document.getElementById('dsPalette').value = 'Own colours'; dsPaletteShown(); document.getElementById('dsColours').value = '200/80, 300/70';"
-                 "document.getElementById('dsDesc').value = 'web made'; document.getElementById('dsIntensity').value = 'low'; dsSaveAs('Web Style')")
+        js(page, "document.getElementById('dsPalette').value = 'Own colours'; dsPaletteShown(); document.getElementById('dsColours').value = '200/80,'")
+        check(js(page, "document.getElementById('dsAddColour').style.display") == "", "Add colour... shows with own colours")
+        js(page, "document.getElementById('dsAddColour').click()")
+        check(js(page, "const r = document.querySelector('#pickModal .modal').getBoundingClientRect(); document.getElementById('pickModal').contains(document.elementFromPoint(r.left + r.width / 2, r.top + 20))"),
+              "the wheel shows over the style editor")
+        js(page, "pickSwatch(300, 70); pickClose(true)")
+        check(js(page, "document.getElementById('dsColours').value") == "200/80, 300/70", "a picked colour joins the list: %s" % js(page, "document.getElementById('dsColours').value"))
+        js(page, "document.getElementById('dsDesc').value = 'web made'; document.getElementById('dsIntensity').value = 'low'; dsSaveAs('Web Style')")
         waitFor(page, "document.getElementById('dsStatus').textContent === 'Saved Web Style'", "saved")
         saved = nl.savedDraftStyles.get("Web Style", {})
         check(saved.get("description") == "web made" and saved["intensity"] == "low" and saved["palette"] == [{"hue": 200, "sat": 80}, {"hue": 300, "sat": 70}]
@@ -679,12 +706,35 @@ def main():
             js(page, "pickOpen(0); pickSwatch(225, 100); pickClose(true)")
             check(js(page, "JSON.stringify([sndDraft.palette[0].hue, sndDraft.palette[0].sat])") == "[225,100]", "the palette wheel sets the colour")
 
+    def ownSwatches():
+        ui = nl.neewerlux_ui
+        ui.SWATCH_STORE.replace([])
+        js(page, "swatchesLoad()")
+        waitFor(page, "userSwatches.length === 0 && !!document.querySelector('#hsiSwatches .swatch-add')", "the + button")
+        js(page, "hsiPickSwatch(150, 60); document.querySelector('#hsiSwatches .swatch-add').click()")
+        waitFor(page, "document.querySelectorAll('#hsiSwatches .user-swatch').length === 1", "a saved swatch")
+        check(ui.SWATCH_STORE.items == [{"hue": 150, "sat": 60}], "saved on the server: %s" % ui.SWATCH_STORE.items)
+        ui.SWATCH_STORE.add(20, 90)  # saved on the desktop: the wheel popup picks it up when it opens
+        js(page, "pickOpenWith(0, 100, () => {})")
+        waitFor(page, "document.querySelectorAll('#pickSwatches .user-swatch').length === 2", "the desktop's swatch in the popup")
+        js(page, "document.querySelectorAll('#pickSwatches .user-swatch')[1].click()")
+        check(js(page, "JSON.stringify(pickHS)") == "[20,90]", "a click on your swatch picks it")
+        js(page, "pickClose(false)")
+        page.runJavaScript("window.confirm = () => true")
+        js(page, "document.querySelectorAll('#hsiSwatches .user-swatch')[0].dispatchEvent(new MouseEvent('contextmenu', {bubbles: true, cancelable: true}))")
+        waitFor(page, "userSwatches.length === 1 && document.querySelectorAll('#hsiSwatches .user-swatch').length === 1", "right-click removes one")
+        check(ui.SWATCH_STORE.items == [{"hue": 20, "sat": 90}], "removed on the server: %s" % ui.SWATCH_STORE.items)
+        ui.SWATCH_STORE.replace([])
+        nl._saveSwatches([])
+        js(page, "swatchesLoad()")
+
     for name, fn in [("stage tiles and swatches", stage), ("sequence list", sequenceList),
                      ("play, pause, resume, seek, stop", playPauseSeekStop), ("render", render),
                      ("reload", reload), ("light preferences", lightPrefs), ("global preferences", globalPrefs), ("flash guard setting", flashGuardSetting),
                      ("network settings stay desktop-only", securityPrefsRefused), ("preset editor and menu", presetEditor),
                      ("animation editor, import, duplicate, delete", animationEditor), ("timeline editor", timelineEditor),
-                     ("sound panel", soundPanel), ("draft from a song", songDraft), ("draft styles", draftStyles), ("colour wheel and play brightness", wheelAndBrightness)]:
+                     ("sound panel", soundPanel), ("draft from a song", songDraft), ("draft styles", draftStyles), ("colour wheel and play brightness", wheelAndBrightness),
+                     ("your own swatches", ownSwatches)]:
         step(name, fn)
     if page.errors:
         results.append(("FAIL", "no JavaScript errors", "; ".join(page.errors[:5])))

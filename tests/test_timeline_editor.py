@@ -168,6 +168,16 @@ def main():
         pump(100)
         st = ed.seq["cues"][i]["state"]
         check(st["mode"] == "HSI" and st["hue"] == 222 and st["bri"] == 65 and st["fade_ms"] == 1500, "colour properties: " + str(st))
+        check(not ed.pPick.isHidden(), "the wheel and swatches show for an HSI cue")
+        n = len(ed.undoStack)
+        ed.pPick.swatches.buttons[7].click()  # blue
+        pump(50)
+        st = ed.seq["cues"][i]["state"]
+        check((st["hue"], st["sat"]) == (225, 100) and (ed.pHue.value(), ed.pSat.value()) == (225, 100) and len(ed.undoStack) == n + 1,
+              "a swatch sets the hue and saturation as one edit: %s, %d undo steps" % (st, len(ed.undoStack) - n))
+        ed.undo()
+        pump(50)
+        check(ed.seq["cues"][i]["state"]["hue"] == 222, "one undo takes it back")
         ed.pMode.setCurrentText("CCT")
         pump(50)
         ed.pTemp.setValue(4300)
@@ -387,6 +397,8 @@ def main():
             pump(50)
         check(dlg.draftButton.isEnabled() and abs(dlg.bpmSpin.value() - 128) < 0.3, "analysed: %s" % dlg.infoLabel.text())
         check(dlg.nameEdit.text() == "Test Song" and dlg.view.analysis is not None, "named after the song, drawn")
+        check(dlg.artistEdit.text() == "" and dlg.songEdit.text() == "Test Song", "artist and song from the file name: %r, %r" % (dlg.artistEdit.text(), dlg.songEdit.text()))
+        dlg.artistEdit.setText("Poizen Jam")
         dlg.grab().save(os.path.join(rig.workdir, "song_dialog.png"))
         RESULTS.append(("INFO", "screenshot", os.path.join(rig.workdir, "song_dialog.png")))
         from PySide6.QtTest import QTest
@@ -412,10 +424,13 @@ def main():
         styles.soundEdits["Groove"].setText("calm, -warm, Pulse")
         styles.coloursEdit.setText("bad")
         styles.paletteCombo.setCurrentText(styles.OWN)
+        check(not styles.addColourButton.isHidden(), "Add colour... shows with own colours")
         check(styles.saveAs("Neon Mine") is None and "Colours are" in styles.status.text(), "unreadable colours are reported")
         styles.coloursEdit.setText("190/95, 285/90, 3200K")
         check(not styles.saveAs("Neon Mine")["success"] and "not a mix" in styles.status.text(), "a mix of colours and whites is refused: %s" % styles.status.text())
-        styles.coloursEdit.setText("190/95, 285/90")
+        styles.coloursEdit.setText("190/95,")
+        styles.addColour(285, 90)
+        check(styles.coloursEdit.text() == "190/95, 285/90", "a picked colour is added to the list: %s" % styles.coloursEdit.text())
         r = styles.saveAs("Neon Mine")
         saved = nl.savedDraftStyles.get("Neon Mine", {})
         check(r and r["success"] and saved["palette"] == [{"hue": 190, "sat": 95}, {"hue": 285, "sat": 90}]
@@ -431,6 +446,7 @@ def main():
         pump(200)
         check(ed is not None and ed.seq["tempo"]["bpm"] == round(half, 2) and ed.seq["sections"] and ed.dirty, "the draft opens unsaved in the editor")
         check(ed.seq["name"] == "Test Song" and "Neon" in ed.seq["description"], ed.seq.get("description"))
+        check(ed.seq.get("artist") == "Poizen Jam" and ed.seq.get("song") == "Test Song", "the artist and song go into the draft: %s" % {k: ed.seq.get(k) for k in ("artist", "song")})
         check(not any("key" in c["target"] for c in ed.seq["cues"]), "never the key")
         plain = win.seqOpenEditor(sequence={"format": 1, "name": "No Tempo", "duration_ms": 5000, "cues": []})
         check(ed.snapCombo.currentData() == -1 and plain.snapCombo.currentData() == 100,
