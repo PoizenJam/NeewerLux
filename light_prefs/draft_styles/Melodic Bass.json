@@ -1,0 +1,80 @@
+{
+  "format": 1,
+  "name": "Melodic Bass",
+  "description": "Pastel pink, sky blue, lavender and peach: soaring builds, drops in lively colour rather than hard hits, soft drifts in the breakdowns.",
+  "genres": [
+    "future bass",
+    "melodic bass",
+    "melodic dubstep",
+    "colour bass",
+    "color bass",
+    "wave",
+    "chillstep",
+    "kawaii future bass",
+    "melodic edm"
+  ],
+  "palette": [
+    {
+      "hue": 330,
+      "sat": 55
+    },
+    {
+      "hue": 200,
+      "sat": 55
+    },
+    {
+      "hue": 265,
+      "sat": 45
+    },
+    {
+      "hue": 20,
+      "sat": 50
+    }
+  ],
+  "intensity": "medium",
+  "use_animations": true,
+  "use_sound_modes": true,
+  "sections": {
+    "Intro": {
+      "behaviour": "fade_up"
+    },
+    "Groove": {
+      "behaviour": [
+        "colour_bars",
+        "pulse"
+      ]
+    },
+    "Build": {
+      "behaviour": "build"
+    },
+    "Drop": {
+      "behaviour": [
+        "sound",
+        "colour_bars"
+      ],
+      "sound_modes": {
+        "tags": [
+          "lively"
+        ],
+        "exclude": [
+          "hard"
+        ]
+      }
+    },
+    "Breakdown": {
+      "behaviour": [
+        "drift",
+        "animation"
+      ],
+      "animations": {
+        "tags": [
+          "smooth",
+          "calm"
+        ]
+      }
+    },
+    "Outro": {
+      "behaviour": "fade_down"
+    }
+  }
+}

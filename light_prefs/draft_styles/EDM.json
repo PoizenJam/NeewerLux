@@ -1,0 +1,79 @@
+{
+  "format": 1,
+  "name": "EDM",
+  "description": "Festival mainstage: cold white and electric blue with magenta, long builds into a blackout, drops that hit hard and chase or hand over to intense sound modes.",
+  "genres": [
+    "edm",
+    "electronic",
+    "electronic dance music",
+    "big room",
+    "festival edm",
+    "mainstage",
+    "progressive edm",
+    "electro pop edm",
+    "dance music"
+  ],
+  "palette": [
+    {
+      "hue": 210,
+      "sat": 10
+    },
+    {
+      "hue": 220,
+      "sat": 95
+    },
+    {
+      "hue": 300,
+      "sat": 85
+    },
+    {
+      "hue": 45,
+      "sat": 90
+    }
+  ],
+  "intensity": "high",
+  "use_animations": true,
+  "use_sound_modes": true,
+  "sections": {
+    "Intro": {
+      "behaviour": "fade_up"
+    },
+    "Groove": {
+      "behaviour": [
+        "pulse",
+        "colour_bars"
+      ]
+    },
+    "Build": {
+      "behaviour": "build"
+    },
+    "Drop": {
+      "behaviour": [
+        "hit_chase",
+        "sound"
+      ],
+      "sound_modes": {
+        "tags": [
+          "intense"
+        ]
+      }
+    },
+    "Breakdown": {
+      "behaviour": [
+        "drift",
+        "animation"
+      ],
+      "animations": {
+        "tags": [
+          "smooth"
+        ],
+        "exclude": [
+          "hard"
+        ]
+      }
+    },
+    "Outro": {
+      "behaviour": "fade_down"
+    }
+  }
+}

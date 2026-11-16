@@ -1,0 +1,79 @@
+{
+  "format": 1,
+  "name": "Hardstyle",
+  "description": "Red, white and amber at full intensity: hard pulses in the grooves, hard sound modes and chases on the drops, a quick blackout before each.",
+  "genres": [
+    "hardstyle",
+    "rawstyle",
+    "raw hardstyle",
+    "euphoric hardstyle",
+    "hard dance",
+    "happy hardcore",
+    "uk hardcore",
+    "gabber",
+    "frenchcore",
+    "hardcore techno",
+    "jumpstyle"
+  ],
+  "palette": [
+    {
+      "hue": 0,
+      "sat": 90
+    },
+    {
+      "hue": 210,
+      "sat": 5
+    },
+    {
+      "hue": 30,
+      "sat": 95
+    },
+    {
+      "hue": 350,
+      "sat": 70
+    }
+  ],
+  "intensity": "high",
+  "use_animations": true,
+  "use_sound_modes": true,
+  "sections": {
+    "Intro": {
+      "behaviour": "fade_up"
+    },
+    "Groove": {
+      "behaviour": [
+        "pulse",
+        "sound"
+      ],
+      "sound_modes": {
+        "tags": [
+          "hard"
+        ]
+      }
+    },
+    "Build": {
+      "behaviour": "build"
+    },
+    "Drop": {
+      "behaviour": [
+        "hit_chase",
+        "sound"
+      ],
+      "sound_modes": {
+        "tags": [
+          "intense",
+          "hard"
+        ]
+      }
+    },
+    "Breakdown": {
+      "behaviour": [
+        "drift",
+        "colour_bars"
+      ]
+    },
+    "Outro": {
+      "behaviour": "fade_down"
+    }
+  }
+}

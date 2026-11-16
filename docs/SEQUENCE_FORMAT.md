@@ -332,7 +332,7 @@ The draft drives `@fill`, `@rim`, `@background` and `@practical` (only the roles
 
 A kind can list several behaviours: sections of that kind take them in turn, while a part that repeats (the same `group`) plays the same behaviour, colours and pool pick each time, so the song gets variety without the chorus changing look every time it returns. Brightness follows the song's energy bar by bar between the style's intensity limits (from the analysis's energy curve and the section's level). Pulses and chase steps never come faster than twice a second per light, animations are only drawn if they stay at or under 2 flashes a second at their speed (firmware scenes never), and sound modes keep themselves to 2; the tests draft every shipped style at 60 to 200 BPM and check every light stays at or under 2.5 (handing over between sections adds a little), with the flash guard's 3 as the backstop.
 
-Styles are JSON files in `light_prefs/draft_styles/`, edited with **Styles...** in the From song dialog (desktop and dashboard) or over HTTP (`draft_styles`, `save_draft_style`, `delete_draft_style`). 26 ship: Subtle, Concert and Neon; Rock, Prog Rock, Metal, Punk, Pop, Ballad, Folk, Jazz, Classical, Hip Hop, Disco Funk; House, Techno, Trance, Drum and Bass, Dubstep, Synthwave, Ambient, Lo-fi; and for streams that aren't music, Just Chatting, Cozy, Horror and Hype. The format:
+Styles are JSON files in `light_prefs/draft_styles/`, edited with **Styles...** in the From song dialog (desktop and dashboard) or over HTTP (`draft_styles`, `save_draft_style`, `delete_draft_style`). 31 ship: Subtle, Concert and Neon; Rock, Prog Rock, Metal, Punk, Pop, Ballad, Folk, Jazz, Classical, Hip Hop, Disco Funk; EDM, House, Techno, Trance, Hardstyle, UK Garage, Drum and Bass, Dubstep, Melodic Bass, Electronica, Synthwave, Ambient, Lo-fi; and for streams that aren't music, Just Chatting, Cozy, Horror and Hype. The format:
 
 ```json
 {
@@ -357,7 +357,7 @@ Styles are JSON files in `light_prefs/draft_styles/`, edited with **Styles...** 
 | `format` | no | 1 |
 | `name` | yes | The style's name. |
 | `description` | no | Shown under the style's name. |
-| `genres` | no | Genres it suits, matched by Pick and `style_for` (exact names count most, then one containing the other, then shared words; the word "music" is ignored, so `electronic music` matches `electronic`). Generic electronic genres (`electronic`, `edm`, `dance`) pick House. |
+| `genres` | no | Genres it suits, matched by Pick and `style_for` (exact names count most, then one containing the other, then shared words; the word "music" is ignored, so `electronic music` matches `electronic`). Generic electronic genres (`electronic`, `edm`, `big room`) pick EDM; `dance` picks House. |
 | `palette` | yes | The name of a saved palette (`light_prefs/palettes/`), or a list of colours: all `{"hue", "sat"}` or all `{"temp"}` in Kelvin (3200 to 8500 in a sequence). Each section takes the next colours round it; the fill gets a pale version. |
 | `intensity` | no | `low`, `medium` (default) or `high`: how bright the colour lights get (rim at most 45, 75 or 100%). |
 | `use_animations`, `use_sound_modes` | no | `true` (default) or `false`: whether `animation` and `sound` behaviours may be used. When one can't (turned off, or nothing in its pool qualifies), the section takes the kind's other behaviours, or its default. |

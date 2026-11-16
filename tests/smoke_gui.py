@@ -56,6 +56,24 @@ def checkWorkerUsesGuiThread(nl, app, win):
     print("worker to GUI on signals: PASS")
 
 
+def checkWriteErrorKeepsWorker(nl, app, win):
+    """A send that fails outside the per-light write (here a selection naming a light that has
+    gone) leaves the worker idle and alive. It used to set threadAction to False (the CLI's
+    error result), and the worker's next loop died on False.startswith."""
+    worker = [t for t in __import__("threading").enumerate() if t.name == "workerThread"]
+    realSnapshot = win.selectionSnapshot
+    win.selectionSnapshot = lambda: [99]
+    try:
+        nl.threadAction = "send"
+        pumpUntil(app, lambda: nl.threadAction != "send", 10, "the send to finish")
+        time.sleep(0.3)
+        assert nl.threadAction == "" and all(t.is_alive() for t in worker), \
+            "after a failed send the worker is idle and alive: %r, alive %s" % (nl.threadAction, [t.is_alive() for t in worker])
+    finally:
+        win.selectionSnapshot = realSnapshot
+    print("failed send keeps the worker: PASS")
+
+
 SMALL_SCREEN = (1280, 720)  # every window must fit a screen this size
 
 
@@ -232,6 +250,12 @@ def checkOwnSwatches(nl, app, win):
     from neewerlux_ui import SWATCH_STORE, ColourPickDialog
     from neewerlux_anim_editor import AnimationEditorDialog
     SWATCH_STORE.replace([])
+    # measured on the HSI tab, where the swatches' layout counts towards the window's minimum
+    tabs = win.ColorModeTabWidget
+    lastTab = tabs.currentIndex()
+    tabs.setCurrentWidget(win.HSI)
+    app.processEvents()
+    emptySize = win.minimumSizeHint()
     dlg = ColourPickDialog(30, 80, win)
     for slider, v in ((win.Slider_HSI_1_H, 200), (win.Slider_HSI_2_S, 40)):
         slider.blockSignals(True)  # no send to the lights: only the + button is under test
@@ -262,7 +286,11 @@ def checkOwnSwatches(nl, app, win):
     assert rows.buttons[0].height() == 22 and ed._pickRow.scroll.height() >= 2 * 22 + rows.grid.verticalSpacing(), "two full rows show"
     assert ed._pickRow.scroll.height() == ed._pickRow.scroll.maximumHeight() and ed._pickRow.sizeHint().height() <= 50, \
         "a full set of swatches scrolls in the editor rather than growing it"
+    app.processEvents()
+    assert win.minimumSizeHint() == emptySize, "a full set of swatches doesn't change the main window's minimum: %s, was %s" % (
+        win.minimumSizeHint(), emptySize)
     assert not tooBig(win), "the main window still fits %dx%d with a full set of swatches: %s" % (SMALL_SCREEN + (tooBig(win),))
+    tabs.setCurrentIndex(lastTab)
     b = win.hsiSwatches.buttons[0]
     assert (b.height(), win.hsiSwatches.addButton.height()) == (22, 22), \
         "the theme doesn't stretch the swatches or hide the +: %s" % ((b.height(), win.hsiSwatches.addButton.height()),)
@@ -324,6 +352,7 @@ def main():
     win.updateLights()
     app.processEvents()
     checkWorkerUsesGuiThread(nl, app, win)
+    checkWriteErrorKeepsWorker(nl, app, win)
     checkSoundTab(nl, app, win, rig)
     checkFlashRates(nl, app, win)
     checkColourAndPresetFade(nl, app, win)

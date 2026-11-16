@@ -6276,11 +6276,11 @@ async def writeToLight(selectedLights=0, updateGUI=True, useGlobalValue=True, fr
             if updateGUI == True:
                 selectedLights = mainWindow.selectionSnapshot() # re-acquire the current list of selected lights
     except Exception as e:
-        printDebugString("There was an error communicating with light " + str(selectedLights[a] + 1) + " [" + availableLights[selectedLights[a]][0].name + "] " + returnMACname() + " " + availableLights[selectedLights[a]][0].address)
-        print(e)
+        # the light itself may be the failure (gone from the list after a rescan), so don't look it up again here
+        printDebugString("There was an error sending to the lights: " + repr(e))
 
-        if updateGUI == True:
-            returnValue = False # there was an error writing to this light, so return false to the CLI
+        if updateGUI == False:
+            returnValue = False # the CLI's error result; the GUI worker needs "" to go back to waiting
 
     if updateGUI == True:
         if threadAction != "quit": # if we've been asked to quit somewhere else in the program

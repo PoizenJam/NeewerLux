@@ -469,13 +469,17 @@ class SwatchStore:
 SWATCH_STORE = SwatchStore()
 
 
+SWATCH_QSS_SIZE = "min-width: 24px; max-width: 24px; min-height: 20px; max-height: 20px;"
+
+
 def _swatchButton(hue, sat, tip):
     b = QPushButton()
     b.setFixedSize(26, 22)
     b.setToolTip(tip)
-    # min-height 0: the theme's button min-height would otherwise stretch it past the fixed size
-    b.setStyleSheet("QPushButton { background: %s; border: 1px solid #666; border-radius: 3px; padding: 0px; min-height: 0px; }"
-                    % QColor.fromHsv(hue % 360, int(sat * 2.55), 255).name())
+    # sizes in the style sheet (content box: 24 x 20 inside a 1 px border = 26 x 22): the theme's
+    # min-height would stretch the button, and a style sheet size overrides setFixedSize
+    b.setStyleSheet("QPushButton { background: %s; border: 1px solid #666; border-radius: 3px; padding: 0px; %s }"
+                    % (QColor.fromHsv(hue % 360, int(sat * 2.55), 255).name(), SWATCH_QSS_SIZE))
     return b
 
 
@@ -525,8 +529,8 @@ class ColourSwatches(QWidget):
             self.addButton = QPushButton("+")
             self.addButton.setFixedSize(26, 22)
             # dashed and empty-looking would read as a transparent swatch: a bold + on the theme's button colour
-            self.addButton.setStyleSheet("QPushButton { padding: 0px; min-height: 0px; border: 1px dashed #888; border-radius: 3px;"
-                                         " font-weight: bold; font-size: 15px; }")
+            self.addButton.setStyleSheet("QPushButton { padding: 0px; border: 1px dashed #888; border-radius: 3px;"
+                                         " font-weight: bold; font-size: 15px; " + SWATCH_QSS_SIZE + " }")
             self.addButton.setToolTip("Save the current colour as a swatch (up to %d of your own)" % SwatchStore.LIMIT)
             self.addButton.clicked.connect(lambda: SWATCH_STORE.add(*self.current()))
             self.grid.addWidget(self.addButton, n // self.columns, n % self.columns)
@@ -536,6 +540,20 @@ class ColourSwatches(QWidget):
         act = menu.addAction("Remove this swatch")
         act.triggered.connect(lambda: SWATCH_STORE.remove(index))
         _exec(menu, button.mapToGlobal(button.rect().bottomLeft()))
+
+
+def swatchScroll(swatches, rows):
+    """swatches in a scroll area showing rows rows at a time, so saving swatches never changes the
+    size of the window around them (it would push a window past 1280 x 720)."""
+    area = QScrollArea()
+    area.setFrameShape(QFrame.NoFrame)
+    area.setWidgetResizable(True)
+    area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+    area.setWidget(swatches)
+    bar = area.verticalScrollBar().sizeHint().width()
+    columns = swatches.columns
+    area.setFixedSize(columns * 26 + (columns - 1) * 3 + bar + 2, rows * 22 + (rows - 1) * 3)
+    return area
 
 
 class ColourPickRow(QWidget):
@@ -554,13 +572,7 @@ class ColourPickRow(QWidget):
         lay.addWidget(self.wheelButton, 0, Qt.AlignTop)
         self.swatches = ColourSwatches(columns, current=get)
         self.swatches.picked.connect(lambda h, sa: self.set(h, sa))
-        self.scroll = QScrollArea()
-        self.scroll.setFrameShape(QFrame.NoFrame)
-        self.scroll.setWidgetResizable(True)
-        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.scroll.setWidget(self.swatches)
-        bar = self.scroll.verticalScrollBar().sizeHint().width()
-        self.scroll.setFixedSize(columns * 26 + (columns - 1) * 3 + bar + 2, rows * 22 + (rows - 1) * 3)
+        self.scroll = swatchScroll(self.swatches, rows)
         lay.addWidget(self.scroll, 0, Qt.AlignTop)
         lay.addStretch(1)
 
@@ -582,7 +594,7 @@ class ColourPickDialog(QDialog):
         lay.addWidget(self.wheel, 0, Qt.AlignHCenter)
         self.swatches = ColourSwatches(current=lambda: (self.wheel.hue, self.wheel.sat))
         self.swatches.picked.connect(self.wheel.setHueSat)
-        lay.addWidget(self.swatches, 0, Qt.AlignHCenter)
+        lay.addWidget(swatchScroll(self.swatches, 4), 0, Qt.AlignHCenter)
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
@@ -1080,7 +1092,9 @@ class Ui_MainWindow(object):
         self.hsiWheel.setHueSat(self.Slider_HSI_1_H.value(), self.Slider_HSI_2_S.value())
         self.hsiSwatches = ColourSwatches(current=lambda: (self.Slider_HSI_1_H.value(), self.Slider_HSI_2_S.value()))
         pickRow.addWidget(self.hsiWheel)
-        pickRow.addWidget(self.hsiSwatches, 0, Qt.AlignVCenter)
+        # four rows: the 12 ready colours and a row and a half of yours before it scrolls
+        self.hsiSwatchScroll = swatchScroll(self.hsiSwatches, 4)
+        pickRow.addWidget(self.hsiSwatchScroll, 0, Qt.AlignVCenter)
         pickRow.addStretch(1)
         hsiLay.addLayout(pickRow)
         # the wheel and swatches set the sliders (which send as they always do); the sliders move the wheel's marker

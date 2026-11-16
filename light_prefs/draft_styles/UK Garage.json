@@ -1,0 +1,68 @@
+{
+  "format": 1,
+  "name": "UK Garage",
+  "description": "Gold, teal and magenta with a swing: the rim pulses on the beat, punchy sound modes in the grooves, chases on the drops.",
+  "genres": [
+    "uk garage",
+    "garage",
+    "2-step",
+    "2 step",
+    "speed garage",
+    "bassline",
+    "uk funky",
+    "future garage",
+    "uk bass"
+  ],
+  "palette": [
+    {
+      "hue": 45,
+      "sat": 85
+    },
+    {
+      "hue": 175,
+      "sat": 80
+    },
+    {
+      "hue": 315,
+      "sat": 80
+    },
+    {
+      "hue": 200,
+      "sat": 40
+    }
+  ],
+  "intensity": "medium",
+  "use_animations": true,
+  "use_sound_modes": true,
+  "sections": {
+    "Intro": {
+      "behaviour": "fade_up"
+    },
+    "Groove": {
+      "behaviour": [
+        "pulse",
+        "sound"
+      ],
+      "sound_modes": {
+        "tags": [
+          "punchy"
+        ]
+      }
+    },
+    "Build": {
+      "behaviour": "build"
+    },
+    "Drop": {
+      "behaviour": [
+        "hit_chase",
+        "colour_bars"
+      ]
+    },
+    "Breakdown": {
+      "behaviour": "drift"
+    },
+    "Outro": {
+      "behaviour": "fade_down"
+    }
+  }
+}

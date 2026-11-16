@@ -1,0 +1,91 @@
+{
+  "format": 1,
+  "name": "Electronica",
+  "description": "Teal, lime, violet and orange that keep shifting: colour on the bar, lively sound modes and colourful animations, never a hard strobe.",
+  "genres": [
+    "electronica",
+    "idm",
+    "intelligent dance music",
+    "glitch",
+    "leftfield",
+    "braindance",
+    "experimental electronic",
+    "folktronica",
+    "indietronica",
+    "microhouse"
+  ],
+  "palette": [
+    {
+      "hue": 175,
+      "sat": 80
+    },
+    {
+      "hue": 90,
+      "sat": 75
+    },
+    {
+      "hue": 270,
+      "sat": 70
+    },
+    {
+      "hue": 25,
+      "sat": 85
+    }
+  ],
+  "intensity": "medium",
+  "use_animations": true,
+  "use_sound_modes": true,
+  "sections": {
+    "Intro": {
+      "behaviour": "fade_up"
+    },
+    "Groove": {
+      "behaviour": [
+        "colour_bars",
+        "sound"
+      ],
+      "sound_modes": {
+        "tags": [
+          "lively"
+        ],
+        "exclude": [
+          "hard"
+        ]
+      }
+    },
+    "Build": {
+      "behaviour": "build"
+    },
+    "Drop": {
+      "behaviour": [
+        "colour_bars",
+        "animation"
+      ],
+      "animations": {
+        "tags": [
+          "colourful"
+        ],
+        "exclude": [
+          "hard"
+        ]
+      }
+    },
+    "Breakdown": {
+      "behaviour": [
+        "drift",
+        "animation"
+      ],
+      "animations": {
+        "tags": [
+          "smooth"
+        ],
+        "exclude": [
+          "hard"
+        ]
+      }
+    },
+    "Outro": {
+      "behaviour": "fade_down"
+    }
+  }
+}
