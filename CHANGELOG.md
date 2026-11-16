@@ -2,6 +2,11 @@
 
 Changes relative to upstream [NeewerLite-Python v0.12d](https://github.com/taburineagle/NeewerLite-Python).
 
+## v1.4.1
+
+### Added
+- **`tests/beat_score.py` scores the live beat tracker** that sound modes follow against known beats: when it locks on, how many beats it hits, how many it fires off the beat, how late it fires them, and how often it reads the right tempo or a related one (double, half, 3/2, 2/3, 4/3, 3/4). Synthetic cases cover off-beat bass, dotted-eighth riffs, tempo ramps and jumps, a long breakdown with no drums, half-time, 2-step, drum rolls, a quiet patch and a sparse intro. `--song` scores any song with a steady tempo against its own whole-song analysis.
+
 ## v1.4.0 - 2026-11-16
 
 ### Added

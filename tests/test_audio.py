@@ -685,10 +685,39 @@ def t_songFiles():
     check(au.songAvailable() == (True, ""), "song import available here")
 
 
+def t_beatScorer():
+    """tests/beat_score.py scores what it should: beats fired on the true grid score 100% with
+    nothing false, beats fired half a beat late score nothing and are all false, and its song
+    mode takes the reference grid from the song analysis."""
+    import beat_score
+    _, truth = beat_score.render(beat_score.CASES["clicks120"])
+    def fake(times):
+        out, n = [], 0
+        for k in range(int(truth[-1][0] / 0.01) + 50):
+            t = k * 0.01
+            while n < len(times) and times[n] <= t:
+                n += 1
+            out.append({"t": t, "beat": n, "bpm": 120.0})
+        return out
+    exact = beat_score.score(fake([b[0] for b in truth]), truth)
+    check(exact["hit"] == 1.0 and exact["false_per_min"] == 0 and exact["tempo_ok"] == 1.0, "on the grid: %s" % exact)
+    check(abs(exact["lock_s"] - truth[3][0]) < 1e-9, "locked on the 4th beat: %s" % exact["lock_s"])
+    late = beat_score.score(fake([b[0] + 0.25 for b in truth]), truth)
+    check(late["lock_s"] is None and late["false_per_min"] > 100, "half a beat late: %s" % late)
+    import tempfile
+    import soundfile
+    x, sr, _ = _syntheticSong(plan=(("chorus", 16),))
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "steady.wav")
+        soundfile.write(path, x, sr)
+        song = beat_score.runSong(path)
+    check(abs(song["reference_bpm"] - 126.0) < 0.3, "song reference tempo %s" % song["reference_bpm"])
+
+
 TESTS = [t_tempoOfClickTracks, t_tempoOfDrumPattern, t_tempoChange, t_bandsAndCentroid, t_silenceAndGaps,
          t_levelIsRelative, t_shippedModesValid, t_shippedModesUnderFlashLimit, t_modesMoveWithTheMusic,
          t_modesAimAtRoles, t_beatChase, t_hardModesSnap, t_beatBlinkPaced, t_brightnessCurve, t_warmGlowIsWhiteOnly, t_silenceSettlesAtTheFloor, t_modeValidation,
-         t_docExamplesValidate, t_colourCycle, t_voices, t_retryNow, t_silenceMeansFloor, t_songAnalysis, t_songRiser, t_externalSections, t_songFiles]
+         t_docExamplesValidate, t_colourCycle, t_voices, t_retryNow, t_silenceMeansFloor, t_songAnalysis, t_songRiser, t_externalSections, t_songFiles, t_beatScorer]
 
 
 def main():

@@ -121,7 +121,7 @@ Lights following live audio ([SOUND_MODES.md](SOUND_MODES.md)). They play on the
 ```json
 {
   "apiVersion": 2,
-  "version": "1.4.0",
+  "version": "1.4.1",
   "lights": [
     {
       "id": 1, "name": "Key", "mac": "AA:BB:CC:DD:EE:FF", "model": "NEEWER-RGB660 PRO",
