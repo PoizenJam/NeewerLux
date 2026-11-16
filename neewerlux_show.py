@@ -915,6 +915,20 @@ class SequencePlayer:
                 "position_ms": int(self.position(nowMs)), "duration_ms": int(self.seq.duration)}
 
 
+def syntheticSoundFeatures(tMs, bpm=120.0, offsetMs=0):
+    """Sound analysis for a song that isn't there: a steady four-on-the-floor beat at bpm (kick
+    on every beat, hi-hat between), so previews and renders can show what a sound cue's mode
+    does. Same keys as the live analysis."""
+    period = 60000.0 / (bpm or 120.0)
+    pos = (tMs - offsetMs) / period
+    beat = int(math.floor(pos)) if pos >= 0 else -1
+    phase = pos - math.floor(pos)
+    kick = math.exp(-phase * 7.0)
+    hat = math.exp(-abs(phase - 0.5) * 14.0)
+    return {"level": 0.45 + 0.45 * kick, "low": 0.15 + 0.8 * kick, "mid": 0.4 + 0.15 * kick, "high": 0.2 + 0.6 * hat,
+            "centroid": 0.35 + 0.3 * hat, "silent": False, "beat": beat, "bpm": float(bpm or 120.0)}
+
+
 def animationFlashRate(anim, speed=1.0):
     """An animation's worst flashes in any second, played on its own at speed (looped, as
     the Animations tab plays it): {"flashes", "red"}, the worst over its lights, before the

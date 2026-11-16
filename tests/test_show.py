@@ -1663,6 +1663,8 @@ def t_soundCues(rig):
     sources = {c[4] for c in rim if 700 <= c[0] < 2500}
     check(r["success"] and "sound" in {c[4] for c in rim} and any(c["kind"] == "sound" and c["what"] == "sound: Kick Blink" for c in r["cues"]),
           "a render marks the sound cue's light: %s %s" % (sources, r["cues"]))
+    shown = {c[1] for c in rim if 700 <= c[0] < 2500}
+    check(len(shown) >= 2, "and shows the mode reacting to a beat (renders and editor previews animate): %s" % shown)
     if _needsNumpy(rig):
         return
     _soundSignal(nl)

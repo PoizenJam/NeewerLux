@@ -454,18 +454,28 @@ def main():
         if isinstance(w, SequenceEditor):
             assert not tooBig(w), "the sequence editor fits a small screen: %s" % (tooBig(w),)
             column = w.stage.parentWidget()
+            scales = []
             for size, name in (((1100, 700), "editor_small.png"), ((1600, 1250), "editor_tall.png")):
                 w.resize(*size)
                 w.show()
                 app.processEvents()
                 app.processEvents()
                 spare = column.height() - w.stage.geometry().bottom()
-                assert spare < 40, "%dx%d: the preview fills the height the tracks leave (%d px spare)" % (size + (spare,))
+                assert spare < 40, "%dx%d: the preview fills its part of the column (%d px spare)" % (size + (spare,))
+                scales.append(w.stage._scale())
                 w.grab().save(os.path.join(rig.workdir, name))
-            assert w.stage._scale() > 1.0, "in a tall window the preview grows past full size: %.2f" % w.stage._scale()
+            assert scales[1] > scales[0] + 0.2, "the preview grows with the window: %s" % scales
             w.resize(1100, 700)
             app.processEvents()
-            assert w.stage._scale() < 1.0, "in a short one it shrinks: %.2f" % w.stage._scale()
+            propsArea = w.props.parentWidget().parentWidget()
+            assert propsArea.viewport().width() >= w.props.minimumSizeHint().width(), \
+                "the properties panel is never narrower than its fields: %d < %d" % (propsArea.viewport().width(), w.props.minimumSizeHint().width())
+            w.resize(1600, 1250)
+            app.processEvents()
+            before, sizes = w.stage.height(), w.vSplit.sizes()
+            w.vSplit.setSizes([sizes[0] + 80, sizes[1] - 80])
+            app.processEvents()
+            assert w.stage.height() < before - 40, "the divider between tracks and preview moves: %d then %d" % (before, w.stage.height())
             native.extend(nativeSpins(w))
             native.extend(nativeSpins(w._tempoDialog()))
             w.close()

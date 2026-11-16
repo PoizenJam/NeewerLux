@@ -30,10 +30,10 @@ def main():
     app = nl.QApplication.instance() or nl.QApplication([])
     try:
         from PySide6.QtTest import QTest
-        from PySide6.QtCore import QPoint, Qt
+        from PySide6.QtCore import QPoint, QPointF, Qt
     except ImportError:
         from PySide2.QtTest import QTest
-        from PySide2.QtCore import QPoint, Qt
+        from PySide2.QtCore import QPoint, QPointF, Qt
     import neewerlux_timeline as tl
     win = nl.MainWindow()
     nl.mainWindow = win
@@ -128,6 +128,34 @@ def main():
         ed.redo()
         pump(100)
         check(ed.seq["cues"][i]["at_ms"] == 27000, "redo moves it again")
+
+    def marqueeSelect():
+        """Dragging over empty track space draws a box that selects every cue it touches; Delete
+        removes them together and undo brings them back."""
+        ed = state["ed"]
+        v = ed.view
+        i = state["new"]
+        fm, rowH, rulerH, labelW = v.metrics()
+        ed.setSelection([])
+        x0, y0 = labelW + 2, int(rulerH + 2)
+        x1, y1 = int(v.xFor(28000)), int(rulerH + rowH * 1.9)
+        start = next((QPoint(x0 + k, y0) for k in range(0, 200, 4) if v.hitAt(QPointF(x0 + k, y0)) is None), QPoint(x0, y0))
+        QTest.mousePress(v, Qt.LeftButton, Qt.NoModifier, start)
+        for k in range(1, 7):
+            QTest.mouseMove(v, QPoint(start.x() + (x1 - start.x()) * k // 6, y0 + (y1 - y0) * k // 6))
+            pump(10)
+        QTest.mouseRelease(v, Qt.LeftButton, Qt.NoModifier, QPoint(x1, y1))
+        pump(80)
+        sel = list(ed.selection)
+        check(i in sel and len(sel) >= 2, "the box selects the cues it touches: %s" % sel)
+        n = len(ed.seq["cues"])
+        v.setFocus()
+        QTest.keyClick(v, Qt.Key_Delete)
+        pump(80)
+        check(len(ed.seq["cues"]) == n - len(sel), "Delete removes them all: %d of %d left" % (len(ed.seq["cues"]), n))
+        ed.undo()
+        pump(80)
+        check(len(ed.seq["cues"]) == n and ed.seq["cues"][i]["at_ms"] == 27000, "undo brings them back")
 
     def propertiesEdit():
         ed = state["ed"]
@@ -397,7 +425,7 @@ def main():
         dlg.close()
 
     for name, fn in [("model helpers", modelHelpers), ("opens on a saved sequence", opens), ("double-click adds a cue", doubleClickAdds),
-                     ("drag moves a cue", dragMoves), ("undo and redo", undoRedo), ("properties panel", propertiesEdit),
+                     ("drag moves a cue", dragMoves), ("undo and redo", undoRedo), ("drag a box to select", marqueeSelect), ("properties panel", propertiesEdit),
                      ("drag a clip's end", resizeEnd), ("copy, paste, delete", copyPasteDelete), ("stage preview", renderAndPreview),
                      ("save and rename", saveAndRename), ("screen-only preview", playPreviewOnly), ("send to lights", playToLights),
                      ("panel New/Duplicate/Delete", panelButtons), ("unmatched cues track", unmatchedTrack),

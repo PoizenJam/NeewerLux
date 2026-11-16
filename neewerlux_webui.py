@@ -2546,6 +2546,13 @@ function tlDraw() {
     ctx.fillStyle = '#22222a'; ctx.fillRect(0, 0, labelW, rulerH);
     ctx.fillStyle = '#9696a0'; ctx.fillText(tlFmt(dur, true), 8, secH + (rulerH - secH) / 2);
     if (secH) ctx.fillText('Sections', 8, secH / 2);
+    if (tl.drag && tl.drag.kind === 'marquee') {
+        const d = tl.drag;
+        ctx.fillStyle = 'rgba(120,170,255,.16)'; ctx.strokeStyle = 'rgba(120,170,255,.9)'; ctx.setLineDash([4, 3]);
+        ctx.fillRect(Math.min(d.x0, d.x1), Math.min(d.y0, d.y1), Math.abs(d.x1 - d.x0), Math.abs(d.y1 - d.y0));
+        ctx.strokeRect(Math.min(d.x0, d.x1), Math.min(d.y0, d.y1), Math.abs(d.x1 - d.x0), Math.abs(d.y1 - d.y0));
+        ctx.setLineDash([]);
+    }
     const xp = tlX(tl.playhead);
     if (xp >= labelW && xp <= W) {
         ctx.fillStyle = '#ff5050'; ctx.fillRect(xp - 1, 0, 2, H);
@@ -2642,7 +2649,8 @@ function tlSetSel(sel) {
         const multi = ev.ctrlKey || ev.metaKey || ev.shiftKey;
         if (!hit) {
             if (!multi) tlSetSel([]);
-            if (x >= m.labelW && row != null) tlSetPlayhead(tlMs(x));
+            // a click moves the playhead; a drag draws a box that selects the cues it touches
+            if (x >= m.labelW && row != null) tl.drag = {kind: 'marquee', x0: x, y0: y, x1: x, y1: y, base: multi ? tl.sel.slice() : [], at: tlMs(x)};
             return;
         }
         if (multi) { const s = tl.sel.slice(), k = s.indexOf(hit.i); if (k >= 0) s.splice(k, 1); else s.push(hit.i); tlSetSel(s); }
@@ -2670,6 +2678,13 @@ function tlSetSel(sel) {
             return;
         }
         if (d.kind === 'scrub') { tlSetPlayhead(tlMs(x)); return; }
+        if (d.kind === 'marquee') {
+            d.x1 = x; d.y1 = y;
+            const L = Math.min(d.x0, x), R = Math.max(d.x0, x), T = Math.min(d.y0, y), B = Math.max(d.y0, y);
+            const touched = tl.hits.filter(h => (h[5] === 'body' || h[5] === 'tail') && h[0] < R && h[0] + h[2] > L && h[1] < B && h[1] + h[3] > T).map(h => h[4]);
+            tlSetSel(d.base.concat([...new Set(touched)].filter(i => !d.base.includes(i))));
+            return;
+        }
         const dms = (x - d.x0) * 1000 / tl.pxPerSec;
         if (!d.moved) { if (Math.abs(x - d.x0) < 3) return; tlPushUndo(); d.moved = true; }
         const cues = tl.seq.cues, [aAt, aDur, aFade] = d.orig[d.cue];
@@ -2686,8 +2701,13 @@ function tlSetSel(sel) {
     });
     window.addEventListener('mouseup', () => {
         if (!tl || !tl.drag) return;
-        const moved = tl.drag.moved;
+        const d = tl.drag, moved = d.moved;
         tl.drag = null;
+        if (d.kind === 'marquee') {
+            if (Math.abs(d.x1 - d.x0) < 3 && Math.abs(d.y1 - d.y0) < 3) tlSetPlayhead(d.at);  // just a click
+            tlDraw();
+            return;
+        }
         if (moved) { tlChanged(); tlProps(); }
     });
     cv.addEventListener('dblclick', ev => {

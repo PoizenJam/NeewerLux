@@ -127,9 +127,11 @@ on the sound device chosen for sound modes, and stops listening when it ends (un
 sound mode is playing). The mode keeps itself under 2 flashes a second, and the flash
 guard still applies.
 
-A render can't hear the song, so a sound cue renders as a steady middle level in the
-mode's colours, marked `"sound"` as its source (hatched in the render image and in the
-timeline editors).
+A render can't hear the song, so in renders (and the timeline editors' previews, which
+come from a render) a sound cue's mode reacts to a steady beat instead: a kick on every beat
+and a hi-hat between, at the sequence's `tempo` (120 BPM without one). Its lights are
+marked `"sound"` as their source and hatched in the render image and the editors, since
+the real show follows whatever is playing.
 
 ### Which cue wins
 

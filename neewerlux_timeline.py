@@ -34,16 +34,7 @@ except ImportError:
                                    QSplitter, QStackedWidget, QMessageBox, QMenu, QDialog, QDialogButtonBox,
                                    QInputDialog, QSizePolicy, QFrame, QTextEdit, QShortcut, QFileDialog, QScrollArea)
 
-class _FillColumn(QWidget):
-    """A scrolled column that takes the scroll area's height. A wrapping label inside gives its
-    layout a height-for-width, and the scroll area sizes such a widget by heightForWidth, which
-    would be the column's preferred height, leaving nothing over for the part that stretches;
-    answering with the minimum lets the scroll area fill the view instead."""
-
-    def heightForWidth(self, width):
-        return self.minimumSizeHint().height()
-
-
+PROPS_START_W = 330          # the sequence editor's properties panel width when it opens
 SOUND_CUE_DEFAULT_MS = 8000  # a new sound cue's length
 SNAP_CHOICES = [("No snap", 0), ("10 ms", 10), ("50 ms", 50), ("100 ms", 100), ("250 ms", 250),
                 ("500 ms", 500), ("1 s", 1000), ("Beat", -1), ("Half beat", -2), ("Bar (4 beats)", -4)]
@@ -483,6 +474,11 @@ class TimelineView(QWidget):
             p.drawLine(QPointF(xp, 0), QPointF(xp, H))
             p.setBrush(QColor(255, 80, 80))
             p.drawPolygon(QPolygonF([QPointF(xp - 6, 0), QPointF(xp + 6, 0), QPointF(xp, 8)]))
+        d = self._drag
+        if d is not None and d["kind"] == "marquee":
+            p.setPen(QPen(QColor(120, 170, 255), 1, Qt.DashLine))
+            p.setBrush(QColor(120, 170, 255, 40))
+            p.drawRect(QRectF(d["start"], d["end"]).normalized())
 
     # --- interaction ------------------------------------------------------
     def hitAt(self, pos):
@@ -519,10 +515,13 @@ class TimelineView(QWidget):
         hit = self.hitAt(pos)
         mods = event.modifiers()
         if hit is None:
-            if not (mods & (Qt.ControlModifier | Qt.ShiftModifier)):
+            keep = bool(mods & (Qt.ControlModifier | Qt.ShiftModifier))
+            if not keep:
                 ed.setSelection([])
             if pos.x() >= labelW and row is not None:
-                ed.setPlayhead(self.msFor(pos.x()))
+                # a click moves the playhead; a drag draws a box that selects the cues it touches
+                self._drag = {"kind": "marquee", "start": pos, "end": pos, "base": list(ed.selection) if keep else [],
+                              "at": self.msFor(pos.x())}
             return
         i, kind, row = hit
         if mods & (Qt.ControlModifier | Qt.ShiftModifier):
@@ -569,6 +568,13 @@ class TimelineView(QWidget):
         if d["kind"] == "scrub":
             ed.setPlayhead(self.msFor(pos.x()))
             return
+        if d["kind"] == "marquee":
+            d["end"] = pos
+            box = QRectF(d["start"], pos).normalized()
+            touched = [i for rect, i, kind, row in self._hits if kind in ("body", "tail") and rect.intersects(box)]
+            ed.setSelection(d["base"] + [i for i in dict.fromkeys(touched) if i not in d["base"]])
+            self.update()
+            return
         dms = (pos.x() - d["x0"]) * 1000.0 / self.pxPerSec
         if not d["moved"]:
             if abs(pos.x() - d["x0"]) < 3:
@@ -593,8 +599,13 @@ class TimelineView(QWidget):
         ed.changed(live=True)
 
     def mouseReleaseEvent(self, event):
-        if self._drag is not None and self._drag.get("moved"):
+        d = self._drag
+        if d is not None and d.get("moved"):
             self.editor.changed()
+        if d is not None and d["kind"] == "marquee":
+            if abs(d["end"].x() - d["start"].x()) < 3 and abs(d["end"].y() - d["start"].y()) < 3:
+                self.editor.setPlayhead(d["at"])  # just a click
+            self.update()
         self._drag = None
 
     def mouseDoubleClickEvent(self, event):
@@ -1113,12 +1124,19 @@ class SequenceEditor(QWidget):
 
         # --- timeline + properties
         split = QSplitter(Qt.Horizontal)
-        left = _FillColumn()
-        leftLay = QVBoxLayout(left)
+        # tracks above, preview below, with a divider to drag between them; the tracks scroll when
+        # there are more than fit
+        tracksBox = QWidget()
+        leftLay = QVBoxLayout(tracksBox)
         leftLay.setContentsMargins(0, 0, 0, 0)
         leftLay.setSpacing(0)
         self.view = TimelineView(self)
-        leftLay.addWidget(self.view)
+        self.trackScroll = QScrollArea()
+        self.trackScroll.setWidgetResizable(True)
+        self.trackScroll.setFrameShape(QFrame.NoFrame)
+        self.trackScroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.trackScroll.setWidget(self.view)
+        leftLay.addWidget(self.trackScroll, 1)
         self.hScroll = QScrollBar(Qt.Horizontal)
         self.view.scrollBar = self.hScroll
         self.hScroll.valueChanged.connect(self.view.onScroll)
@@ -1128,7 +1146,10 @@ class SequenceEditor(QWidget):
         hint.setWordWrap(True)
         hint.setStyleSheet("color: #888;")
         leftLay.addWidget(hint)
-        leftLay.addSpacing(8)
+        previewBox = QWidget()
+        previewLay = QVBoxLayout(previewBox)
+        previewLay.setContentsMargins(0, 6, 0, 0)
+        previewLay.setSpacing(0)
         previewRow = QHBoxLayout()
         previewLabel = QLabel("Preview at the playhead")
         previewLabel.setStyleSheet("color: #aaa;")
@@ -1138,21 +1159,18 @@ class SequenceEditor(QWidget):
         self.viewCombo.addItems(["Plan", "Height", "Strip"])
         self.viewCombo.setToolTip("Plan: where each light stands, from your seat facing the camera.\nHeight: high to low. Strip: sweep order.")
         previewRow.addWidget(self.viewCombo)
-        leftLay.addLayout(previewRow)
+        previewLay.addLayout(previewRow)
         self.stage = StageView(self)
         self.viewCombo.currentIndexChanged.connect(lambda i: self.stage.setViewMode(["plan", "height", "strip"][i]))
-        # the preview takes whatever height the tracks leave, its grid scaling to fit (the tracks
-        # keep their own height; when the window is short the column scrolls)
+        # the preview's grid scales to fill whatever height it's given
         self.stage.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        leftLay.addWidget(self.stage, 1)
-        # both sides scroll when the window is short, so the tracks, preview and properties
-        # don't set its minimum height
-        leftScroll = QScrollArea()
-        leftScroll.setWidgetResizable(True)
-        leftScroll.setFrameShape(QFrame.NoFrame)
-        leftScroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        leftScroll.setWidget(left)
-        split.addWidget(leftScroll)
+        previewLay.addWidget(self.stage, 1)
+        self.vSplit = QSplitter(Qt.Vertical)
+        self.vSplit.addWidget(tracksBox)
+        self.vSplit.addWidget(previewBox)
+        self.vSplit.setChildrenCollapsible(False)
+        self.vSplit.setStretchFactor(1, 1)
+        split.addWidget(self.vSplit)
         self.props = self._buildProperties()
         propsScroll = QScrollArea()
         propsScroll.setWidgetResizable(True)
@@ -1162,6 +1180,13 @@ class SequenceEditor(QWidget):
         split.addWidget(propsScroll)
         split.setStretchFactor(0, 4)
         split.setStretchFactor(1, 1)
+        # the panel can be dragged wider or narrower, but never under what its fields need
+        propsScroll.setMinimumWidth(self.props.minimumSizeHint().width() + 16)
+        split.setChildrenCollapsible(False)
+        for sp in (split, self.vSplit):
+            sp.setHandleWidth(7)
+            sp.setStyleSheet("QSplitter::handle { background: #3a3a46; } QSplitter::handle:hover { background: #5a6a9a; }")
+        self.hSplit = split
         root.addWidget(split, 1)
 
         # --- status
@@ -1211,6 +1236,17 @@ class SequenceEditor(QWidget):
         QTimer.singleShot(0, self.view.zoomToFit)
 
     # --- properties panel ----------------------------------------------------
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not getattr(self, "_splitSized", False):
+            # the tracks get their full height, up to 60% of the room; the preview the rest
+            self._splitSized = True
+            props = max(PROPS_START_W, self.hSplit.widget(1).minimumWidth())
+            self.hSplit.setSizes([max(1, self.hSplit.width() - props), props])
+            room = self.vSplit.height()
+            tracks = min(self.view.height() + self.hScroll.sizeHint().height() + 50, int(room * 0.6))
+            self.vSplit.setSizes([tracks, max(1, room - tracks)])
+
     def _buildProperties(self):
         panel = QWidget()
         panel.setMinimumWidth(260)

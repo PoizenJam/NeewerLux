@@ -8004,10 +8004,13 @@ def renderSequence(nameOrData, stepMs=None, startMs=0, endMs=None):
     if seq is None:
         return {"success": False, "errors": errors, "warnings": seqWarnings}
 
-    # sound cues follow live sound, which a render doesn't have: they show a steady middle
-    # level, and their lights are marked "sound"
+    # sound cues follow live sound, which a render doesn't have: they react to a steady beat at
+    # the sequence's tempo (120 BPM without one) instead, and their lights are marked "sound"
+    tempo = data.get("tempo") or {}
+    clock = {"t": 0.0}
     player = show.SequencePlayer(seq, _showResolve, lambda n: savedAnimations.get(resolveAnimationName(n)),
-                                 _sequenceBaseCommand, lambda: RENDER_SOUND_FEATURES)
+                                 _sequenceBaseCommand,
+                                 lambda: show.syntheticSoundFeatures(clock["t"], float(tempo.get("bpm") or 120), int(tempo.get("offset_ms") or 0)))
     player.start(0.0, 0)
     try:
         startMs = max(0, int(startMs or 0))
@@ -8031,6 +8034,7 @@ def renderSequence(nameOrData, stepMs=None, startMs=0, endMs=None):
         baseShown[idx] = show.bytesToCommand(output) if output is not None else getLightDisplayState(idx)[0]
 
     for t in range(startMs, endMs, step):
+        clock["t"] = float(t)
         out, _ = player.frame(float(t))
         soundLights = {i for ci in player._soundActive for i in player.cueTargets.get(ci, ())}
         for idx, meta in enumerate(lights):
@@ -8095,10 +8099,6 @@ def flashRateText(rate):
     if worst > show.FLASH_LIMIT_PER_SECOND:
         return "%.1f flashes/s, over the limit (the flash guard slows it)" % worst
     return "%.1f flashes/s" % worst if worst > 0 else "no flashes"
-
-
-RENDER_SOUND_FEATURES = {"level": 0.5, "low": 0.5, "mid": 0.5, "high": 0.5, "centroid": 0.5,
-                         "silent": False, "beat": 0, "bpm": 0.0}
 
 
 def animationFlashReport(name, speed=1.0, seconds=None):

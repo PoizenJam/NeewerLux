@@ -478,6 +478,22 @@ def main():
         js(page, "tlUndo()")
         check(js(page, "tl.seq.cues[tl.seq.cues.length - 1].at_ms") == 25000, "undo")
         js(page, "tlRedo()")
+        # drag a box over empty track space: it selects every cue it touches; Delete removes them together
+        sel = json.loads(js(page, """const cv = document.getElementById('tlCanvas'), r = cv.getBoundingClientRect(), m = tlMetrics();
+                    tlSetSel([]);
+                    let x0 = m.labelW + 2; const y0 = m.rulerH + 2;
+                    while (tlHitAt(x0, y0) && x0 < m.labelW + 200) x0 += 4;
+                    const x1 = tlX(28000), y1 = m.rulerH + m.rowH * 1.9;
+                    cv.dispatchEvent(new MouseEvent('mousedown', {bubbles: true, button: 0, clientX: r.left + x0, clientY: r.top + y0}));
+                    for (let k = 1; k <= 6; k++) window.dispatchEvent(new MouseEvent('mousemove', {bubbles: true, clientX: r.left + x0 + (x1 - x0) * k / 6, clientY: r.top + y0 + (y1 - y0) * k / 6}));
+                    window.dispatchEvent(new MouseEvent('mouseup', {bubbles: true, clientX: r.left + x1, clientY: r.top + y1}));
+                    JSON.stringify(tl.sel)"""))
+        n1 = js(page, "tl.seq.cues.length")
+        check(n1 - 1 in sel and len(sel) >= 2, "a box selects the cues it touches: %s" % sel)
+        js(page, "tlDelete()")
+        check(js(page, "tl.seq.cues.length") == n1 - len(sel), "and Delete removes them all")
+        js(page, "tlUndo(); tlSetSel([tl.seq.cues.length - 1])")
+        check(js(page, "tl.seq.cues.length") == n1, "undo brings them back")
         # properties: colour, then switch to a clip
         js(page, """document.getElementById('tpHue').value = '200'; document.getElementById('tpBri').value = '55';
                     document.getElementById('tpFade').value = '1200'; tlPropChanged();""")
