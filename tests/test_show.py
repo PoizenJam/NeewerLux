@@ -1097,6 +1097,7 @@ def t_listJsonStructured(rig):
     check(key["cctRange"] == [3200, 5600] and key["cctOnly"] is False, "capabilities: %s %s" % (key["cctRange"], key["cctOnly"]))
     check(key["role"] == "key" and key["layer"] == "base" and key["power"] in ("on", "standby", None), "show fields and power")
     check(isinstance(key["status"], str), "the display string stays for older clients")
+    check(key["rssi"] == -50, "1.5.0: signal strength in dBm: %r" % key.get("rssi"))
     check(any(sq["name"] == "Example - Four Light Demo" for sq in data["sequences"]), "sequences listed")
     check(rig.getJSON("status_json")["apiVersion"] == 2, "status_json carries apiVersion")
 

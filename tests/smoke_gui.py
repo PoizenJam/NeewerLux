@@ -254,6 +254,38 @@ def checkSoundTab(nl, app, win, rig):
     print("Sound tab: PASS")
 
 
+def checkSignalInLinkedColumn(nl, app, win):
+    """1.5.0: each light's signal strength is on the first line of its Linked cell, not under its
+    name; a power change keeps one copy of it; the Linked header sorts by it, strongest first, and
+    the lights keep their signal strengths through the sort."""
+    saved = [light.rssi for light in nl.availableLights]
+    try:
+        for light, rssi in zip(nl.availableLights, (-80, -55, -70, -62)):
+            light.rssi = rssi
+        win.updateLights(False, False)
+        app.processEvents()
+        names = [win.returnTableInfo(r, 0) for r in range(len(nl.availableLights))]
+        linked = [win.returnTableInfo(r, 2) for r in range(len(nl.availableLights))]
+        assert not any("dBm" in n for n in names), "no signal under the names: %s" % names
+        assert linked[0].split("\n")[0].endswith("(-80 dBm)"), "signal on the Linked cell's first line: %r" % linked[0]
+        win._showPowerChange(0, False)
+        win._showPowerChange(0, True)
+        assert win.returnTableInfo(0, 2).count("dBm") == 1, "one signal after power changes: %r" % win.returnTableInfo(0, 2)
+        win.sortByHeader(2)
+        app.processEvents()
+        order = [light.rssi for light in nl.availableLights]
+        assert order == [-55, -62, -70, -80], "the Linked header sorts strongest first: %s" % order
+        assert win.returnTableInfo(0, 2).split("\n")[0].endswith("(-55 dBm)"), "signals kept through the sort: %r" % win.returnTableInfo(0, 2)
+    finally:
+        nl.availableLights.sort(key=lambda light: light.device.address)
+        for light, rssi in zip(nl.availableLights, saved):
+            light.rssi = rssi
+        win.lightTable.horizontalHeader().setSortIndicatorShown(False)
+        win.updateLights(False, False)
+        app.processEvents()
+    print("signal in the Linked column: PASS")
+
+
 def checkToolbarWraps(nl, app, win):
     """The light buttons wrap rather than hold the main window wide: with large fonts their
     row was 1271 px, past a 1280 x 720 screen once the window's margins were added."""
@@ -392,6 +424,7 @@ def main():
     checkColourAndPresetFade(nl, app, win)
     checkOwnSwatches(nl, app, win)
     checkToolbarWraps(nl, app, win)
+    checkSignalInLinkedColumn(nl, app, win)
 
     # Sequences panel and status timer
     nl.savedSequences["Smoke"] = {"format": 1, "name": "Smoke", "duration_ms": 1500,

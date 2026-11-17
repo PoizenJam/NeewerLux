@@ -31,6 +31,7 @@ if sys.stderr is None:
 
 import math # used for calculating the RGB values of color temperatures
 import json # used for animation files and HTTP batch/animation APIs
+import re # the signal strength in the light table's Linked cell
 import hmac  # comparing the HTTP access token in constant time
 import tomllib # reads the light model table
 import shutil # used to seed the default preset file on first run
@@ -54,6 +55,7 @@ import neewerlux_show as show # layered show engine: animation timelines, sequen
 import neewerlux_sim as sim # simulated lights for testing without hardware
 import neewerlux_audio as audio # sound modes: capture and analysis (numpy, soundcard optional)
 import neewerlux_midi as midi # MIDI clock input (Windows)
+import neewerlux_neewer as neewer # light states to Neewer command bytes, writes, capabilities
 
 # IMPORT BLEAK (this is the library that allows the program to communicate with the lights) - THIS IS NECESSARY!
 try:
@@ -203,18 +205,18 @@ availableLights = [] # the list of Neewer lights currently available to control 
 
 
 class Light:
-    """One light NeewerLux knows about. Until 1.5 each light was a positional list; the fields
-    are named now. value (the old [3]: the last value set, as command bytes) is still reached
-    as light[3] until 1.5 m1c holds the state as values; light[i] reaches every field by its old
-    position until m1d removes that."""
-    FIELDS = ("device", "client", "name", "value", "cctRange", "cctOnly", "on", "status", "prefId", "rssi")
+    """One light NeewerLux knows about. Until 1.5 each light was a positional list read by
+    position, with its state as Neewer command bytes; the fields are named now and the state is
+    values (neewerlux_neewer.LightState), turned into bytes only where bytes are needed.
+    light[i] reaches every field by its old position (light[3] as bytes) until 1.5 m1d removes it."""
+    FIELDS = ("device", "client", "name", "_stateBytes", "cctRange", "cctOnly", "on", "status", "prefId", "rssi")
 
-    def __init__(self, device, client="", name="", value=None, cctRange=None, cctOnly=False, on=True,
+    def __init__(self, device, client="", name="", state=None, cctRange=None, cctOnly=False, on=True,
                  status=None, prefId=0, rssi=None):
         self.device = device        # the Bleak scan object (.name is the model, .address the MAC)
         self.client = client        # the Bleak connection, "" until linked
         self.name = name            # the custom name, "" when there is none
-        self.value = value          # light[3] until m1c, see above
+        self.state = state          # the LightState last set for it (None: unknown); see neewerlux_neewer
         self.cctRange = cctRange    # [min, max] colour temperature in Kelvin
         self.cctOnly = cctOnly      # an older light: CCT only, brightness and temperature sent separately
         self.on = on                # switched on or off by hand
@@ -228,6 +230,14 @@ class Light:
         return self.device.address.upper()
 
     # Positional access, temporary (removed in 1.5 m1d)
+    @property
+    def _stateBytes(self):
+        return neewer.encode(self.state)
+
+    @_stateBytes.setter
+    def _stateBytes(self, data):
+        self.state = neewer.decode(data)
+
     def __getitem__(self, i):
         return getattr(self, Light.FIELDS[i])
 
@@ -378,7 +388,7 @@ threadAction = "" # the current action to take from the thread
 mainWindow = None  # the GUI main window (None in HTTP-only mode)
 asyncioEventLoop = None # the current asyncio loop
 
-setLightUUID = "69400002-B5A3-F393-E0A9-E50E24DCCA99" # the UUID to send information to the light
+setLightUUID = neewer.SET_LIGHT_UUID # the UUID to send information to the light
 notifyLightUUID = "69400003-B5A3-F393-E0A9-E50E24DCCA99" # the UUID for notify callbacks from the light
 
 # Notification subscriptions, keyed by MAC so they survive table re-sorting. Each light
@@ -2845,18 +2855,14 @@ try: # try to load the GUI
             global availableLights
             global lastSortingField
 
-            if theHeader < 2: # if we didn't click on the "Linked" or "Status" headers, start processing the sort
-                checkForCustomNames = theHeader == 0 and any(light.name != "" for light in availableLights) # only offer sorting by custom name when there are any
-            else: # we clicked on the "Linked" or "Status" headers, which do not allow sorting
-                sortingField = -1
-
+            sortingField = -1 # the Status header doesn't sort
             if theHeader == 0:
+                checkForCustomNames = any(light.name != "" for light in availableLights) # only offer sorting by custom name when there are any
                 sortDlg = QMessageBox(self)
                 sortDlg.setIcon(QMessageBox.Question)
                 sortDlg.setWindowTitle("Sort by...")
                 sortDlg.setText("Which do you want to sort by?")
                    
-                sortDlg.addButton(" RSSI (Signal Level) ", QMessageBox.ButtonRole.AcceptRole)
                 sortDlg.addButton(" Type of Light ", QMessageBox.ButtonRole.AcceptRole)
 
                 if checkForCustomNames == True: # if we have custom names available, then add that as an option
@@ -2867,18 +2873,13 @@ try: # try to load the GUI
                 clickedButton = pyside_exec(sortDlg)
 
                 if clickedButton == 0:
-                    sortingField = 10 # sort by RSSI
-                elif clickedButton == 1:
                     sortingField = 8 # sort by type of light
-                elif clickedButton == 2:
-                    if checkForCustomNames == True: # if the option was available for custom names, this is "custom name"
-                        sortingField = 2 
-                    else: # if the option wasn't available, then this is "cancel"
-                        sortingField = -1 # cancel out of sorting - write this!
-                elif clickedButton == 3: # this option is only available if custom names is accessible - if so, this is "cancel"
-                        sortingField = -1 # cancel out of sorting - write this!
+                elif clickedButton == 1 and checkForCustomNames == True:
+                    sortingField = 2 # sort by custom name
             elif theHeader == 1: # sort by MAC Address/GUID
                 sortingField = 9
+            elif theHeader == 2: # the Linked column shows the signal strength: sort by it
+                sortingField = 10
 
             if sortingField != -1: # we want to sort
                 self.lightTable.horizontalHeader().setSortIndicatorShown(True) # show the sorting indicator
@@ -2901,13 +2902,10 @@ try: # try to load the GUI
                         else:
                             doReverseSort = True
 
-                sortKeys = {2: lambda light: light.name, 8: lambda light: light.device.name,
-                            9: lambda light: light.device.address, 10: lambda light: _get_light_rssi(light)}
-                sortedList = sorted(availableLights, key=sortKeys[sortingField], reverse=doReverseSort)
-                for light in sortedList:
-                    # as before 1.5: a sort forgets the stored RSSI (the table then reads the device's)
-                    light.rssi = None
-                availableLights[:] = sortedList
+                # signal strength as a number (unknown sorts as the weakest); the first sort puts the strongest first
+                sortKeys = {2: lambda light: light.name, 8: lambda light: light.device.name, 9: lambda light: light.device.address,
+                            10: lambda light: _rssiNumber(light) if _rssiNumber(light) is not None else -999}
+                availableLights[:] = sorted(availableLights, key=sortKeys[sortingField], reverse=doReverseSort)
                                         
                 self.updateLights(False, False) # redraw the table with the new light list (don't reorder by preferred ID)
                 lastSortingField = sortingField # keep track of the last field used for sorting, so we know whether or not to switch to ascending
@@ -2987,43 +2985,36 @@ try: # try to load the GUI
             for lightIdx in selectedLights:
                 if lightIdx >= len(availableLights):
                     continue
-                params = availableLights[lightIdx][3]
-                if not params or not isinstance(params, list) or len(params) < 4:
+                state = availableLights[lightIdx].state
+                if state is None:
                     continue
 
-                mode = params[1]
-                newParams = list(params)
-
-                if mode == 135: # CCT: [120, 135, 2, bri, temp, checksum]
+                if state.mode == "CCT":
                     if paramType in (0, 2):
-                        newParams[3] = max(0, min(100, newParams[3] + delta))
+                        state = state.with_(bri=max(0, min(100, state.bri + delta)))
                     elif paramType == 1:
                         minK, maxK = getEffectiveCCTRange(lightIdx)
-                        newParams[4] = max(minK // 100, min(maxK // 100, newParams[4] + delta))
+                        state = state.with_(kelvin=max(minK // 100, min(maxK // 100, state.kelvin // 100 + delta)) * 100)
                     else:
                         continue
-                elif mode == 134: # HSI: [120, 134, 4, hueLo, hueHi, sat, bri, checksum]
+                elif state.mode == "HSI":
                     if paramType in (0, 3):
-                        newParams[6] = max(0, min(100, newParams[6] + delta))
+                        state = state.with_(bri=max(0, min(100, state.bri + delta)))
                     elif paramType == 1:
-                        hue = (newParams[3] | (newParams[4] << 8)) + delta
-                        hue %= 361
-                        newParams[3] = hue & 255
-                        newParams[4] = (hue >> 8) & 255
+                        state = state.with_(hue=(state.hue + delta) % 361)
                     elif paramType == 2:
-                        newParams[5] = max(0, min(100, newParams[5] + delta))
+                        state = state.with_(sat=max(0, min(100, state.sat + delta)))
                     else:
                         continue
-                elif mode == 136: # ANM/Scene: [120, 136, 2, bri, scene, checksum]
+                elif state.mode == "SCENE":
                     if paramType == 0:
-                        newParams[3] = max(0, min(100, newParams[3] + delta))
+                        state = state.with_(bri=max(0, min(100, state.bri + delta)))
                     else:
                         continue
                 else:
                     continue
 
-                newParams[-1] = calculateChecksum(newParams)
-                availableLights[lightIdx][3] = newParams
+                availableLights[lightIdx].state = state
                 adjusted.append(lightIdx)
 
             if not adjusted:
@@ -3050,35 +3041,33 @@ try: # try to load the GUI
             """Move the active tab's sliders to match a light's stored values, without re-sending."""
             if lightIdx < 0 or lightIdx >= len(availableLights):
                 return
-            params = availableLights[lightIdx][3]
-            if not params or not isinstance(params, list):
+            state = availableLights[lightIdx].state
+            if state is None:
                 return
-            mode = params[1]
             tab = self.ColorModeTabWidget.currentIndex()
 
-            if mode == 135 and tab == 0:
+            if state.mode == "CCT" and tab == 0:
                 widgets = (self.Slider_CCT_Bright, self.Slider_CCT_Hue)
                 for w in widgets: w.blockSignals(True)
-                self.Slider_CCT_Bright.setValue(params[3])
-                self.Slider_CCT_Hue.setValue(params[4])
-                self.TFV_CCT_Bright.setText(str(params[3]) + "%")
-                self.TFV_CCT_Hue.setText(str(params[4]) + "00K")
+                self.Slider_CCT_Bright.setValue(state.bri)
+                self.Slider_CCT_Hue.setValue(state.kelvin // 100)
+                self.TFV_CCT_Bright.setText(str(state.bri) + "%")
+                self.TFV_CCT_Hue.setText(str(state.kelvin // 100) + "00K")
                 for w in widgets: w.blockSignals(False)
-            elif mode == 134 and tab == 1:
-                hue = params[3] | (params[4] << 8)
+            elif state.mode == "HSI" and tab == 1:
                 widgets = (self.Slider_HSI_1_H, self.Slider_HSI_2_S, self.Slider_HSI_3_L)
                 for w in widgets: w.blockSignals(True)
-                self.Slider_HSI_1_H.setValue(hue)
-                self.Slider_HSI_2_S.setValue(params[5])
-                self.Slider_HSI_3_L.setValue(params[6])
-                self.TFV_HSI_1_H.setText(str(hue) + "\u00B0")
-                self.TFV_HSI_2_S.setText(str(params[5]) + "%")
-                self.TFV_HSI_3_L.setText(str(params[6]) + "%")
+                self.Slider_HSI_1_H.setValue(state.hue)
+                self.Slider_HSI_2_S.setValue(state.sat)
+                self.Slider_HSI_3_L.setValue(state.bri)
+                self.TFV_HSI_1_H.setText(str(state.hue) + "\u00B0")
+                self.TFV_HSI_2_S.setText(str(state.sat) + "%")
+                self.TFV_HSI_3_L.setText(str(state.bri) + "%")
                 for w in widgets: w.blockSignals(False)
-            elif mode == 136 and tab == 2:
+            elif state.mode == "SCENE" and tab == 2:
                 self.Slider_ANM_Brightness.blockSignals(True)
-                self.Slider_ANM_Brightness.setValue(params[3])
-                self.TFV_ANM_Brightness.setText(str(params[3]) + "%")
+                self.Slider_ANM_Brightness.setValue(state.bri)
+                self.TFV_ANM_Brightness.setText(str(state.bri) + "%")
                 self.Slider_ANM_Brightness.blockSignals(False)
 
         def checkLightTab(self, selectedLight = -1):
@@ -3222,10 +3211,10 @@ try: # try to load the GUI
 
                 # IF A CUSTOM NAME IS SET UP FOR THIS LIGHT, THEN CHANGE THE TABLE TO REFLECT THAT
                 if availableLights[selectedRows[0]].name != "":
-                    self.setTheTable([availableLights[selectedRows[0]].name + " (" + availableLights[selectedRows[0]].device.name + ")" "\n  [ʀssɪ: " + _get_light_rssi(availableLights[selectedRows[0]]) + " dBm]",
+                    self.setTheTable([availableLights[selectedRows[0]].name + " (" + availableLights[selectedRows[0]].device.name + ")",
                                     "", "", ""], selectedRows[0])
                 else: # if there is no custom name, then reset the table to show that
-                    self.setTheTable([availableLights[selectedRows[0]].device.name + "\n  [ʀssɪ: " + _get_light_rssi(availableLights[selectedRows[0]]) + " dBm]",
+                    self.setTheTable([availableLights[selectedRows[0]].device.name,
                                     "", "", ""], selectedRows[0])
 
                 if self.colorTempRange.isChecked(): # if we've asked to save a custom temperature range for this light
@@ -3870,23 +3859,23 @@ try: # try to load the GUI
                     # send them the sliders' value, which would take them out of the sound layer)
                     if self.ColorModeTabWidget.currentIndex() == self.TAB_SOUND:
                         pass
-                    elif availableLights[currentlySelectedRow][3] != []: # if the last set parameters aren't empty
+                    elif availableLights[currentlySelectedRow].state is not None: # if the last set parameters aren't empty
                         if availableLights[currentlySelectedRow].on != False: # if the light is listed as being turned ON
-                            sendValue = availableLights[currentlySelectedRow][3] # make the current "sendValue" the last set parameter so it doesn't re-send it on re-load
+                            sendValue = availableLights[currentlySelectedRow].state # make the current "sendValue" the last set parameter so it doesn't re-send it on re-load
 
-                            if sendValue[1] == 135: # the last parameter was a CCT mode change
+                            if sendValue.mode == "CCT": # the last parameter was a CCT mode change
                                 self.setUpGUI(colorMode="CCT",
-                                        brightness=sendValue[3],
-                                        temp=sendValue[4])
-                            elif sendValue[1] == 134: # the last parameter was a HSI mode change
+                                        brightness=sendValue.bri,
+                                        temp=sendValue.kelvin // 100)
+                            elif sendValue.mode == "HSI": # the last parameter was a HSI mode change
                                 self.setUpGUI(colorMode="HSI",
-                                        hue=sendValue[3] + (256 * sendValue[4]),
-                                        sat=sendValue[5],
-                                        brightness=sendValue[6])
-                            elif sendValue[1] == 136: # the last parameter was a ANM/SCENE mode change
+                                        hue=sendValue.hue,
+                                        sat=sendValue.sat,
+                                        brightness=sendValue.bri)
+                            elif sendValue.mode == "SCENE": # the last parameter was a ANM/SCENE mode change
                                 self.setUpGUI(colorMode="ANM",
-                                        brightness=sendValue[3],
-                                        scene=sendValue[4])
+                                        brightness=sendValue.bri,
+                                        scene=sendValue.scene)
                         else:
                             self.ColorModeTabWidget.setCurrentIndex(0) # switch to the CCT tab if the light is off and there ARE prior parameters
                     else:
@@ -3945,15 +3934,25 @@ try: # try to load the GUI
             if infoArray[1] != "": # the MAC address of the light
                 if rowToChange == -1 or (rowToChange != -1 and infoArray[1] != self.returnTableInfo(rowToChange, 1)):
                     self.lightTable.item(currentRow, 1).setText(infoArray[1])
-            if infoArray[2] != "": # the Linked status of the light
-                if rowToChange == -1 or (rowToChange != -1 and infoArray[2] != self.returnTableInfo(rowToChange, 2)):
-                    self.lightTable.item(currentRow, 2).setText(infoArray[2])
+            if infoArray[2] != "": # the Linked status of the light, with its signal strength
+                linkedText = self._withSignal(currentRow, infoArray[2])
+                if rowToChange == -1 or (rowToChange != -1 and linkedText != self.returnTableInfo(rowToChange, 2)):
+                    self.lightTable.item(currentRow, 2).setText(linkedText)
                     self.lightTable.item(currentRow, 2).setTextAlignment(Qt.AlignCenter) # align the light status info to be center-justified
             if infoArray[3] != "": # the current status message of the light
                 if rowToChange == -1 or (rowToChange != -1 and infoArray[3] != self.returnTableInfo(rowToChange, 3)):
                     self.lightTable.item(currentRow, 3).setText(infoArray[3])
 
             self.lightTable.resizeRowsToContents()
+
+        def _withSignal(self, row, linkedText):
+            """The Linked cell's text with the light's signal strength on its first line, replacing
+            any already there (_showPowerChange passes the cell's own text back in)."""
+            lines = linkedText.split("\n")
+            lines[0] = re.sub(r" \([^()]*dBm\)$", "", lines[0])
+            if row < len(availableLights):
+                lines[0] += " (" + _get_light_rssi(availableLights[row]) + " dBm)"
+            return "\n".join(lines)
 
         def returnTableInfo(self, row, column):
             return self.lightTable.item(row, column).text()
@@ -4286,23 +4285,22 @@ try: # try to load the GUI
                     self.statusBar.showMessage("We didn't locate any Neewer lights on the last search")
 
             for a in range(len(availableLights)):
-                _rssi_str = _get_light_rssi(availableLights[a])
                 if availableLights[a].client == "": # the light does not currently have a Bleak object connected to it
                     if availableLights[a].name != "": # the light has a custom name, so add the custom name to the light
-                        self.setTheTable([availableLights[a].name + " (" + availableLights[a].device.name + ")" + "\n  [ʀssɪ: " + _rssi_str + " dBm]", availableLights[a].device.address, "Waiting", "Waiting to connect..."])
+                        self.setTheTable([availableLights[a].name + " (" + availableLights[a].device.name + ")", availableLights[a].device.address, "Waiting", "Waiting to connect..."])
                     else: # the light does not have a custom name, so just use the model # of the light
-                        self.setTheTable([availableLights[a].device.name + "\n  [ʀssɪ: " + _rssi_str + " dBm]", availableLights[a].device.address, "Waiting", "Waiting to connect..."])
+                        self.setTheTable([availableLights[a].device.name, availableLights[a].device.address, "Waiting", "Waiting to connect..."])
                 else: # the light does have a Bleak object connected to it
                     if availableLights[a].name != "": # the light has a custom name, so add the custom name to the light
                         if availableLights[a].client.is_connected: # we have a connection to the light
-                            self.setTheTable([availableLights[a].name + " (" + availableLights[a].device.name + ")" + "\n  [ʀssɪ: " + _rssi_str + " dBm]", availableLights[a].device.address, "LINKED", "Waiting to send..."])
+                            self.setTheTable([availableLights[a].name + " (" + availableLights[a].device.name + ")", availableLights[a].device.address, "LINKED", "Waiting to send..."])
                         else: # we're still trying to connect, or haven't started trying yet
-                            self.setTheTable([availableLights[a].name + " (" + availableLights[a].device.name + ")" + "\n  [ʀssɪ: " + _rssi_str + " dBm]", availableLights[a].device.address, "Waiting", "Waiting to connect..."])
+                            self.setTheTable([availableLights[a].name + " (" + availableLights[a].device.name + ")", availableLights[a].device.address, "Waiting", "Waiting to connect..."])
                     else: # the light does not have a custom name, so just use the model # of the light
                         if availableLights[a].client.is_connected:
-                            self.setTheTable([availableLights[a].device.name + "\n  [ʀssɪ: " + _rssi_str + " dBm]", availableLights[a].device.address, "LINKED", "Waiting to send..."])
+                            self.setTheTable([availableLights[a].device.name, availableLights[a].device.address, "LINKED", "Waiting to send..."])
                         else:
-                            self.setTheTable([availableLights[a].device.name + "\n  [ʀssɪ: " + _rssi_str + " dBm]", availableLights[a].device.address, "Waiting", "Waiting to connect..."])
+                            self.setTheTable([availableLights[a].device.name, availableLights[a].device.address, "Waiting", "Waiting to connect..."])
 
             # Update vertical header labels to show effective IDs (preferred ID if set, else row number)
             headerLabels = []
@@ -4882,7 +4880,7 @@ def saveLightPrefs(lightID, deleteFile = False): # save a sidecar file with the 
 
         if rememberLightsOnExit == True: # if we're supposed to remember the last settings, then add that to the Prefs file
             # the light's base state, not a frame a sound mode or show happened to be sending
-            lastSettings = showEngine.baseFor(lightID) if showEngine is not None else availableLights[lightID][3]
+            lastSettings = showEngine.baseFor(lightID) if showEngine is not None else neewer.encode(availableLights[lightID].state)
             if lastSettings: # if we actually have a value stored for this light
                 lastSettingsString = ",".join(map(str, lastSettings)) # combine all the elements of the last set params
                 exportString += "|" + lastSettingsString # add it to the exported string
@@ -5077,7 +5075,7 @@ def recallCustomPreset(numOfPreset, updateGUI=True, loop=None):
             if updateGUI == False or guiFade:
                 for b in (mainWindow.selectedLights() if guiFade else range(len(availableLights))):
                     changedLights.append(b) # add each light to changedLights
-                    availableLights[b][3] = list(computedValue) # set each light's "last" parameter to the computed value above
+                    availableLights[b].state = neewer.decode(computedValue) # set each light's "last" parameter to the computed value above
             else:
                 # Presets always send immediately, force a send even if livePreview is off
                 if not livePreview:
@@ -5089,27 +5087,27 @@ def recallCustomPreset(numOfPreset, updateGUI=True, loop=None):
             if currentLight != []: # if we have a match
                 # always refer to the light it found as currentLight[0]
                 if customLightPresets[numOfPreset][a][1][0] == 5 or customLightPresets[numOfPreset][a][1][0] == 8: # the preset is in CCT mode
-                    availableLights[currentLight[0]][3] = calculateByteString(True, colorMode="CCT",\
+                    availableLights[currentLight[0]].state = neewer.decode(calculateByteString(True, colorMode="CCT",\
                                                             brightness=customLightPresets[numOfPreset][a][1][1],\
-                                                            temp=customLightPresets[numOfPreset][a][1][2])
+                                                            temp=customLightPresets[numOfPreset][a][1][2]))
 
                     if customLightPresets[numOfPreset][a][1][0] == 8: # if we want to turn the light off, let the send system know this
-                        availableLights[currentLight[0]][3][0] = 0
+                        availableLights[currentLight[0]].state = availableLights[currentLight[0]].state.with_(power=False)
                 elif customLightPresets[numOfPreset][a][1][0] == 4 or customLightPresets[numOfPreset][a][1][0] == 7: # the preset is in HSI mode
-                    availableLights[currentLight[0]][3] = calculateByteString(True, colorMode="HSI",\
+                    availableLights[currentLight[0]].state = neewer.decode(calculateByteString(True, colorMode="HSI",\
                                                             HSI_I=customLightPresets[numOfPreset][a][1][1],\
                                                             HSI_H=customLightPresets[numOfPreset][a][1][2],\
-                                                            HSI_S=customLightPresets[numOfPreset][a][1][3])
+                                                            HSI_S=customLightPresets[numOfPreset][a][1][3]))
 
                     if customLightPresets[numOfPreset][a][1][0] == 7: # if we want to turn the light off, let the send system know this
-                        availableLights[currentLight[0]][3][0] = 0
+                        availableLights[currentLight[0]].state = availableLights[currentLight[0]].state.with_(power=False)
                 elif customLightPresets[numOfPreset][a][1][0] == 6 or customLightPresets[numOfPreset][a][1][0] == 9: # the preset is in ANM/SCENE mode
-                    availableLights[currentLight[0]][3] = calculateByteString(True, colorMode="ANM",\
+                    availableLights[currentLight[0]].state = neewer.decode(calculateByteString(True, colorMode="ANM",\
                                                             brightness=customLightPresets[numOfPreset][a][1][1],\
-                                                            animation=customLightPresets[numOfPreset][a][1][2])
+                                                            animation=customLightPresets[numOfPreset][a][1][2]))
                     
                     if customLightPresets[numOfPreset][a][1][0] == 9: # if we want to turn the light off, let the send system know this
-                        availableLights[currentLight[0]][3][0] = 0
+                        availableLights[currentLight[0]].state = availableLights[currentLight[0]].state.with_(power=False)
                 
                 changedLights.append(currentLight[0])
 
@@ -5462,7 +5460,7 @@ def listBuilder(selectedLight):
             lightMACAddress = customName  # alias name
         else:
             lightMACAddress = availableLights[selectedLight].device.address  # MAC fallback
-        listToWorkWith = availableLights[selectedLight][3] # we're specificially using the last parameter for the specified light for this
+        listToWorkWith = neewer.encode(availableLights[selectedLight].state) # we're specificially using the last parameter for the specified light for this
 
     if listToWorkWith != []: # if we have elements in this list, then sort them out
         if selectedLight == -1:
@@ -5619,6 +5617,13 @@ def _get_light_rssi(light_entry):
     except (AttributeError, TypeError):
         return "?"
 
+def _rssiNumber(light):
+    """A light's signal strength in dBm as a number (what the table shows), or None when unknown."""
+    try:
+        return int(_get_light_rssi(light))
+    except ValueError:
+        return None
+
 # TEST TO MAKE SURE THE VALUE GIVEN TO THE FUNCTION IS VALID OR IN BOUNDS
 def testValid(theParam, theValue, defaultValue, startBounds, endBounds, returnDefault = False):
     if theParam == "temp":
@@ -5771,16 +5776,7 @@ def updateStatus(splitString = False, customValue=False):
 
 # CALCULATE THE CHECKSUM FROM THE BYTESTRING
 def calculateChecksum(sendValue):
-    checkSum = 0
-
-    for a in range(len(sendValue) - 1):
-        if sendValue[a] < 0:
-            checkSum = checkSum + int(sendValue[a] + 256)
-        else:
-            checkSum = checkSum + int(sendValue[a])
-
-    checkSum = checkSum & 255
-    return checkSum
+    return neewer.checksum(sendValue)
 
 # FIND NEW LIGHTS
 async def findDevices():
@@ -5839,9 +5835,9 @@ async def findDevices():
                 lightShowPrefs[device.address.upper()] = parseShowPrefFields([str(x) for x in customPrefs])
 
             if customPrefs[3] is not None and isinstance(customPrefs[3], list): # we have previously stored parameters
-                availableLights.append(Light(device, "", customPrefs[0], customPrefs[3], customPrefs[1], customPrefs[2], prefId=prefID, rssi=rssi))
+                availableLights.append(Light(device, "", customPrefs[0], neewer.decode(customPrefs[3]), customPrefs[1], customPrefs[2], prefId=prefID, rssi=rssi))
             else: # no stored parameters, use defaults
-                availableLights.append(Light(device, "", customPrefs[0], [120, 135, 2, 20, 56, 77], customPrefs[1], customPrefs[2], prefId=prefID, rssi=rssi))
+                availableLights.append(Light(device, "", customPrefs[0], neewer.decode([120, 135, 2, 20, 56, 77]), customPrefs[1], customPrefs[2], prefId=prefID, rssi=rssi))
 
     if threadAction != "quit":
         return "" # once the device scan is over, set the threadAction to nothing
@@ -5866,7 +5862,7 @@ def addSimulatedLights(count, includeCCTOnly=False, faults=False):
         elif len(customPrefs) > 5:
             lightShowPrefs[device.address.upper()] = parseShowPrefFields([str(x) for x in customPrefs])
         lastParams = customPrefs[3] if isinstance(customPrefs[3], list) else [120, 135, 2, 20, 56, 77]
-        availableLights.append(Light(device, "", customPrefs[0], lastParams, customPrefs[1], customPrefs[2], prefId=prefID, rssi=-40))
+        availableLights.append(Light(device, "", customPrefs[0], neewer.decode(lastParams), customPrefs[1], customPrefs[2], prefId=prefID, rssi=-40))
         if not hasSidecar:
             # Save the preset as the light's own preferences right away, so its ID and role
             # resolve like any light's and survive the alias reload after a preferences save
@@ -6246,26 +6242,27 @@ async def writeToLight(selectedLights=0, updateGUI=True, useGlobalValue=True, fr
                 for a in range(len(selectedLights)): # try to write each light in turn, and show the current data being sent to them in the table
                     # A light driven by a sequence or effect keeps showing it; this write becomes its revert target
                     if not fromShow and showEngine is not None:
-                        baseVal = currentSendValue if useGlobalValue else availableLights[selectedLights[a]][3]
+                        baseVal = currentSendValue if useGlobalValue else neewer.encode(availableLights[selectedLights[a]].state)
                         blocked, shown = showEngine.interceptBaseWrite(int(selectedLights[a]), baseVal)
                         if blocked:
                             if not useGlobalValue and shown is not None:
-                                availableLights[selectedLights[a]][3] = list(shown)
+                                availableLights[selectedLights[a]].state = neewer.decode(shown)
                             if updateGUI and mainWindow is not None:
                                 mainWindow._tableUpdateSignal.emit(["", "", "", "Held: a sequence or effect is driving this light"], int(selectedLights[a]))
                             continue
 
                     # THIS SECTION IS FOR LOADING SNAPSHOT PRESET POWER STATES
                     if useGlobalValue == False: # if we're forcing the lights to use their stored parameters, then load that in here
-                        if availableLights[selectedLights[a]][3][0] == 0: # we want to turn the light off
-                            availableLights[selectedLights[a]][3][0] = 120 # reset the light's value to the normal value
+                        storedState = availableLights[selectedLights[a]].state
+                        if storedState.mode is not None and not storedState.power: # we want to turn the light off
+                            availableLights[selectedLights[a]].state = storedState.with_(power=True) # the colour it shows once switched back on
                             currentSendValue = [120, 129, 1, 2, 252] # set the send value to turn the light off downstream
                         else: # we want to turn the light on and run a snapshot preset
-                            await availableLights[int(selectedLights[a])].client.write_gatt_char(setLightUUID, bytearray([120, 129, 1, 1, 251]), False) # force this light to turn on
+                            await neewer.write(availableLights[int(selectedLights[a])].client, [120, 129, 1, 1, 251]) # force this light to turn on
                             availableLights[int(selectedLights[a])].on = True # set the ON flag of this light to True
                             await asyncio.sleep(0.05)
 
-                            currentSendValue = availableLights[selectedLights[a]][3] # set the send value to set the preset downstream
+                            currentSendValue = neewer.encode(availableLights[selectedLights[a]].state) # set the send value to set the preset downstream
 
                     if availableLights[selectedLights[a]].client != "": # if a Bleak connection is there
                         try:
@@ -6292,27 +6289,27 @@ async def writeToLight(selectedLights=0, updateGUI=True, useGlobalValue=True, fr
                                         splitCommands = calculateSeparateBytestrings(currentSendValue) # get both commands from the converter
 
                                         # WRITE BOTH LUMINANCE AND HUE VALUES TOGETHER, BUT SEPARATELY
-                                        await availableLights[int(selectedLights[a])].client.write_gatt_char(setLightUUID, bytearray(splitCommands[0]), False)
+                                        await neewer.write(availableLights[int(selectedLights[a])].client, splitCommands[0])
                                         await asyncio.sleep(0.05) # wait 1/20th of a second to give the Bluetooth bus a little time to recover
-                                        await availableLights[int(selectedLights[a])].client.write_gatt_char(setLightUUID, bytearray(splitCommands[1]), False)
+                                        await neewer.write(availableLights[int(selectedLights[a])].client, splitCommands[1])
                                     else: # we're only writing either HUE or BRI independently
-                                        await availableLights[int(selectedLights[a])].client.write_gatt_char(setLightUUID, bytearray(calculateSeparateBytestrings(currentSendValue)), False)
+                                        await neewer.write(availableLights[int(selectedLights[a])].client, calculateSeparateBytestrings(currentSendValue))
                                 elif currentSendValue[1] == 129: # we're using an old light, but we're either turning the light on or off
-                                    await availableLights[int(selectedLights[a])].client.write_gatt_char(setLightUUID, bytearray(currentSendValue), False)
+                                    await neewer.write(availableLights[int(selectedLights[a])].client, currentSendValue)
                                 elif currentSendValue[1] in (134, 136): # HSI or ANM mode on CCT-only light
                                     convertedVal = applyCCTFallback(int(selectedLights[a]), currentSendValue)
                                     if convertedVal is not None:
                                         # Send converted CCT value using split commands for old-style lights
                                         splitCommands = calculateSeparateBytestrings(convertedVal)
-                                        await availableLights[int(selectedLights[a])].client.write_gatt_char(setLightUUID, bytearray(splitCommands[0]), False)
+                                        await neewer.write(availableLights[int(selectedLights[a])].client, splitCommands[0])
                                         await asyncio.sleep(0.05)
-                                        await availableLights[int(selectedLights[a])].client.write_gatt_char(setLightUUID, bytearray(splitCommands[1]), False)
+                                        await neewer.write(availableLights[int(selectedLights[a])].client, splitCommands[1])
                                         currentSendValue = convertedVal  # for status display
                                     elif updateGUI == True:
                                         modeName = "HSI" if currentSendValue[1] == 134 else "ANM/SCENE"
                                         if mainWindow is not None: mainWindow._tableUpdateSignal.emit(["", "", "", modeName + " mode ignored (CCT-only)"], int(selectedLights[a]))
                             else: # we're using a "newer" Neewer light, so just send the original calculated value
-                                await availableLights[int(selectedLights[a])].client.write_gatt_char(setLightUUID, bytearray(currentSendValue), False)
+                                await neewer.write(availableLights[int(selectedLights[a])].client, currentSendValue)
                             _recordWritten(int(selectedLights[a]), currentSendValue)
 
                             if updateGUI == True:
@@ -6334,7 +6331,7 @@ async def writeToLight(selectedLights=0, updateGUI=True, useGlobalValue=True, fr
                                 returnValue = True # we successfully wrote to the light
 
                             if currentSendValue[1] != 129: # if we didn't just send a command to turn the light on/off
-                                availableLights[selectedLights[a]][3] = currentSendValue # store the currenly sent value to recall later
+                                availableLights[selectedLights[a]].state = neewer.decode(currentSendValue) # store the currenly sent value to recall later
                         except Exception as e:
                             if updateGUI == True:
                                 if mainWindow is not None: mainWindow._tableUpdateSignal.emit(["", "", "", "Error Sending to light!"], int(selectedLights[a]))
@@ -6376,7 +6373,7 @@ async def connectToOneLight(MACAddress):
     try:
         currentLightToAdd = await BleakScanner.find_device_by_address(MACAddress)
         customLightPrefs = getCustomLightPrefs(currentLightToAdd.address, currentLightToAdd.name)
-        availableLights = [Light(currentLightToAdd, "", customLightPrefs[0], [], customLightPrefs[1], customLightPrefs[2], prefId=customLightPrefs[4] if len(customLightPrefs) > 4 else 0)]
+        availableLights = [Light(currentLightToAdd, "", customLightPrefs[0], None, customLightPrefs[1], customLightPrefs[2], prefId=customLightPrefs[4] if len(customLightPrefs) > 4 else 0)]
     except Exception as e:
         printDebugString("Error finding the Neewer light with MAC address " + MACAddress)
         print(e)
@@ -6431,7 +6428,7 @@ def _flashAllowed(lightIdx, byteVal):
 
 def _recordWritten(lightIdx, byteVal):
     """Remember what a light was actually sent, for the Stage window, swatches and status.
-    availableLights[i][3] keeps the requested value (before the CCT-only conversion), which
+    A light's state keeps the requested value (before the CCT-only conversion), which
     is what presets and reverts need, so display can't use it directly."""
     mac = availableLights[lightIdx].device.address
     if byteVal[1] == 129:
@@ -6451,47 +6448,46 @@ async def parallelWriteToLights(lightIndices, fromShow=False):
     async def writeSingleLight(idx):
         try:
             if idx < len(availableLights) and availableLights[idx].client != "":
-                currentSendValue = availableLights[idx][3]
-                if currentSendValue is not None and not fromShow and showEngine is not None:
+                currentSendValue = neewer.encode(availableLights[idx].state)
+                if not fromShow and showEngine is not None:
                     blocked, shown = showEngine.interceptBaseWrite(idx, currentSendValue)
                     if blocked:
                         if shown is not None:
-                            availableLights[idx][3] = list(shown)
+                            availableLights[idx].state = neewer.decode(shown)
                         return
-                if currentSendValue is not None:
-                    # Apply CCT-only fallback if needed
-                    sendVal = applyCCTFallback(idx, currentSendValue)
-                    if sendVal is None:
-                        return  # ignore mode
-                    # Clamp CCT temperature to effective range
-                    if sendVal[1] == 135:
-                        clampedTemp = clampCCTForLight(idx, sendVal[4])
-                        if clampedTemp is None:
-                            return  # out of range, ignore
-                        elif clampedTemp != sendVal[4]:
-                            sendVal = list(sendVal)
-                            sendVal[4] = clampedTemp
-                            sendVal[5] = calculateChecksum(sendVal)
-                    sendVal = applyBrightnessEnvelope(idx, sendVal)
-                    if not _flashAllowed(idx, sendVal):
-                        return  # held back: this frame would flash faster than the guard allows
-                    if fromShow and sendVal[1] != 129 and availableLights[idx].device.address in _lightsOff:
-                        # a show taking a light that is off powers it on first: lights in
-                        # standby ignore colour commands (switched off by hand while a show
-                        # plays, the show leaves it alone, see interceptBaseWrite)
-                        await availableLights[int(idx)].client.write_gatt_char(setLightUUID, bytearray([120, 129, 1, 1, 251]), False)
-                        availableLights[int(idx)].on = True
-                        _recordWritten(int(idx), [120, 129, 1, 1, 251])
-                        await asyncio.sleep(0.05)
-                    if availableLights[idx].cctOnly == True and sendVal[1] == 135:
-                        # Old-style CCT light needs split commands
-                        splitCmds = calculateSeparateBytestrings(sendVal)
-                        await availableLights[int(idx)].client.write_gatt_char(setLightUUID, bytearray(splitCmds[0]), False)
-                        await asyncio.sleep(0.05)
-                        await availableLights[int(idx)].client.write_gatt_char(setLightUUID, bytearray(splitCmds[1]), False)
-                    else:
-                        await availableLights[int(idx)].client.write_gatt_char(setLightUUID, bytearray(sendVal), False)
-                    _recordWritten(int(idx), sendVal)
+                # Apply CCT-only fallback if needed
+                sendVal = applyCCTFallback(idx, currentSendValue)
+                if sendVal is None:
+                    return  # ignore mode
+                # Clamp CCT temperature to effective range
+                if sendVal[1] == 135:
+                    clampedTemp = clampCCTForLight(idx, sendVal[4])
+                    if clampedTemp is None:
+                        return  # out of range, ignore
+                    elif clampedTemp != sendVal[4]:
+                        sendVal = list(sendVal)
+                        sendVal[4] = clampedTemp
+                        sendVal[5] = calculateChecksum(sendVal)
+                sendVal = applyBrightnessEnvelope(idx, sendVal)
+                if not _flashAllowed(idx, sendVal):
+                    return  # held back: this frame would flash faster than the guard allows
+                if fromShow and sendVal[1] != 129 and availableLights[idx].device.address in _lightsOff:
+                    # a show taking a light that is off powers it on first: lights in
+                    # standby ignore colour commands (switched off by hand while a show
+                    # plays, the show leaves it alone, see interceptBaseWrite)
+                    await neewer.write(availableLights[int(idx)].client, [120, 129, 1, 1, 251])
+                    availableLights[int(idx)].on = True
+                    _recordWritten(int(idx), [120, 129, 1, 1, 251])
+                    await asyncio.sleep(0.05)
+                if availableLights[idx].cctOnly == True and sendVal[1] == 135:
+                    # Old-style CCT light needs split commands
+                    splitCmds = calculateSeparateBytestrings(sendVal)
+                    await neewer.write(availableLights[int(idx)].client, splitCmds[0])
+                    await asyncio.sleep(0.05)
+                    await neewer.write(availableLights[int(idx)].client, splitCmds[1])
+                else:
+                    await neewer.write(availableLights[int(idx)].client, sendVal)
+                _recordWritten(int(idx), sendVal)
         except Exception as e:
             printDebugString("Parallel write error on light " + str(idx + 1) + ": " + str(e))
 
@@ -6655,8 +6651,8 @@ def workerThread(_loop):
             try:
                 if mainWindow is not None:
                     for idx in lightIndices:
-                        if idx < len(availableLights) and availableLights[idx][3] is not None:
-                            if hasGUI: mainWindow._tableUpdateSignal.emit(["", "", "", updateStatus(True, availableLights[idx][3])], idx)
+                        if idx < len(availableLights) and availableLights[idx].state is not None:
+                            if hasGUI: mainWindow._tableUpdateSignal.emit(["", "", "", updateStatus(True, neewer.encode(availableLights[idx].state))], idx)
             except Exception:
                 pass
             threadAction = ""
@@ -6671,8 +6667,8 @@ def workerThread(_loop):
                 _loop.run_until_complete(parallelWriteToLights(pending))
                 if mainWindow is not None:
                     for idx in pending:
-                        if idx < len(availableLights) and availableLights[idx][3] is not None:
-                            mainWindow._tableUpdateSignal.emit(["", "", "", updateStatus(True, availableLights[idx][3])], idx)
+                        if idx < len(availableLights) and availableLights[idx].state is not None:
+                            mainWindow._tableUpdateSignal.emit(["", "", "", updateStatus(True, neewer.encode(availableLights[idx].state))], idx)
 
         # VALUES THE FLASH GUARD HELD BACK: resend each light's latest value once allowed.
         # fromShow=True: the value already passed the show/base arbitration when it was held.
@@ -6699,13 +6695,13 @@ def sendShowFrames(_loop, frames):
     parallelIdx, serialIdx = [], []
     for idx, (byteVal, parallel) in frames.items():
         if idx < len(availableLights):
-            availableLights[idx][3] = list(byteVal)
+            availableLights[idx].state = neewer.decode(byteVal)
             (parallelIdx if parallel else serialIdx).append(idx)
     if parallelIdx:
         _loop.run_until_complete(parallelWriteToLights(parallelIdx, fromShow=True))
         if mainWindow is not None:
             for idx in parallelIdx:
-                mainWindow._tableUpdateSignal.emit(["", "", "", updateStatus(True, availableLights[idx][3])], idx)
+                mainWindow._tableUpdateSignal.emit(["", "", "", updateStatus(True, neewer.encode(availableLights[idx].state))], idx)
     if serialIdx:
         _loop.run_until_complete(writeToLight(serialIdx, True, False, fromShow=True))
 
@@ -7203,7 +7199,7 @@ def processHTMLCommands(paramsList, loop):
             # Store computed value in each target light's parameter slot
             for lightIdx in selectedLights:
                 if lightIdx < len(availableLights):
-                    availableLights[lightIdx][3] = computedValue
+                    availableLights[lightIdx].state = neewer.decode(computedValue)
 
             queueLightSend(selectedLights)
 
@@ -7542,7 +7538,7 @@ def processBatchCommands(batchInput, loop):
         # Store the computed value into each target light's parameter slot
         for lightIdx in selectedLights:
             if lightIdx < len(availableLights):
-                availableLights[lightIdx][3] = byteVal
+                availableLights[lightIdx].state = neewer.decode(byteVal)
                 if lightIdx not in changedLights:
                     changedLights.append(lightIdx)
                 printDebugString("Batch: light " + str(lightIdx + 1) + " -> " + mode + " " + str(byteVal))
@@ -7745,7 +7741,7 @@ class _ShowHooks:
 
     def currentBytes(self, lightIdx):
         if 0 <= lightIdx < len(availableLights):
-            return availableLights[lightIdx][3]
+            return neewer.encode(availableLights[lightIdx].state)
         return None
 
     def isLocked(self, lightIdx):
@@ -8232,7 +8228,7 @@ def _sequenceBaseCommand(lightIdx):
     # Fades that start a sequence begin from what the light returns to, not from an effect on top
     base = showEngine.baseStates.get(lightIdx) if showEngine is not None else None
     if base is None and 0 <= lightIdx < len(availableLights):
-        base = availableLights[lightIdx][3]
+        base = neewer.encode(availableLights[lightIdx].state)
     return show.bytesToCommand(base)
 
 
@@ -8445,7 +8441,7 @@ def renderSequence(nameOrData, stepMs=None, startMs=0, endMs=None):
                        "locked": bool(getLightShowPref(idx, "locked")), "simulated": sim.isSimulated(light.device)})
         changes[lightID] = []
         intent = showEngine.baseStates.get(idx) if showEngine is not None else None
-        output = _outputBytes(idx, intent if intent is not None else light[3])
+        output = _outputBytes(idx, intent if intent is not None else neewer.encode(light.state))
         baseShown[idx] = show.bytesToCommand(output) if output is not None else getLightDisplayState(idx)[0]
 
     for t in range(startMs, endMs, step):
@@ -8643,7 +8639,7 @@ def getLightDisplayState(lightIdx):
     elif light.device.address in _lastWritten:
         cmd = show.bytesToCommand(_lastWritten[light.device.address])
     else:
-        cmd = show.bytesToCommand(_outputBytes(lightIdx, light[3])) # nothing sent yet this session
+        cmd = show.bytesToCommand(_outputBytes(lightIdx, neewer.encode(light.state))) # nothing sent yet this session
     try:
         linked = light.client != "" and bool(light.client.is_connected)
     except Exception:
@@ -9272,12 +9268,12 @@ def lightStateJSON(lightIdx):
     if showEngine is not None:
         layer = show.LAYER_NAMES[showEngine.status()["owners"].get(lightIdx, 0)]
     return {"simulated": simulated, "power": power, "channel": channel,
-            "setting": _commandJSON(show.bytesToCommand(light[3])),
+            "setting": _commandJSON(show.bytesToCommand(neewer.encode(light.state))),
             "output": dict(_commandJSON(cmd) or {}, color=show.rgbHex(rgb)) if cmd else None,
             "cctRange": [minK, maxK], "cctOnly": bool(light.cctOnly),
             "role": getLightShowPref(lightIdx, "role"), "side": getLightShowPref(lightIdx, "side"),
             "depth": getLightShowPref(lightIdx, "depth"), "height": getLightShowPref(lightIdx, "height"), "aim": getLightShowPref(lightIdx, "aim"),
-            "locked": bool(getLightShowPref(lightIdx, "locked")), "layer": layer}
+            "locked": bool(getLightShowPref(lightIdx, "locked")), "layer": layer, "rssi": _rssiNumber(light)}
 
 
 # ============================================================================
@@ -9933,8 +9929,8 @@ class NLPythonServer(BaseHTTPRequestHandler):
                         mac = light.device.address
                         linked = bool(light.client != "" and hasattr(light.client, 'is_connected') and light.client.is_connected)
                         try:
-                            if light[3] is not None and isinstance(light[3], list) and len(light[3]) > 3:
-                                status = updateStatus(True, light[3])
+                            if light.state is not None:
+                                status = updateStatus(True, neewer.encode(light.state))
                             else:
                                 status = ""
                         except Exception:
@@ -10148,7 +10144,7 @@ class NLPythonServer(BaseHTTPRequestHandler):
                                 except Exception as e:
                                     self.wfile.write(bytes("     <TD STYLE='background-color:rgb(240,248,255)'>" + "<A HREF='doAction?link=" + str(a + 1) + "'>No</A></TD>\n", "utf-8")) # is the light linked?
 
-                                self.wfile.write(bytes("     <TD STYLE='background-color:rgb(240,248,255)'>" + updateStatus(False, availableLights[a][3]) + "</TD>\n", "utf-8")) # the last sent value to the light
+                                self.wfile.write(bytes("     <TD STYLE='background-color:rgb(240,248,255)'>" + updateStatus(False, neewer.encode(availableLights[a].state)) + "</TD>\n", "utf-8")) # the last sent value to the light
                                 self.wfile.write(bytes("  </TR>\n", "utf-8"))
 
                             self.wfile.write(bytes("</TABLE>\n", "utf-8"))

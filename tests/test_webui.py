@@ -122,6 +122,9 @@ def main():
         waitFor(page, "[...document.querySelectorAll('.stage-box')].every(b => b.style.background.includes('0, 255, 0'))", "green tiles")
         check(js(page, "document.querySelectorAll('[data-swatch]').length") == 4, "table swatches")
         check(js(page, "document.querySelector('[data-swatch]').style.background").startswith("rgb(0, 255, 0"), "swatch colour")
+        # 1.5.0: signal strength in the Linked cell, as on the desktop
+        waitFor(page, "(document.querySelector('[data-linked]') || {}).textContent && document.querySelector('[data-linked]').textContent.includes('(-50 dBm)')",
+                "signal strength in the Linked cell")
         # plan view: each light in its cell (the harness rig is fill and background on the left,
         # key and rim on the right, all beside you by default)
         js(page, "setStageView('plan')")

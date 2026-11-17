@@ -260,7 +260,7 @@ def boot(srcDir, verbose=False, roles=True, model="RGB660", worker=True):
         client = device.makeClient()
         client._connected = True
         if hasattr(nl, "Light"):
-            lights.append(nl.Light(device, client, "", list(START_BYTES), [3200, 5600], False, True, prefId=0, rssi=-50))
+            lights.append(nl.Light(device, client, "", nl.neewer.decode(START_BYTES), [3200, 5600], False, True, prefId=0, rssi=-50))
         else:  # v1.3.0 for compare_legacy: positional lists
             lights.append([device, client, "", list(START_BYTES), [3200, 5600], False, True, ["---", "---"], 0, -50])
     nl.availableLights = lights

@@ -16,6 +16,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 import neewerlux_sim as sim  # noqa: E402
+import neewerlux_neewer as neewer  # noqa: E402
 
 GOLDEN = [
     ("CCT", {"brightness": 100, "temp": 56}, [120, 135, 2, 100, 56, 157]),
@@ -51,7 +52,7 @@ def encoder():
     neither Qt nor bleak."""
     src = io.open(os.path.join(ROOT, "NeewerLux.py"), encoding="utf-8").read()
     tree = ast.parse(src)
-    ns = {"CCTSlider": -1}
+    ns = {"CCTSlider": -1, "neewer": neewer}
     exec("\n".join(ast.get_source_segment(src, n) for n in tree.body if isinstance(n, ast.FunctionDef) and
                    n.name in ("calculateChecksum", "calculateByteString", "calculateSeparateBytestrings")), ns)
     return ns
@@ -153,9 +154,39 @@ def t_rigPresets():
     check(rig[4][0].name == "SIM-SNL660-Practical", "CCT-only light name picks a CCT-only model")
 
 
+def t_lightStates():
+    """1.5.0: a light's state as values encodes to the bytes NeewerLux always stored, and back."""
+    S = neewer.LightState
+    for mode, kw, expected in GOLDEN:
+        if mode == "CCT":
+            state = S(mode="CCT", bri=kw["brightness"], kelvin=kw["temp"] * 100)
+        elif mode == "HSI":
+            state = S(mode="HSI", hue=kw["HSI_H"], sat=kw["HSI_S"], bri=kw["HSI_I"])
+        else:
+            state = S(mode="SCENE", bri=kw["brightness"], scene=kw["animation"])
+        check(neewer.encode(state) == expected, "%s encoded as %s, expected %s" % (state, neewer.encode(state), expected))
+        check(neewer.decode(expected) == state, "%s decoded as %s" % (expected, neewer.decode(expected)))
+    # a colour to show once switched back on: first byte 0, the checksum that of the 120 form
+    off = S(mode="HSI", power=False, hue=300, sat=100, bri=60)
+    check(neewer.encode(off) == [0, 134, 4, 44, 1, 100, 60, 207], "off marker %s" % neewer.encode(off))
+    check(neewer.decode([0, 134, 4, 44, 1, 100, 60, 207]) == off, "off marker decodes")
+    check(neewer.encode(S(mode=None, power=False)) == POWER["OFF"] and neewer.encode(S(mode=None)) == POWER["ON"], "power alone")
+    check(neewer.decode(POWER["OFF"]) == S(mode=None, power=False), "power off decodes")
+    check(neewer.encode(None) == [] and neewer.decode([]) is None, "no state")
+    for data in ([120, 135, 2, b, t, 0] for b in range(0, 101, 7) for t in range(32, 86, 5)):
+        data[-1] = neewer.checksum(data)
+        check(neewer.encode(neewer.decode(data)) == data, "round trip %s" % data)
+    try:
+        neewer.decode([120, 130, 1, 50, 0])
+        check(False, "a brightness-only packet is not a state")
+    except ValueError:
+        pass
+
+
 def main():
     enc = encoder()
     t_golden(enc)
+    t_lightStates()
     t_decoderRoundTrip(enc)
     t_badPacketsIgnored()
     t_clientQueriesAndFaults()

@@ -1356,7 +1356,7 @@ function renderLightsJSON(data) {
             <td><span class="swatch" data-swatch="${l.id}" style="background:${st.color || '#464646'}"></span></td>
             <td>${displayName}${l.model && l.name !== l.model ? ' <span style="color:var(--muted);font-size:11px">(' + l.model + ')</span>' : ''}</td>
             <td style="font-family:monospace;font-size:11px">${l.mac}</td>
-            <td class="${l.linked ? 'linked' : 'not-linked'}">${l.linked ? '● LINKED' : '○ Not linked'}</td>
+            <td class="${l.linked ? 'linked' : 'not-linked'}" data-linked="${l.id}">${l.linked ? '● LINKED' : '○ Not linked'}${l.rssi != null ? ' <span style="color:var(--muted);font-size:11px;font-weight:400">(' + l.rssi + ' dBm)</span>' : ''}</td>
             <td style="font-size:11px" data-role="${l.id}">${esc(cap(st.role || ''))}${st.locked ? ' (locked)' : ''}</td>
             <td style="font-size:11px" data-layer="${l.id}">${esc(st.layer || '')}</td>
             <td style="font-size:11px">${l.status}</td>
