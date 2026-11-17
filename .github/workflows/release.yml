@@ -1,27 +1,48 @@
-# Build NeewerLux on every push to main and keep one draft release per version up to date:
+# Build NeewerLux on every push to main or a dev-* branch and keep one draft release per version up to date:
 #   - NeewerLux-<version>-Windows.zip  (PyInstaller --onedir EXE + light_prefs/)
 #   - NeewerLux-<version>-Source.zip   (Python source distribution)
 # The version comes from pyproject.toml. Each push replaces the draft for that version, so the
 # newest test build is always on the Releases page. A draft creates no tag; publishing it
 # creates v<version> at the commit it was built from. Pushing with a version that is already
 # published fails instead of touching the published release: bump the version first.
+# main is the released line and dev-<version> branches hold the next version's work. Drafts are
+# per version, so the two never replace each other's draft, as long as a dev branch's version
+# differs from main's: a dev build with main's version fails before building.
 
 name: Build Release
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'dev-*']
   workflow_dispatch:
 
 permissions:
   contents: write  # Needed to create releases
 
 concurrency:
-  group: release-draft
-  cancel-in-progress: true  # a newer push supersedes a build still running
+  group: release-${{ github.ref }}  # per branch: a dev push neither cancels nor waits for a main build
+  cancel-in-progress: true  # a newer push to the same branch supersedes a build still running
 
 jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: A dev branch's version must differ from main's
+        if: startsWith(github.ref_name, 'dev-')
+        run: |
+          VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -1)
+          git fetch --depth=1 origin main
+          MAIN=$(git show FETCH_HEAD:pyproject.toml | sed -n 's/^version = "\(.*\)"/\1/p' | head -1)
+          if [ "$VERSION" = "$MAIN" ]; then
+            echo "::error::$GITHUB_REF_NAME has version $VERSION, the same as main: it would replace main's draft. Set the next version in pyproject.toml, uv.lock and NeewerLux.py"
+            exit 1
+          fi
+
   build-windows-exe:
+    needs: check-version
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -64,6 +85,7 @@ jobs:
           path: NeewerLux-*-Windows.zip
 
   build-source:
+    needs: check-version
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

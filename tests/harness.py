@@ -10,6 +10,8 @@ channel queries are answered through notifications, and the worker's status poll
 compare_legacy.py boots with model "RGB176" (a light that skips status polling) because
 v1.3.0's polling would otherwise add timing noise to an exact comparison.
 """
+import atexit
+import copy
 import importlib.util
 import json
 import os
@@ -29,22 +31,51 @@ RIG = [
     ("AA:00:00:00:00:04", "Background", {"role": "background", "side": "left", "order": 2}),
 ]
 START_BYTES = [120, 135, 2, 20, 56, 77]  # CCT 5600K 20%
+# A file to keep every write in, one segment per clear() (each test resets): trace_compare.py
+# compares two such traces, to show a refactor left the suites' writes alone.
+TRACE_PATH = os.environ.get("NL_WRITE_TRACE")
 
 
 class Recorder:
     def __init__(self):
         self.lock = threading.Lock()
         self.writes = []
+        self.segment = None
+        if TRACE_PATH:
+            # one JSON line per test, written when the next one starts, and the last at exit
+            open(TRACE_PATH, "w").close()
+            self.segment = []
+            self.segmentStart = time.monotonic()
+            atexit.register(self._saveSegment)
+            # test_webui and test_timeline_editor end with os._exit, which skips atexit
+            realExit = os._exit
+
+            def exitSaving(code):
+                with self.lock:
+                    self._saveSegment()
+                realExit(code)
+            os._exit = exitSaving
 
     def add(self, mac, data):
         if len(data) > 1 and data[1] in (132, 133):
             return  # status queries from the worker's poll, not light changes
         with self.lock:
-            self.writes.append((time.monotonic(), mac, list(data)))
+            now = time.monotonic()
+            self.writes.append((now, mac, list(data)))
+            if self.segment is not None:
+                self.segment.append([round((now - self.segmentStart) * 1000.0, 1), mac, list(data)])
 
     def clear(self):
         with self.lock:
             self.writes = []
+            if self.segment is not None:
+                self._saveSegment()
+                self.segment = []
+                self.segmentStart = time.monotonic()
+
+    def _saveSegment(self):
+        with open(TRACE_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(self.segment, separators=(",", ":")) + "\n")
 
     def snapshot(self):
         with self.lock:
@@ -121,8 +152,7 @@ class Rig:
         elif nl.animationRunning:
             nl.stopAnimation()
         time.sleep(0.4)
-        for light in nl.availableLights:
-            light[3] = list(bytesForAll or START_BYTES)
+        self.resetLights(bytesForAll)
         if getattr(nl, "showEngine", None) is not None:
             with nl.showEngine.lock:
                 nl.showEngine.released.clear()
@@ -131,6 +161,55 @@ class Rig:
         if hasattr(nl, "presetSounds"):
             nl.presetSounds.clear()
         self.rec.clear()
+
+    def resetLights(self, bytesForAll=None, on=None):
+        """Every light holding bytesForAll (default START_BYTES) as its stored value; on sets
+        their on/off flag too."""
+        for light in self.nl.availableLights:
+            light[3] = list(bytesForAll or START_BYTES)
+            if on is not None:
+                light[6] = bool(on)
+
+    def device(self, i):
+        """Light i's simulated device (its onWrite and latencyMs can be changed)."""
+        return self.nl.availableLights[i][0]
+
+    def setCCTOnly(self, i, cctOnly):
+        self.nl.availableLights[i][5] = bool(cctOnly)
+
+    def lightsSnapshot(self):
+        """Everything held for each light, and its device's name, for restoreLights."""
+        return [(copy.deepcopy(light[2:]), light[0], light[1], light[0].name) for light in self.nl.availableLights]
+
+    def restoreLights(self, snapshot):
+        """The lights as lightsSnapshot found them: the same devices and links, every value
+        back, and the list holding them alone (rediscover rebuilds it)."""
+        self.nl.availableLights[:] = []
+        for values, device, client, name in snapshot:
+            device.name = name
+            self.nl.availableLights.append([device, client] + copy.deepcopy(values))
+
+    def rediscover(self):
+        """What a restart does to the lights: a scan finds them again and findDevices builds each
+        from its saved preferences file, then each is linked. The same simulated devices come
+        back, in rig order."""
+        nl = self.nl
+        devices = [light[0] for light in nl.availableLights]
+
+        async def scan(return_adv=False):
+            return {d.address: (d, None) for d in devices}
+
+        real = nl.BleakScanner
+        nl.BleakScanner = type("SimScanner", (), {"discover": staticmethod(scan)})
+        try:
+            nl.availableLights[:] = []
+            nl.asyncioEventLoop.run_until_complete(nl.findDevices())
+        finally:
+            nl.BleakScanner = real
+        for light in nl.availableLights:
+            client = light[0].makeClient()
+            client._connected = True
+            light[1] = client
 
     def setShowPrefs(self, i, **prefs):
         mac = self.mac(i)
@@ -152,7 +231,9 @@ def _copyTree(src, dst):
     os.makedirs(os.path.join(dst, "light_prefs"), exist_ok=True)
 
 
-def boot(srcDir, verbose=False, roles=True, model="RGB660"):
+def boot(srcDir, verbose=False, roles=True, model="RGB660", worker=True):
+    """worker False leaves the worker thread and the compositor's thread unstarted, for a
+    caller that ticks the compositor and drains the writes itself (record_writes.py)."""
     workdir = tempfile.mkdtemp(prefix="nlharness_")
     _copyTree(srcDir, workdir)
     sys.argv = [os.path.join(workdir, "NeewerLux.py")]
@@ -185,14 +266,16 @@ def boot(srcDir, verbose=False, roles=True, model="RGB660"):
         if hasattr(nl, "loadAllSoundModes"):
             nl.loadAllSoundModes()
         nl.initShowEngine()
+        if not worker:
+            nl.showEngine.stopThread()
         if roles:
             for mac, name, prefs in RIG:
                 p = dict(nl.SHOW_PREF_DEFAULTS)
                 p.update(prefs)
                 nl.lightShowPrefs[mac] = p
 
-    worker = threading.Thread(target=nl.workerThread, args=(nl.asyncioEventLoop,), name="workerThread", daemon=True)
-    worker.start()
+    if worker:
+        threading.Thread(target=nl.workerThread, args=(nl.asyncioEventLoop,), name="workerThread", daemon=True).start()
     server = nl.ThreadingHTTPServer(("127.0.0.1", 0), nl.NLPythonServer)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     time.sleep(0.3)

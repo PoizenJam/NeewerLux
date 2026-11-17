@@ -2,7 +2,15 @@
 
 Changes relative to upstream [NeewerLite-Python v0.12d](https://github.com/taburineagle/NeewerLite-Python).
 
-## v1.4.2
+## v1.5.0 (in development)
+
+### Added
+- **`tests/record_writes.py` records every write sent to the lights**, to prove the 1.5 rework of how NeewerLux holds each light's state changes none of them. On a virtual clock, through the real show engine, limits, CCT-only fallback, flash guard and write paths, it plays every shipped animation, sequence and sound mode and 41 scenarios (presets during sequences, effects and effect queues; Scene-mode global presets; the desktop's preset buttons, sliders and power buttons; effects with fades; Off and On during shows and sound, for one light and for all; locked and limited lights; CCT-only lights under shows and sound; per-light colour temperature ranges; eye-line and flash-guard holds; presets saved, reloaded and recalled; a restart from saved light settings; one-light-at-a-time writes), and compares the writes and the saved light and preset files exactly against a baseline recorded from 1.4.2. `--trace` runs the test suites recording their writes and compares two such runs per test and light.
+
+### Changed
+- **Test builds for the next version:** pushes to `dev-*` branches build a draft release for their own version, as pushes to `main` do for the released line, without cancelling or replacing each other's builds. A dev branch with the same version as `main` fails before building.
+
+## v1.4.2 - 2026-11-16
 
 ### Fixed
 - **A global preset in Scene mode can be recalled again.** Recalling it (from the desktop's preset buttons, `use_preset=N` or the presets POST `recall`) stopped with an error and changed no light, because the scene number went to the byte encoder under the wrong name. The bug dates from upstream NeewerLite-Python (2022). Snapshot presets with scenes were not affected.
