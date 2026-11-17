@@ -2,7 +2,12 @@
 
 Changes relative to upstream [NeewerLite-Python v0.12d](https://github.com/taburineagle/NeewerLite-Python).
 
-## v1.4.2
+## v1.4.3 - 2026-11-16
+
+### Fixed
+- **Eye-line lights set to "calm" change again.** With Global Preferences set to "calm" for lights marked as in the eye line, such a light never made a large change in brightness or a red change once anything flashing played on it: it held whatever it showed when the show started, even when that was dark. It now changes about every 2 seconds, as the setting describes. "Same" and "gentler" were not affected. The bug dates from 1.3.3.
+
+## v1.4.2 - 2026-11-16
 
 ### Fixed
 - **A global preset in Scene mode can be recalled again.** Recalling it (from the desktop's preset buttons, `use_preset=N` or the presets POST `recall`) stopped with an error and changed no light, because the scene number went to the byte encoder under the wrong name. The bug dates from upstream NeewerLite-Python (2022). Snapshot presets with scenes were not affected.

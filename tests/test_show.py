@@ -1292,6 +1292,46 @@ def t_flashGuardRedFlashes(rig):
         rig.post("/NeewerLux/animate", {"action": "delete", "name": red["name"]})
 
 
+def _transitionTimes(rig, i, since):
+    """When light i's written luminance swung by at least a flash step (a strobe's dark frames
+    at brightness 0 go out as power off)."""
+    show = rig.nl.show
+    times, last = [], None
+    for t, d in writesFor(rig, i, since):
+        if d[1] in (129, 134, 135):
+            lum = show.flashLevel(show.bytesToCommand(list(d)))[0]
+            if last is not None and abs(lum - last) >= show.FLASH_LUMINANCE_STEP:
+                times.append(t)
+            last = lum
+    return times
+
+
+def t_eyelineCalmPaces(rig):
+    """1.4.3: an eye-line light under "calm" changes about every 2 seconds through a strobe. It
+    never changed at all: the guard's count needed under one transition per window for a limit
+    below 0.5, so every transition was held."""
+    nl = rig.nl
+    saved = nl.eyelineFlash
+    rig.post("/NeewerLux/animate", {"action": "save", "animation": FAST, "overwrite": True})
+    rig.setShowPrefs(FILL, eyeline=True)
+    nl.eyelineFlash = "calm"
+    try:
+        t0 = time.monotonic()
+        rig.post("/NeewerLux/animate", {"action": "play", "name": FAST["name"], "loop": True, "layer": "effect", "rate": 20})
+        end = time.monotonic() + 12.0
+        while len(_transitionTimes(rig, FILL, t0)) < 3 and time.monotonic() < end:
+            time.sleep(0.1)
+        rig.post("/NeewerLux/animate", {"action": "stop", "layer": "effect"}, 0.3)
+        times = _transitionTimes(rig, FILL, t0)
+        check(len(times) >= 3, "the eye-line light changes under calm: %d transitions in 12 s" % len(times))
+        gaps = [b - a for a, b in zip(times, times[1:])]
+        check(all(g >= 2.0 for g in gaps), "calm keeps changes about 2 s apart: %s" % ["%.2f" % g for g in gaps])
+    finally:
+        nl.eyelineFlash = saved
+        rig.setShowPrefs(FILL, eyeline=False)
+        rig.post("/NeewerLux/animate", {"action": "delete", "name": FAST["name"]})
+
+
 def t_shippedAnimationTags(rig):
     """1.4.0: every shipped animation is tagged with one energy and one feel (draft styles pick
     by them), and tags must be a list of words."""
@@ -2533,7 +2573,7 @@ TESTS = [t_maxBrightnessHTTP, t_maxBrightnessAnimationAndSequence, t_minBrightne
          t_batchKelvin, t_batchCoalescesUnderLoad, t_getDuringBusyWorkerNotDropped, t_batchStopsOverrideAnimation,
          t_batchDuringSequenceBecomesRevertTarget, t_listJsonStructured,
          t_presetEditAPI, t_animationEditAPI, t_sequenceEditAPI, t_commandsDontWaitForStatusPoll,
-         t_flashGuardLimitsOutput, t_flashGuardRedFlashes, t_shippedContentUnderFlashLimit,
+         t_flashGuardLimitsOutput, t_flashGuardRedFlashes, t_eyelineCalmPaces, t_shippedContentUnderFlashLimit,
          t_positionTargetsAndSweep, t_animationModeValidation, t_exactAnimationTiming, t_handbackFade, t_blendCommands, t_fadeInEverywhere,
          t_fadesOnlyBetweenItems,
          t_addSimulatedRig, t_compositorWakesOnlyWhenDue, t_handBackToRunningLayerFades,
