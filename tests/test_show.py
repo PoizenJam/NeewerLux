@@ -2202,6 +2202,40 @@ def t_globalScenePreset(rig):
     check(any(d[1] == 136 and d[3] == 40 and d[4] == 5 for d in w), "scene 5 at 40%% written: %s" % w[-2:])
 
 
+def t_httpAllowlist(rig):
+    """1.4.4: an allowlist entry matches whole parts of the address from the start. It matched
+    anywhere in the address, so "10." admitted 192.168.10.5, "127.0.0.1" admitted 127.0.0.10,
+    and a blank entry admitted every address. GET and POST both."""
+    nl = rig.nl
+    import urllib.error
+    allowed = nl.ipAllowed
+    check(allowed("10.0.0.5", ["10."]) and allowed("10.20.30.40", ["10"]), "10. admits 10.x.x.x")
+    check(not allowed("192.168.10.5", ["10."]) and not allowed("172.10.0.1", ["10."]), "10. no longer admits 192.168.10.5 or 172.10.0.1")
+    check(allowed("192.168.1.9", ["192.168."]) and not allowed("192.169.1.9", ["192.168."]), "192.168. admits 192.168.x.x only")
+    check(allowed("127.0.0.1", ["127.0.0.1"]) and not allowed("127.0.0.10", ["127.0.0.1"]), "a full address admits only itself")
+    check(not allowed("8.8.8.8", ["", " ", "127.0.0.1"]), "blank entries admit nobody")
+    check(allowed("192.168.1.20", [" 192.168.1. "]), "spaces around an entry are ignored")
+
+    def code(url, data=None):
+        req = urllib.request.Request("http://127.0.0.1:%d%s" % (rig.port, url), data=data, method="POST" if data else "GET")
+        try:
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return r.status
+        except urllib.error.HTTPError as e:
+            return e.code
+    saved = list(nl.acceptable_HTTP_IPs)
+    try:
+        # both admitted this computer (127.0.0.1) before 1.4.4: "0.0.1" sits inside it, "" in everything
+        for entries in (["0.0.1"], [""], ["27.0.0.1"]):
+            nl.acceptable_HTTP_IPs = entries
+            check(code("/NeewerLux/doAction?status_json") == 403, "GET refused for %s" % entries)
+            check(code("/NeewerLux/animate", b'{"action": "list"}') == 403, "POST refused for %s" % entries)
+        nl.acceptable_HTTP_IPs = ["127."]
+        check(code("/NeewerLux/doAction?status_json") == 200, "127. admits this computer")
+    finally:
+        nl.acceptable_HTTP_IPs = saved
+
+
 def t_accessToken(rig):
     """1.4.0: with an access token set, other computers need it (header or token=); this
     computer doesn't; token= never reaches the commands."""
@@ -2579,7 +2613,7 @@ TESTS = [t_maxBrightnessHTTP, t_maxBrightnessAnimationAndSequence, t_minBrightne
          t_addSimulatedRig, t_compositorWakesOnlyWhenDue, t_handBackToRunningLayerFades,
          t_soundModeHTTP, t_soundUnderShowAndEffects, t_soundRespectsLimitsAndLocks, t_soundUnavailable, t_soundModeFilesHTTP,
          t_offWinsDuringShows, t_animationFlashRates, t_shippedAnimationTags, t_soundCues, t_soundHandsBackToBase, t_manualWriteReleasesSound, t_presetFadeTakesLightsFromSound, t_soundOnSomeLights,
-         t_presetSounds, t_paletteLibrary, t_songDrafts, t_draftStyles, t_playBrightness, t_clockFollow, t_presetAsEffect, t_globalScenePreset, t_accessToken, t_reconnectBackoff, t_songHTTP, t_swatches, t_songTags, t_midiClockHTTP]
+         t_presetSounds, t_paletteLibrary, t_songDrafts, t_draftStyles, t_playBrightness, t_clockFollow, t_presetAsEffect, t_globalScenePreset, t_httpAllowlist, t_accessToken, t_reconnectBackoff, t_songHTTP, t_swatches, t_songTags, t_midiClockHTTP]
 
 
 def main():

@@ -754,13 +754,19 @@ def main():
     win.simulatedCCTOnlyCheck.setChecked(True)
     win.songSectionCommandField.setText("finder {song}")
     win.songSectionCommandOnCheck.setChecked(False)
+    # 1.4.4: a custom HTTP allowlist is saved under the name the loader reads, blank lines dropped
+    win.acceptable_HTTP_IPs_field.setPlainText("127.0.0.1\n\n 192.168.1. \n")
     nl.globalPrefsFile = os.path.join(rig.workdir, "light_prefs", "NeewerLux.prefs")
     win.saveGlobalPrefs()
     text = open(nl.globalPrefsFile, encoding="utf-8").read()
+    assert "acceptableIPs=127.0.0.1;192.168.1." in text.splitlines() and "acceptable_HTTP_IPs" not in text, "allowlist saved: " + text
     assert "envMaxBri=80" in text and "seqFrameRate=15" in text and "simulatedLights=3" in text and "simulatedCCTOnly=1" in text, text
     assert "songSectionCommand=finder {song}" in text and "songSectionCommandOn=0" in text, text
     nl.envMaxBri, nl.seqFrameRate, nl.simulatedLights, nl.simulatedCCTOnly, nl.songSectionCommandOn = 100, 20, 0, False, True
+    nl.acceptable_HTTP_IPs = list(nl.DEFAULT_HTTP_IPS)
     nl.loadPrefsFile(nl.globalPrefsFile)
+    assert nl.acceptable_HTTP_IPs == ["127.0.0.1", "192.168.1."], "the saved allowlist loads: %s" % nl.acceptable_HTTP_IPs
+    nl.acceptable_HTTP_IPs = list(nl.DEFAULT_HTTP_IPS)
     assert nl.envMaxBri == 80 and nl.seqFrameRate == 15 and nl.simulatedLights == 3 and nl.simulatedCCTOnly is True
     assert nl.songSectionCommand == "finder {song}" and nl.songSectionCommandOn is False, "the finder is kept but off"
     win.setupGlobalLightPrefsTab(True)

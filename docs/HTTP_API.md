@@ -5,7 +5,7 @@ The contract for anything that drives NeewerLux over HTTP: Stream Deck plugins, 
 ## Basics
 
 - **Base URL:** `http://<host>:<port>`, port 8080 unless changed in Global Preferences. Turn the server on from the toolbar, or have it start with the app.
-- **Access:** requests are accepted only from IP addresses matching the allowlist in Global Preferences (by default `127.0.0.1`, `192.168.` and `10.`); others get `403`. Optionally, Global Preferences > Simulation and HTTP > HTTP access token (desktop only) makes requests from other computers carry a token: the `X-NeewerLux-Token` header, or `token=...` in the address (GET commands, POST paths and the dashboard: open it as `http://<host>:8080/?token=...` and it sends the token with everything it does). Without it they get `401` with JSON `{"success": false, "errors": [...]}`. Requests from the computer NeewerLux runs on (`127.0.0.1`) never need it, so a Stream Deck or Streamer.bot there keeps working unchanged. Don't expose the port to the internet.
+- **Access:** requests are accepted only from IP addresses matching the allowlist in Global Preferences (by default `127.0.0.1`, `192.168.` and `10.`); others get `403`. Each entry matches whole parts of the address from the start: `10.` admits 10.x.x.x, `192.168.` admits 192.168.x.x, and a full address admits only itself (from 1.4.4; before, an entry matched anywhere in the address). Optionally, Global Preferences > Simulation and HTTP > HTTP access token (desktop only) makes requests from other computers carry a token: the `X-NeewerLux-Token` header, or `token=...` in the address (GET commands, POST paths and the dashboard: open it as `http://<host>:8080/?token=...` and it sends the token with everything it does). Without it they get `401` with JSON `{"success": false, "errors": [...]}`. Requests from the computer NeewerLux runs on (`127.0.0.1`) never need it, so a Stream Deck or Streamer.bot there keeps working unchanged. Don't expose the port to the internet.
 - **CORS:** every response allows any origin (`Access-Control-Allow-Origin: *`), and `OPTIONS` preflight requests are answered, so browser pages on other origins can call the API.
 - **Feature detection:** `list_json`, `status_json` and `POST /NeewerLux/settings {"action": "get"}` include `"apiVersion"`. A response without it comes from API version 1. Additions bump the version; existing fields are not removed or changed in meaning.
 - **Old path:** `/NeewerLite-Python/` is accepted in place of `/NeewerLux/` for GET commands, `batch` and `animate`.
@@ -123,7 +123,7 @@ Lights following live audio ([SOUND_MODES.md](SOUND_MODES.md)). They play on the
 ```json
 {
   "apiVersion": 2,
-  "version": "1.4.3",
+  "version": "1.4.4",
   "lights": [
     {
       "id": 1, "name": "Key", "mac": "AA:BB:CC:DD:EE:FF", "model": "NEEWER-RGB660 PRO",
