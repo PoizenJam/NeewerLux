@@ -68,6 +68,10 @@ class SimLightState:
     def toCommand(self):
         if not self.power:
             return {"mode": "OFF"}
+        return self.colourCommand()
+
+    def colourCommand(self):
+        """The colour it shows when on (kept while it is off)."""
         if self.mode == "HSI":
             return {"mode": "HSI", "hue": self.hue, "sat": self.sat, "bri": self.bri}
         if self.mode == "ANM":

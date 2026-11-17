@@ -131,7 +131,6 @@ def commandToRGB(cmd):
     if mode == "OFF":
         return (0, 0, 0)
     bri = max(0, min(100, cmd.get("bri", 100)))
-    level = 0.0 if bri == 0 else 0.4 + 0.6 * (bri / 100.0) ** 0.5
     if mode == "HSI":
         h = (cmd.get("hue", 0) % 360) / 60.0
         sat = max(0, min(100, cmd.get("sat", 100))) / 100.0
@@ -146,6 +145,12 @@ def commandToRGB(cmd):
         rgb = (200.0, 200.0, 200.0)  # scene colours come from the light's firmware; unknown here
     else:
         return None
+    return scaledRGB(rgb, bri)
+
+
+def scaledRGB(rgb, bri):
+    """A colour at a brightness, compressed as commandToRGB describes."""
+    level = 0.0 if bri <= 0 else 0.4 + 0.6 * (min(100, bri) / 100.0) ** 0.5
     return tuple(int(round(c * level)) for c in rgb)
 
 

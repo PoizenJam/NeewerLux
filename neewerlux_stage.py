@@ -8,12 +8,12 @@ The StageView widget is meant to be reused as the timeline editor's preview.
 
 try:
     from PySide6.QtCore import Qt, QTimer, QRectF, QSize, QEvent, QPointF
-    from PySide6.QtGui import QColor, QPainter, QPen, QFont, QFontMetrics, QPixmap, QPolygonF
+    from PySide6.QtGui import QColor, QPainter, QPen, QFont, QFontMetrics, QPixmap, QPolygonF, QPainterPath
     from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QCheckBox, QLabel, QDialog,
                                    QScrollArea, QPushButton, QFileDialog, QComboBox)
 except ImportError:
     from PySide2.QtCore import Qt, QTimer, QRectF, QSize, QEvent, QPointF
-    from PySide2.QtGui import QColor, QPainter, QPen, QFont, QFontMetrics, QPixmap, QPolygonF
+    from PySide2.QtGui import QColor, QPainter, QPen, QFont, QFontMetrics, QPixmap, QPolygonF, QPainterPath
     from PySide2.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QCheckBox, QLabel, QDialog,
                                    QScrollArea, QPushButton, QFileDialog, QComboBox)
 
@@ -69,6 +69,60 @@ def drawCamera(p, cx, cy, size, facing, colour=QColor(150, 150, 150)):
     p.drawPolygon(QPolygonF([QPointF(-size * 0.18, size * 0.25), QPointF(size * 0.18, size * 0.25),
                              QPointF(size * 0.3, size * 0.55), QPointF(-size * 0.3, size * 0.55)]))
     p.restore()
+
+
+def paintSwatch(p, rect, sw, radius, dim=False):
+    """A light's swatch (see NeewerLux.lightSwatch) in rect: its colour; a built-in scene's colours
+    side by side with a play mark; off as a ring in the colour it comes back on in (grey when
+    that isn't known) round a dark centre; unknown as grey with a question mark."""
+    def col(rgb):
+        c = QColor(*rgb)
+        return c.darker(250) if dim else c
+    p.save()
+    clip = QPainterPath()
+    clip.addRoundedRect(rect, radius, radius)
+    p.setClipPath(clip)
+    p.setPen(Qt.NoPen)
+    kind, rgb = sw.get("kind"), sw.get("rgb")
+    side = min(rect.width(), rect.height())
+    if kind == "scene":
+        colours = sw["colours"]
+        w = rect.width() / len(colours)
+        for i, c in enumerate(colours):
+            p.fillRect(QRectF(rect.x() + i * w, rect.y(), w + 1, rect.height()), col(c))
+        t = side * 0.42
+        x1, y1 = rect.right() - side * 0.1, rect.bottom() - side * 0.1
+        p.setPen(QPen(QColor(0, 0, 0, 160), max(1.0, side * 0.05)))
+        p.setBrush(QColor(255, 255, 255))
+        p.drawPolygon(QPolygonF([QPointF(x1 - t * 0.85, y1 - t), QPointF(x1 - t * 0.85, y1), QPointF(x1, y1 - t / 2)]))
+    elif kind == "colour":
+        p.fillRect(rect, col(rgb))
+    elif kind == "off":
+        p.fillRect(rect, col((28, 28, 28)))
+        ring = max(2.0, side * 0.22)
+        p.setPen(QPen(col(rgb) if rgb is not None else col((110, 110, 110)), ring))
+        p.setBrush(Qt.NoBrush)
+        p.drawRoundedRect(rect.adjusted(ring / 2, ring / 2, -ring / 2, -ring / 2), max(0.0, radius - ring / 2), max(0.0, radius - ring / 2))
+    else:
+        p.fillRect(rect, col((70, 70, 70)))
+        f = QFont(p.font())
+        f.setPixelSize(max(8, int(side * 0.7)))
+        p.setFont(f)
+        p.setPen(QColor(200, 200, 200))
+        p.drawText(rect, Qt.AlignCenter, "?")
+    p.restore()
+
+
+def swatchPixmap(sw, dpr=1.0, size=16):
+    """A swatch as a pixmap for a table cell's decoration."""
+    pm = QPixmap(int(size * dpr), int(size * dpr))
+    pm.setDevicePixelRatio(dpr)
+    pm.fill(Qt.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+    paintSwatch(p, QRectF(0, 0, size, size), sw, 3)
+    p.end()
+    return pm
 
 
 def drawLevelGauge(p, rect, level):
@@ -291,13 +345,15 @@ class StageView(QWidget):
             t = self.tiles[n]
             box = QRectF(x, y, tileW, swatchH)
             rgb = t.get("rgb")
-            fill = QColor(*rgb) if rgb is not None else QColor(55, 55, 55)
-            if not t.get("linked"):
-                fill = fill.darker(250)
-            p.setBrush(fill)
+            if "swatch" in t:  # live lights; previews of a render have only rgb
+                paintSwatch(p, box, t["swatch"], 10, dim=not t.get("linked"))
+                p.setBrush(Qt.NoBrush)
+            else:
+                fill = QColor(*rgb) if rgb is not None else QColor(55, 55, 55)
+                p.setBrush(fill.darker(250) if not t.get("linked") else fill)
             p.setPen(QPen(LAYER_COLOURS.get(t.get("layer"), LAYER_COLOURS["base"]), 4))
             p.drawRoundedRect(box, 10, 10)
-            if rgb is None:
+            if rgb is None and "swatch" not in t:
                 p.setPen(QColor(200, 200, 200))
                 p.setFont(font)
                 p.drawText(box, Qt.AlignCenter, "?")
@@ -395,7 +451,10 @@ class StageView(QWidget):
             ang = math.atan2(dy, dx)
             length = swatchH * 1.6
             spread = math.radians(18)
-            rgb = t.get("rgb") or (120, 120, 120)
+            sw = t.get("swatch")
+            if sw is not None and sw["kind"] in ("off", "unknown"):
+                continue  # no beam from a light that is off, or whose colour isn't known
+            rgb = (sw["rgb"] if sw is not None else t.get("rgb")) or (120, 120, 120)
             colour = QColor(rgb[0], rgb[1], rgb[2], 70)
             poly = QPolygonF([QPointF(cx, cy),
                               QPointF(cx + length * math.cos(ang - spread), cy + length * math.sin(ang - spread)),

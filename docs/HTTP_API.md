@@ -158,6 +158,7 @@ Per light:
 | `cctOnly` | `true` for lights that only do white; colour commands are converted (or ignored) |
 | `role`, `side`, `depth`, `height`, `aim`, `locked` | Show settings from Light Preferences |
 | `rssi` | The light's signal strength in dBm (from the last scan), or `null` when unknown. Added in NeewerLux 1.5.0. |
+| `swatch` | How the light's swatch is drawn, marking where it isn't the light's true colour 1:1. `kind` is `colour` (lit, `color` as shown), `scene` (a built-in scene: `colors` lists its colours, approximate, `color` the first), `off` (`color` is the colour it comes back on in, or `null` when not known; also when the light itself reports standby) or `unknown` (on, but NeewerLux hasn't set its colour this session and has no saved settings for it: Neewer lights report power and channel, not colour). Added in NeewerLux 1.5.0. |
 | `layer` | What is driving the light now: `base` (sliders, presets, light commands), `sound` (a sound mode), `show` (a sequence), `effect` or `override` (animations) |
 
 ### status_json
@@ -170,7 +171,7 @@ Per light:
   "layers": {"override": null, "effect": null, "show": null, "sound": null},
   "sequence": {"type": "sequence", "name": "Example - Four Light Demo", "state": "playing", "position_ms": 12034, "duration_ms": 40000, "brightness": 100, "watchdog_ms": 0},
   "lights": [{"id": 1, "name": "Key", "role": "key", "side": "right", "depth": "front", "height": "middle", "aim": "you", "locked": false, "layer": "show",
-              "linked": true, "simulated": false, "mode": "HSI", "bri": 45, "color": "#b04ce0"}],
+              "linked": true, "simulated": false, "mode": "HSI", "bri": 45, "color": "#b04ce0", "swatch": {"kind": "colour", "color": "#b04ce0"}}],
   "flashGuard": {"enabled": true, "held": 0, "eyeline": "same"},
   "stage": {"camera": "front"},
   "handbackFadeMs": 500,
@@ -338,7 +339,7 @@ Every value in a request is checked before any is applied; a request with an inv
 
 ## Changes by API version
 
-NeewerLux 1.5.0 adds, within version 2 (nothing changes for existing clients): `rssi` per light in `list_json`.
+NeewerLux 1.5.0 adds, within version 2 (nothing changes for existing clients): `rssi` per light in `list_json`, and `swatch` per light in `list_json` and `status_json` (in `status_json`, `mode` and `bri` are `null` for a light whose colour isn't known).
 
 NeewerLux 1.4.0 adds, within version 2 (nothing changes for existing clients): the `sound` layer, `POST /NeewerLux/sound`, `sound=` requests, `stop_layer=sound` (and `all` includes it) and `sound` in `status_json` (with `assignments`: which lights follow which mode), sound on some lights only (`lights`, `sound=start|Mode|lights`, `sound=stop|lights`), saved palettes, colour `cycle` and `cycle_s`, `sound` on preset entries, song analysis and drafts (sequence `analyze` and `draft`, `POST /NeewerLux/song`), draft styles (`draft_styles`, `save_draft_style`, `delete_draft_style`, `style_for`, and `style` or `genres` on `draft`), sequence play `brightness`, `watchdog_ms` and play by `artist` and `song` (`sequence=song|...`), the sequence state `waiting`, presets as temporary effects (`use_preset=N&layer=effect&hold=ms`, presets `recall` with `layer`), the optional access token (`401`), the sequence `sections` field drawn by the editors, your own swatches (settings `swatches`, `add_swatch`, `delete_swatch`), and `artist` and `title` in song analyses. NeewerLux 1.4.1 adds the sound `tempo_range`, `midi_devices`, `midi` and `midi_transport` actions, `sound=tempo|min|max` and `sound=midi|Input`, `midi` in the sound status, `tempoRange` and the `kick` level in the sound status, and the `kick` drive for sound modes.
 

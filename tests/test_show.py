@@ -1767,6 +1767,56 @@ def t_soundCues(rig):
     check(not nl.audioEngine.running, "capture stops when the sequence ends (nothing else listens)")
 
 
+def t_lightSwatches(rig):
+    """1.5: the swatch says when it isn't the light's true colour 1:1. Neewer lights report power
+    and channel but no colour, so a light nothing has set this session (and with no saved
+    settings) is unknown; a scene shows its colours still; off shows the colour it comes back on
+    in, which the light's own power report (standby) also triggers."""
+    nl = rig.nl
+    light = nl.availableLights[RIM]
+    mac = light.device.address
+    saved = (nl._lastWritten.pop(mac, None), mac in nl._lightsOff, light.stateKnown, list(light.status))
+    isSimulated = nl.sim.isSimulated
+    nl.sim.isSimulated = lambda device: False  # the rig's lights stand in for real ones here
+    try:
+        nl._lightsOff.discard(mac)
+        light.stateKnown = False
+        light.status = ["ON", 1]
+        check(nl.lightSwatch(RIM) == {"kind": "unknown", "rgb": None}, "nothing set this session: unknown, %s" % nl.lightSwatch(RIM))
+        st = [l for l in rig.getJSON("status_json")["lights"] if l["id"] == RIM + 1][0]
+        check(st["swatch"] == {"kind": "unknown", "color": None} and st["mode"] is None, "status_json says so too: %s" % st["swatch"])
+        light.stateKnown = True  # restored from its saved settings
+        check(nl.lightSwatch(RIM)["kind"] == "colour", "a restored colour counts as known")
+        light.stateKnown = False
+        rig.get("light=3&mode=CCT&temp=56&bri=100", 0.4)
+        sw = nl.lightSwatch(RIM)
+        check(sw == {"kind": "colour", "rgb": nl.show.commandToRGB({"mode": "CCT", "temp": 56, "bri": 100})}, "a colour sent: %s" % sw)
+        rig.get("light=3&mode=SCENE&scene=1&bri=100", 0.4)
+        sw = nl.lightSwatch(RIM)
+        check(sw["kind"] == "scene" and sw["colours"] == [(255, 0, 0), (0, 60, 255)], "police scene: red and blue, %s" % sw)
+        st = [l for l in rig.getJSON("status_json")["lights"] if l["id"] == RIM + 1][0]
+        check(st["swatch"] == {"kind": "scene", "color": "#ff0000", "colors": ["#ff0000", "#003cff"]}, "scene in status_json: %s" % st["swatch"])
+        rig.get("light=3&off", 0.4)
+        check(nl.lightSwatch(RIM) == {"kind": "off", "rgb": (255, 0, 0)}, "off: comes back on in the scene, %s" % nl.lightSwatch(RIM))
+        rig.get("light=3&on", 0.4)
+        check(nl.lightSwatch(RIM)["kind"] == "scene", "on again: the scene")
+        light.status = ["STBY", 1]  # switched off at the light itself
+        check(nl.lightSwatch(RIM)["kind"] == "off", "the light reporting standby shows off")
+        nl._lastWritten.pop(mac, None)
+        check(nl.lightSwatch(RIM) == {"kind": "off", "rgb": None}, "off, colour not known: %s" % nl.lightSwatch(RIM))
+        lj = [l for l in rig.getJSON("list_json")["lights"] if l["mac"] == mac][0]
+        check(lj["swatch"] == {"kind": "off", "color": None}, "list_json has the swatch: %s" % lj.get("swatch"))
+        nl.sim.isSimulated = isSimulated
+        check(nl.lightSwatch(RIM)["kind"] == "scene", "a simulated light always knows what it shows (still the scene): %s" % nl.lightSwatch(RIM))
+    finally:
+        nl.sim.isSimulated = isSimulated
+        if saved[0] is not None:
+            nl._lastWritten[mac] = saved[0]
+        (nl._lightsOff.add if saved[1] else nl._lightsOff.discard)(mac)
+        light.stateKnown, light.status = saved[2], saved[3]
+        rig.get("light=3&on", 0.3)
+
+
 def t_baseFollowsLightAfterSort(rig):
     """1.5 m1d: what a light returns to is kept on the light. The compositor kept it by list
     position, so sorting the light table (which reorders the list) gave each light another
@@ -2652,7 +2702,7 @@ TESTS = [t_maxBrightnessHTTP, t_maxBrightnessAnimationAndSequence, t_minBrightne
          t_fadesOnlyBetweenItems,
          t_addSimulatedRig, t_compositorWakesOnlyWhenDue, t_handBackToRunningLayerFades,
          t_soundModeHTTP, t_soundUnderShowAndEffects, t_soundRespectsLimitsAndLocks, t_soundUnavailable, t_soundModeFilesHTTP,
-         t_offWinsDuringShows, t_animationFlashRates, t_shippedAnimationTags, t_soundCues, t_baseFollowsLightAfterSort, t_soundHandsBackToBase, t_manualWriteReleasesSound, t_presetFadeTakesLightsFromSound, t_soundOnSomeLights,
+         t_offWinsDuringShows, t_animationFlashRates, t_shippedAnimationTags, t_soundCues, t_baseFollowsLightAfterSort, t_lightSwatches, t_soundHandsBackToBase, t_manualWriteReleasesSound, t_presetFadeTakesLightsFromSound, t_soundOnSomeLights,
          t_presetSounds, t_paletteLibrary, t_songDrafts, t_draftStyles, t_playBrightness, t_clockFollow, t_presetAsEffect, t_globalScenePreset, t_httpAllowlist, t_accessToken, t_reconnectBackoff, t_songHTTP, t_swatches, t_songTags, t_midiClockHTTP]
 
 

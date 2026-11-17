@@ -618,6 +618,17 @@ def main():
     win._updateShowStatus()
     swatch = win.lightTable.item(0, 5).data(nl.Qt.DecorationRole)
     assert swatch is not None, "no swatch on the first light row"
+    # 1.5 swatch states: drawn as pixmaps; the middle of an off swatch is dark, its edge the colour
+    from neewerlux_stage import swatchPixmap
+    def centreAndEdge(sw):
+        img = swatchPixmap(sw, 1.0).toImage()
+        return img.pixelColor(8, 8).getRgb()[:3], img.pixelColor(8, 1).getRgb()[:3]
+    assert centreAndEdge({"kind": "colour", "rgb": (0, 200, 0)})[0] == (0, 200, 0), "a colour fills the swatch"
+    centre, edge = centreAndEdge({"kind": "off", "rgb": (0, 200, 0)})
+    assert max(centre) < 60 and edge[1] > 150, "off: dark centre, coloured ring: %s %s" % (centre, edge)
+    scene = swatchPixmap({"kind": "scene", "rgb": (255, 0, 0), "colours": [(255, 0, 0), (0, 0, 255)]}, 1.0).toImage()
+    assert scene.pixelColor(3, 3).red() > 200 and scene.pixelColor(11, 3).blue() > 200, "scene: its colours side by side"
+    assert scene.pixelColor(10, 11).getRgb()[:3] == (255, 255, 255), "scene: the play mark"
     stage.hide()
     assert not stage.timer.isActive(), "Stage polling must stop while hidden"
     nl.sequenceControl("stop")

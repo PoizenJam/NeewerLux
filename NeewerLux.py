@@ -211,7 +211,7 @@ class Light:
     values (neewerlux_neewer.LightState), turned into bytes only where bytes are needed."""
 
     def __init__(self, device, client="", name="", state=None, cctRange=None, cctOnly=False, on=True,
-                 status=None, prefId=0, rssi=None, base=None):
+                 status=None, prefId=0, rssi=None, base=None, stateKnown=False):
         self.device = device        # the Bleak scan object (.name is the model, .address the MAC)
         self.client = client        # the Bleak connection, "" until linked
         self.name = name            # the custom name, "" when there is none
@@ -225,6 +225,9 @@ class Light:
         # The last colour set outside the show layers (None: none this session). state also takes
         # every frame a show sends, so this is what the light returns to; it survives Off and On.
         self.base = base
+        # True when state came from the light's saved settings: the light can't be asked its colour
+        # (Neewer lights report power and channel only), so otherwise it is a guess until a write
+        self.stateKnown = stateKnown
 
     @property
     def id(self):
@@ -2305,10 +2308,12 @@ try: # try to load the GUI
                 item = self.lightTable.item(row, 5)
                 if item is None:
                     continue
-                rgb = getLightDisplayState(row)[1]
-                if self._swatches.get(row) != rgb or item.data(Qt.DecorationRole) is None:
-                    self._swatches[row] = rgb
-                    item.setData(Qt.DecorationRole, QColor(*rgb) if rgb is not None else QColor(70, 70, 70))
+                sw = lightSwatch(row)
+                if self._swatches.get(row) != sw or item.data(Qt.DecorationRole) is None:
+                    from neewerlux_stage import swatchPixmap
+                    self._swatches[row] = sw
+                    item.setData(Qt.DecorationRole, swatchPixmap(sw, self.devicePixelRatioF()))
+                    item.setToolTip(swatchTip(sw))
                 role = str(getLightShowPref(row, "role")).capitalize() + (" (locked)" if getLightShowPref(row, "locked") else "")
                 layer = show.LAYER_NAMES[layers.get(row, 0)]
                 for col, text in ((7, role), (8, layer)):
@@ -5889,7 +5894,7 @@ async def findDevices():
                 lightShowPrefs[device.address.upper()] = parseShowPrefFields([str(x) for x in customPrefs])
 
             if customPrefs[3] is not None and isinstance(customPrefs[3], list): # we have previously stored parameters
-                availableLights.append(Light(device, "", customPrefs[0], neewer.decode(customPrefs[3]), customPrefs[1], customPrefs[2], prefId=prefID, rssi=rssi))
+                availableLights.append(Light(device, "", customPrefs[0], neewer.decode(customPrefs[3]), customPrefs[1], customPrefs[2], prefId=prefID, rssi=rssi, stateKnown=True))
             else: # no stored parameters, use defaults
                 availableLights.append(Light(device, "", customPrefs[0], neewer.decode([120, 135, 2, 20, 56, 77]), customPrefs[1], customPrefs[2], prefId=prefID, rssi=rssi))
 
@@ -8710,6 +8715,54 @@ def getLightDisplayState(lightIdx):
     return cmd, show.commandToRGB(cmd), linked, simulated
 
 
+def lightSwatch(lightIdx):
+    """How a light's colour swatch is drawn (light table and Stage, desktop and web), marking
+    when it isn't the light's true colour 1:1:
+      {"kind": "colour", "rgb": (r, g, b)}                  lit, the colour it shows
+      {"kind": "scene", "rgb": first, "colours": [...]}     a built-in scene, its colours drawn still
+      {"kind": "off", "rgb": (r, g, b) or None}             off; the colour it comes back on in, if known
+      {"kind": "unknown", "rgb": None}                      on, colour not known
+    Neewer lights report power and channel but not colour, so a light's colour is known only
+    once NeewerLux has sent one this session or restored its saved settings."""
+    light = availableLights[lightIdx]
+    mac = light.device.address
+    if sim.isSimulated(light.device):
+        colour, off = light.device.state.colourCommand(), not light.device.state.power
+    else:
+        colour = None
+        if mac in _lastWritten:
+            colour = show.bytesToCommand(_lastWritten[mac])
+        elif light.stateKnown and light.state is not None and light.state.mode is not None:
+            colour = show.bytesToCommand(_outputBytes(lightIdx, neewer.encode(light.state.with_(power=True))))
+        reported = light.status[0] if isinstance(light.status, list) and light.status else None
+        off = mac in _lightsOff or reported == "STBY"
+    colours = None
+    if colour is not None and colour.get("mode") == "ANM":
+        colours = [show.scaledRGB(c, colour.get("bri", 100)) for c in neewer.SCENE_COLOURS.get(colour.get("scene"), ((200, 200, 200),))]
+    rgb = colours[0] if colours else show.commandToRGB(colour)
+    if off:
+        return {"kind": "off", "rgb": rgb}
+    if rgb is None:
+        return {"kind": "unknown", "rgb": None}
+    if colours:
+        return {"kind": "scene", "rgb": rgb, "colours": colours}
+    return {"kind": "colour", "rgb": rgb}
+
+
+def swatchTip(sw):
+    """The swatch's hover text (the dashboard has the same wording)."""
+    if sw["kind"] == "off":
+        return "Off (comes back on in this colour)" if sw["rgb"] is not None else "Off (colour not known)"
+    return {"scene": "Built-in scene (colours approximate)", "unknown": "Colour not known until NeewerLux sets it"}.get(sw["kind"], "")
+
+
+def swatchJSON(sw):
+    out = {"kind": sw["kind"], "color": show.rgbHex(sw["rgb"])}
+    if "colours" in sw:
+        out["colors"] = [show.rgbHex(c) for c in sw["colours"]]
+    return out
+
+
 def _outputBytes(lightIdx, byteVal):
     """The bytes a light would actually receive for a requested value: CCT-only conversion,
     then the brightness limits. None when the CCT-only setting is "ignore"."""
@@ -8726,10 +8779,13 @@ def getStageTiles():
     for idx in sorted(range(len(availableLights)), key=lightSweepKey):
         cmd, rgb, linked, simulated = getLightDisplayState(idx)
         light = availableLights[idx]
+        sw = lightSwatch(idx)
+        if sw["kind"] == "unknown":
+            cmd = None  # what NeewerLux would guess isn't what the light shows
         tiles.append({"name": light.name if light.name else light.device.name, "role": getLightShowPref(idx, "role"),
                       "side": getLightShowPref(idx, "side"), "depth": getLightShowPref(idx, "depth"),
                       "height": getLightShowPref(idx, "height"), "aim": getLightShowPref(idx, "aim"), "camera": cameraPosition,
-                      "rgb": rgb, "mode": cmd["mode"] if cmd else "", "bri": cmd.get("bri", "") if cmd else "",
+                      "rgb": rgb, "swatch": sw, "mode": cmd["mode"] if cmd else "", "bri": cmd.get("bri", "") if cmd else "",
                       "linked": linked, "simulated": simulated,
                       "layer": "base" if getLightShowPref(idx, "locked") else show.LAYER_NAMES[owners.get(idx, 0)]})
     return tiles
@@ -9288,6 +9344,9 @@ def getShowStatus():
     for idx, light in enumerate(availableLights):
         prefID = light.prefId
         cmd, rgb, linked, simulated = getLightDisplayState(idx)
+        sw = lightSwatch(idx)
+        if sw["kind"] == "unknown":
+            cmd = None  # what NeewerLux would guess isn't what the light shows
         lights.append({"id": prefID if prefID > 0 else idx + 1,
                        "name": light.name if light.name else light.device.name,
                        "role": getLightShowPref(idx, "role"), "side": getLightShowPref(idx, "side"),
@@ -9296,7 +9355,7 @@ def getShowStatus():
                        "layer": show.LAYER_NAMES[st["owners"].get(idx, 0)],
                        "linked": linked, "simulated": simulated,
                        "mode": cmd["mode"] if cmd else None, "bri": cmd.get("bri") if cmd else None,
-                       "color": show.rgbHex(rgb)})
+                       "color": show.rgbHex(rgb), "swatch": swatchJSON(sw)})
     return {"apiVersion": API_VERSION, "layers": st["layers"], "sequence": st["sequence"], "lights": lights,
             "flashGuard": {"enabled": flashGuardEnabled, "held": flashGuard.held, "eyeline": eyelineFlash},
             "stage": {"camera": cameraPosition}, "handbackFadeMs": handbackFadeMs, "fadeInMs": fadeInMs,
@@ -9333,6 +9392,7 @@ def lightStateJSON(lightIdx):
     return {"simulated": simulated, "power": power, "channel": channel,
             "setting": _commandJSON(show.bytesToCommand(neewer.encode(light.state))),
             "output": dict(_commandJSON(cmd) or {}, color=show.rgbHex(rgb)) if cmd else None,
+            "swatch": swatchJSON(lightSwatch(lightIdx)),
             "cctRange": [minK, maxK], "cctOnly": bool(light.cctOnly),
             "role": getLightShowPref(lightIdx, "role"), "side": getLightShowPref(lightIdx, "side"),
             "depth": getLightShowPref(lightIdx, "depth"), "height": getLightShowPref(lightIdx, "height"), "aim": getLightShowPref(lightIdx, "aim"),

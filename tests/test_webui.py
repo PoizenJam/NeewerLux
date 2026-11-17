@@ -122,6 +122,15 @@ def main():
         waitFor(page, "[...document.querySelectorAll('.stage-box')].every(b => b.style.background.includes('0, 255, 0'))", "green tiles")
         check(js(page, "document.querySelectorAll('[data-swatch]').length") == 4, "table swatches")
         check(js(page, "document.querySelector('[data-swatch]').style.background").startswith("rgb(0, 255, 0"), "swatch colour")
+        # 1.5: a scene's colours with a play mark, off as a ring in the colour it comes back on in
+        rig.get("light=1&mode=SCENE&scene=1&bri=100", 0.3)
+        rig.get("light=2&off", 0.3)
+        waitFor(page, "!!document.querySelector('[data-swatch=\"1\"] .sw-play') && document.querySelector('[data-swatch=\"1\"]').style.background.includes('gradient')",
+                "scene swatch: its colours and a play mark")
+        waitFor(page, "document.querySelector('[data-swatch=\"2\"]').style.boxShadow.includes('0, 255, 0')", "off swatch: a ring in its colour")
+        check(js(page, "!!document.querySelector('.stage-box .sw-play')"), "the Stage marks the scene too")
+        rig.get("light=*&on", 0.3)
+        rig.get("light=*&mode=HSI&hue=120&sat=100&bri=100", 0.5)
         # 1.5.0: signal strength in the Linked cell, as on the desktop, with power and channel under it
         waitFor(page, "(document.querySelector('[data-linked]') || {}).textContent && document.querySelector('[data-linked]').textContent.includes('(-50 dBm)')",
                 "signal strength in the Linked cell")

@@ -17,6 +17,15 @@ SET_LIGHT_UUID = "69400002-B5A3-F393-E0A9-E50E24DCCA99"
 
 CMD_POWER, CMD_HSI, CMD_CCT, CMD_SCENE = 129, 134, 135, 136
 
+# The colours each built-in scene (1 to 9) cycles through, for drawing it still on a swatch.
+# Approximate, from the scene names (the light doesn't report them): police red and blue,
+# ambulance red and white, fire truck red and orange, fireworks and party rainbow, candlelight
+# warm white, lightning cool white, paparazzi white, TV screen bluish white.
+_RAINBOW = ((255, 0, 0), (255, 170, 0), (0, 200, 0), (0, 120, 255), (170, 0, 255))
+SCENE_COLOURS = {1: ((255, 0, 0), (0, 60, 255)), 2: ((255, 0, 0), (255, 255, 255)), 3: ((255, 0, 0), (255, 120, 0)),
+                 4: _RAINBOW, 5: _RAINBOW[::-1], 6: ((255, 160, 70),), 7: ((215, 225, 255), (120, 140, 255)),
+                 8: ((255, 255, 255),), 9: ((190, 210, 255), (120, 150, 230))}
+
 
 @dataclass(frozen=True)
 class LightState:

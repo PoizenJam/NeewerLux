@@ -114,7 +114,11 @@ a:hover { text-decoration: underline; }
 #lightColsMenu { position:fixed; z-index:60; background:var(--card); border:1px solid var(--border); border-radius:6px; padding:6px 10px; box-shadow:0 4px 14px rgba(0,0,0,.35); font-size:12px; }
 #lightColsMenu label { display:block; padding:3px 0; white-space:nowrap; }
 .light-table th.sortable { cursor:pointer; }
-.swatch { display:inline-block; width:14px; height:14px; border-radius:3px; border:1px solid var(--border); vertical-align:middle; }
+.swatch { display:inline-block; position:relative; overflow:hidden; width:14px; height:14px; border-radius:3px; border:1px solid var(--border); vertical-align:middle; }
+/* swatch marks: a built-in scene playing, a colour not known */
+.sw-play { position:absolute; right:1px; bottom:1px; width:0; height:0; border-left:6px solid #fff; border-top:4px solid transparent; border-bottom:4px solid transparent; filter:drop-shadow(0 0 1px #000); }
+.sw-q { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#ccc; font-size:10px; font-style:normal; }
+.stage-box .sw-play { right:6px; bottom:6px; border-left-width:16px; border-top-width:10px; border-bottom-width:10px; }
 .stage-grid { display:flex; flex-wrap:wrap; gap:12px; }
 .swatches { display:grid; grid-template-columns:repeat(6, 26px); gap:3px; }
 .swatches button { width:26px; height:22px; border:1px solid #666; border-radius:3px; padding:0; cursor:pointer; }
@@ -1379,7 +1383,8 @@ const LIGHT_ROLE_ORDER = ['key', 'fill', 'rim', 'background', 'practical'];
 const lightHasName = l => l.name && l.name !== l.model;
 const LIGHT_COLS = [
     {key: 'id', label: 'ID', sort: l => l.id, cell: l => `<td class="light-id">${l.id}</td>`},
-    {key: 'colour', label: '', menu: 'Colour', cell: (l, st) => `<td><span class="swatch" data-swatch="${l.id}" style="background:${st.color || '#464646'}"></span></td>`},
+    {key: 'colour', label: '', menu: 'Colour', cell: (l, st) => { const [style, inner] = swatchLook(st.swatch, 3);
+        return `<td><span class="swatch" data-swatch="${l.id}" style="${style}" title="${swatchTip(st.swatch)}">${inner}</span></td>`; }},
     {key: 'name', label: 'Light Name', sort: l => (lightHasName(l) ? '0' : '1') + (l.name || '').toLowerCase(),
      cell: l => lightHasName(l) ? `<td data-name="${l.id}">${esc(l.name)}</td>` : `<td data-name="${l.id}" style="color:var(--muted)">${esc(l.model || l.mac)}</td>`},
     {key: 'type', label: 'Type', sort: l => l.model || '', cell: l => `<td style="font-size:11px" data-type="${l.id}">${esc(l.model || '')}</td>`},
@@ -1602,7 +1607,12 @@ async function pollStatus() {
     renderSoundStatus();
     (lastStatus.lights || []).forEach(l => {
         const sw = document.querySelector('[data-swatch="' + l.id + '"]');
-        if (sw) sw.style.background = l.color || '#464646';
+        if (sw) {
+            const [style, inner] = swatchLook(l.swatch, 3);
+            if (sw.getAttribute('style') !== style) sw.setAttribute('style', style);
+            if (sw.innerHTML !== inner) sw.innerHTML = inner;
+            sw.title = swatchTip(l.swatch);
+        }
         const ly = document.querySelector('[data-layer="' + l.id + '"]');
         if (ly) ly.textContent = l.layer || '';
         const ro = document.querySelector('[data-role="' + l.id + '"]');
@@ -1628,6 +1638,23 @@ function setStageView(v) {
 }
 function setStagePlan(on) { setStageView(on ? 'plan' : 'strip'); }  // older name
 const HEIGHT_LEVEL = {low: 1, middle: 2, high: 3};
+// A light's swatch (status_json "swatch"): [style, inner HTML]. Marks where it isn't the light's
+// true colour 1:1: a scene's colours drawn still with a play mark, off as a ring in the colour it
+// comes back on in (grey when not known) round a dark centre, a colour not known as grey with "?".
+function swatchLook(sw, ring) {
+    if (!sw) return ['background:#464646', ''];
+    if (sw.kind === 'scene') {
+        const cs = sw.colors || [sw.color], step = 100 / cs.length;
+        return ['background:linear-gradient(90deg,' + cs.map((c, i) => c + ' ' + (i * step) + '% ' + ((i + 1) * step) + '%').join(',') + ')', '<i class="sw-play"></i>'];
+    }
+    if (sw.kind === 'off') return ['background:#1c1c1c;box-shadow:inset 0 0 0 ' + ring + 'px ' + (sw.color || '#6e6e6e'), ''];
+    if (sw.kind === 'unknown') return ['background:#464646', '<i class="sw-q">?</i>'];
+    return ['background:' + sw.color, ''];
+}
+function swatchTip(sw) {
+    return !sw ? '' : {scene: 'Built-in scene (colours approximate)', off: sw.color ? 'Off (comes back on in this colour)' : 'Off (colour not known)',
+        unknown: 'Colour not known until NeewerLux sets it', colour: ''}[sw.kind] || '';
+}
 function stageTileHTML(t) {
     // t: name, role, color, mode, bri, linked, simulated, layer, side, depth, height, aim
     let detail = cap(t.role || '');
@@ -1636,17 +1663,21 @@ function stageTileHTML(t) {
     const lvl = HEIGHT_LEVEL[t.height];
     // in the plan, a soft wedge in the light's colour points where it aims (at you: towards the middle)
     let beam = '';
-    if (stageView === 'plan' && t.color) {
+    const sw = t.swatch, lit = !sw || sw.kind === 'colour' || sw.kind === 'scene';
+    const beamColour = sw ? sw.color : t.color;
+    if (stageView === 'plan' && lit && beamColour) {
         const COL = {left: -1, centre: 0, right: 1}, ROW = {front: -1, beside: 0, back: 1};
         const v = AIM_VECTOR[t.aim] || [-(COL[t.side] || 0), -(ROW[t.depth] || 0)];
-        if (v[0] || v[1]) beam = '<span class="beam" style="background:' + t.color + ';transform:rotate(' + Math.round(Math.atan2(v[1], v[0]) * 180 / Math.PI) + 'deg)"></span>';
+        if (v[0] || v[1]) beam = '<span class="beam" style="background:' + beamColour + ';transform:rotate(' + Math.round(Math.atan2(v[1], v[0]) * 180 / Math.PI) + 'deg)"></span>';
     }
-    return '<div class="stage-tile" title="' + esc(t.name) + ' (' + esc(pos) + ')">' + beam
-        + '<div class="stage-box layer-' + esc(t.layer || 'base') + '" style="background:' + (t.color || '#373737') + ';' + (t.linked === false ? 'filter:brightness(.4);' : '') + '">'
+    const [look, mark] = sw ? swatchLook(sw, 10) : ['background:' + (t.color || '#373737'), ''];
+    return '<div class="stage-tile" title="' + esc(t.name) + ' (' + esc(pos) + ')' + (swatchTip(sw) ? ': ' + esc(swatchTip(sw)) : '') + '">' + beam
+        + '<div class="stage-box layer-' + esc(t.layer || 'base') + '" style="' + look + ';' + (t.linked === false ? 'filter:brightness(.4);' : '') + '">'
+        + (sw && sw.kind === 'scene' ? mark : '')
         + (t.simulated ? '<span class="sim">SIM</span>' : '')
         + (stageView === 'plan' && lvl ? '<span class="hb">' + [3, 2, 1].map(n => '<i class="' + (lvl >= n ? 'on' : '') + '"></i>').join('') + '</span>' : '')
         + (stageView === 'plan' && t.aim && t.aim !== 'you' && AIM_ARROW[t.aim] ? '<span class="aim">' + AIM_ARROW[t.aim] + '</span>' : '')
-        + (t.color ? '' : '<span class="unknown">?</span>') + '</div>'
+        + ((sw ? sw.kind === 'unknown' : !t.color) ? '<span class="unknown">?</span>' : '') + '</div>'
         + '<div class="stage-name">' + esc(t.name) + '</div>'
         + '<div class="stage-detail">' + esc(detail) + '</div>'
         + '<div class="stage-detail">' + esc(t.linked === false ? 'not linked' : (t.layer || 'base')) + '</div></div>';
