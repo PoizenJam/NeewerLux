@@ -168,33 +168,35 @@ class Rig:
         for light in self.nl.availableLights:
             light[3] = list(bytesForAll or START_BYTES)
             if on is not None:
-                light[6] = bool(on)
+                light.on = bool(on)
 
     def device(self, i):
         """Light i's simulated device (its onWrite and latencyMs can be changed)."""
-        return self.nl.availableLights[i][0]
+        return self.nl.availableLights[i].device
 
     def setCCTOnly(self, i, cctOnly):
-        self.nl.availableLights[i][5] = bool(cctOnly)
+        self.nl.availableLights[i].cctOnly = bool(cctOnly)
 
     def lightsSnapshot(self):
         """Everything held for each light, and its device's name, for restoreLights."""
-        return [(copy.deepcopy(light[2:]), light[0], light[1], light[0].name) for light in self.nl.availableLights]
+        return [(light.device, light.client, light.device.name,
+                 copy.deepcopy({k: v for k, v in vars(light).items() if k not in ("device", "client")}))
+                for light in self.nl.availableLights]
 
     def restoreLights(self, snapshot):
         """The lights as lightsSnapshot found them: the same devices and links, every value
         back, and the list holding them alone (rediscover rebuilds it)."""
         self.nl.availableLights[:] = []
-        for values, device, client, name in snapshot:
+        for device, client, name, values in snapshot:
             device.name = name
-            self.nl.availableLights.append([device, client] + copy.deepcopy(values))
+            self.nl.availableLights.append(self.nl.Light(device, client, **copy.deepcopy(values)))
 
     def rediscover(self):
         """What a restart does to the lights: a scan finds them again and findDevices builds each
         from its saved preferences file, then each is linked. The same simulated devices come
         back, in rig order."""
         nl = self.nl
-        devices = [light[0] for light in nl.availableLights]
+        devices = [light.device for light in nl.availableLights]
 
         async def scan(return_adv=False):
             return {d.address: (d, None) for d in devices}
@@ -207,9 +209,9 @@ class Rig:
         finally:
             nl.BleakScanner = real
         for light in nl.availableLights:
-            client = light[0].makeClient()
+            client = light.device.makeClient()
             client._connected = True
-            light[1] = client
+            light.client = client
 
     def setShowPrefs(self, i, **prefs):
         mac = self.mac(i)
@@ -257,7 +259,10 @@ def boot(srcDir, verbose=False, roles=True, model="RGB660", worker=True):
         device.onWrite = rec.add
         client = device.makeClient()
         client._connected = True
-        lights.append([device, client, "", list(START_BYTES), [3200, 5600], False, True, ["---", "---"], 0, -50])
+        if hasattr(nl, "Light"):
+            lights.append(nl.Light(device, client, "", list(START_BYTES), [3200, 5600], False, True, prefId=0, rssi=-50))
+        else:  # v1.3.0 for compare_legacy: positional lists
+            lights.append([device, client, "", list(START_BYTES), [3200, 5600], False, True, ["---", "---"], 0, -50])
     nl.availableLights = lights
     nl.loadAllAnimations()
     nl.loadLightAliases()

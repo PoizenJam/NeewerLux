@@ -595,8 +595,10 @@ def main(argv):
         return 0
     if "--record" in argv:
         os.makedirs(os.path.dirname(BASELINE), exist_ok=True)
-        with gzip.open(BASELINE, "wt", encoding="utf-8") as f:
-            json.dump(result, f, separators=(",", ":"), sort_keys=True)
+        # no time or file name in the gzip header: re-recording the same writes gives the same
+        # bytes, so git only shows the baseline changed when the writes did
+        with open(BASELINE, "wb") as raw, gzip.GzipFile(fileobj=raw, mode="wb", mtime=0, filename="") as gz:
+            gz.write(json.dumps(result, separators=(",", ":"), sort_keys=True).encode("utf-8"))
         print("recorded %d items to %s" % (len(result), os.path.relpath(BASELINE, ROOT)))
         return 0
     with gzip.open(BASELINE, "rt", encoding="utf-8") as f:

@@ -199,18 +199,44 @@ lastAnimButtonPressed = 1 # which animation button you clicked last - if none, t
 lastSelection = [] # the current light selection (this is for snapshot preset entering/leaving buttons)
 lastSortingField = -1 # the last field used for sorting purposes
 
-availableLights = [] # the list of Neewer lights currently available to control
-# List Subitems (for ^^^^^^):
-# [0] - Bleak Scan Object (can use .name / .address to get specifics; RSSI stored separately at index [9])
-# [1] - Bleak Connection (the actual Bluetooth connection to the light itself)
-# [2] - Custom Name for Light (string)
-# [3] - Last Used Parameters (list)
-# [4] - The range of color temperatures to use in CCT mode (list, min, max) <- changed in 0.12
-# [5] - Whether or not to send Brightness and Hue independently for old lights (boolean)
-# [6] - Whether or not this light has been manually turned ON/OFF (boolean)
-# [7] - The Power and Channel data returned for this light (list)
-# [8] - Preferred ID for sorting (int)
-# [9] - Last known RSSI value in dBm (int or str "?")
+availableLights = [] # the list of Neewer lights currently available to control (Light objects)
+
+
+class Light:
+    """One light NeewerLux knows about. Until 1.5 each light was a positional list; the fields
+    are named now. value (the old [3]: the last value set, as command bytes) is still reached
+    as light[3] until 1.5 m1c holds the state as values; light[i] reaches every field by its old
+    position until m1d removes that."""
+    FIELDS = ("device", "client", "name", "value", "cctRange", "cctOnly", "on", "status", "prefId", "rssi")
+
+    def __init__(self, device, client="", name="", value=None, cctRange=None, cctOnly=False, on=True,
+                 status=None, prefId=0, rssi=None):
+        self.device = device        # the Bleak scan object (.name is the model, .address the MAC)
+        self.client = client        # the Bleak connection, "" until linked
+        self.name = name            # the custom name, "" when there is none
+        self.value = value          # light[3] until m1c, see above
+        self.cctRange = cctRange    # [min, max] colour temperature in Kelvin
+        self.cctOnly = cctOnly      # an older light: CCT only, brightness and temperature sent separately
+        self.on = on                # switched on or off by hand
+        self.status = status if status is not None else ["---", "---"]  # power and channel as the light reports them
+        self.prefId = prefId        # preferred ID for numbering and sorting, 0 = automatic
+        self.rssi = rssi            # last signal strength in dBm from a scan, None when unknown
+
+    @property
+    def id(self):
+        """The stable ID: the MAC address in upper case."""
+        return self.device.address.upper()
+
+    # Positional access, temporary (removed in 1.5 m1d)
+    def __getitem__(self, i):
+        return getattr(self, Light.FIELDS[i])
+
+    def __setitem__(self, i, v):
+        setattr(self, Light.FIELDS[i], v)
+
+    def __len__(self):
+        return len(Light.FIELDS)
+
 
 # Light Preset ***Default*** Settings (for sections below):
 # NOTE: The list is 0-based, so the preset itself is +1 from the subitem
@@ -853,8 +879,8 @@ try: # try to load the GUI
             def _buildTargetChoices():
                 choices = [("All Lights (Global)", "-1")]
                 for i, light in enumerate(availableLights):
-                    prefID = light[8] if len(light) > 8 else 0
-                    cname = light[2]; model = light[0].name; mac = light[0].address
+                    prefID = light.prefId
+                    cname = light.name; model = light.device.name; mac = light.device.address
                     if prefID > 0:
                         choices.append((str(prefID) + " - " + (cname or model), str(prefID)))
                     elif cname:
@@ -1371,8 +1397,8 @@ try: # try to load the GUI
                     # Try to resolve MAC to a name
                     lightLabel = str(mac)
                     for light in availableLights:
-                        if light[0].address == mac:
-                            lightLabel = light[2] if light[2] else light[0].name
+                        if light.device.address == mac:
+                            lightLabel = light.name if light.name else light.device.name
                             break
                 if len(params) >= 3:
                     mode = params[0]
@@ -1532,11 +1558,11 @@ try: # try to load the GUI
                 self.simulatedCCTOnlyCheck.setChecked(simulatedCCTOnly)
                 self.cctFallbackCombo.setCurrentIndex(0 if cctFallbackMode == "convert" else 1)
                 return
-            changedMAC = availableLights[lightIdx][0].address if lightIdx < len(availableLights) else None
-            selected = [availableLights[i][0].address for i in self.selectedLights() if i < len(availableLights)]
+            changedMAC = availableLights[lightIdx].device.address if lightIdx < len(availableLights) else None
+            selected = [availableLights[i].device.address for i in self.selectedLights() if i < len(availableLights)]
             self.updateLights(False)  # may reorder lights (preferred IDs) and clears the selection
             for i, light in enumerate(availableLights):
-                if light[0].address in selected:
+                if light.device.address in selected:
                     self.lightTable.selectRow(i)
             if len(selected) == 1 and selected[0] == changedMAC and self.selectedLights():
                 self.setupLightPrefsTab(self.selectedLights()[0])
@@ -2056,7 +2082,7 @@ try: # try to load the GUI
                 if not chosen:
                     self.soundStatusLabel.setText("Select the lights to follow " + name + " in the light list first")
                     return
-                lights = ";".join(availableLights[i][0].address for i in chosen)
+                lights = ";".join(availableLights[i].device.address for i in chosen)
             result = startSound(name, params=params, lights=lights)
             if result["success"]:
                 self._soundShown = self.soundStatusLabel.text()  # drops any note, so the status shows now
@@ -2820,16 +2846,7 @@ try: # try to load the GUI
             global lastSortingField
 
             if theHeader < 2: # if we didn't click on the "Linked" or "Status" headers, start processing the sort
-                sortingList = [] # a copy of the availableLights array
-                checkForCustomNames = False # whether or not to ask to sort by custom names (if there aren't any custom names, then don't allow)
-
-                for a in range(len(availableLights)): # copy the entire availableLights array into a temporary array to process it
-                    if theHeader == 0 and availableLights[a][2] != "": # if the current light has a custom name (and we clicked on Name)
-                        checkForCustomNames = True # then we need to ask what kind of sorting when we sort
-
-                    sortingList.append([availableLights[a][0], availableLights[a][1], availableLights[a][2], availableLights[a][3], \
-                                        availableLights[a][4], availableLights[a][5], availableLights[a][6], availableLights[a][7], \
-                                        availableLights[a][0].name, availableLights[a][0].address, _get_light_rssi(availableLights[a])])
+                checkForCustomNames = theHeader == 0 and any(light.name != "" for light in availableLights) # only offer sorting by custom name when there are any
             else: # we clicked on the "Linked" or "Status" headers, which do not allow sorting
                 sortingField = -1
 
@@ -2884,13 +2901,13 @@ try: # try to load the GUI
                         else:
                             doReverseSort = True
 
-                sortedList = sorted(sortingList, key = lambda x: x[sortingField], reverse = doReverseSort) # sort the list
-                availableLights.clear() # clear the list of available lights
-
-                for a in range(len(sortedList)): # rebuild the available lights list from the sorted list
-                    availableLights.append([sortedList[a][0], sortedList[a][1], sortedList[a][2], sortedList[a][3], \
-                                            sortedList[a][4], sortedList[a][5], sortedList[a][6], sortedList[a][7], \
-                                            sortedList[a][8] if len(sortedList[a]) > 8 else 0])
+                sortKeys = {2: lambda light: light.name, 8: lambda light: light.device.name,
+                            9: lambda light: light.device.address, 10: lambda light: _get_light_rssi(light)}
+                sortedList = sorted(availableLights, key=sortKeys[sortingField], reverse=doReverseSort)
+                for light in sortedList:
+                    # as before 1.5: a sort forgets the stored RSSI (the table then reads the device's)
+                    light.rssi = None
+                availableLights[:] = sortedList
                                         
                 self.updateLights(False, False) # redraw the table with the new light list (don't reorder by preferred ID)
                 lastSortingField = sortingField # keep track of the last field used for sorting, so we know whether or not to switch to ascending
@@ -3102,23 +3119,23 @@ try: # try to load the GUI
 
         def setupLightPrefsTab(self, selectedLight):
             # SET UP THE CUSTOM NAME TEXT BOX
-            if availableLights[selectedLight][2] == "":
+            if availableLights[selectedLight].name == "":
                 self.customName.setChecked(False)
                 self.customNameTF.setEnabled(False)
                 self.customNameTF.setText("") # set the "custom name" to nothing
             else:
                 self.customName.setChecked(True)
                 self.customNameTF.setEnabled(True)
-                self.customNameTF.setText(availableLights[selectedLight][2]) # set the "custom name" field to the custom name of this light
+                self.customNameTF.setText(availableLights[selectedLight].name) # set the "custom name" field to the custom name of this light
 
             # SET UP THE PREFERRED ID SPINBOX
-            prefID = availableLights[selectedLight][8] if len(availableLights[selectedLight]) > 8 else 0
+            prefID = availableLights[selectedLight].prefId
             self.preferredIDSpin.setValue(prefID)
 
             # SET UP THE MINIMUM AND MAXIMUM TEXT BOXES
-            defaultRange = getLightSpecs(availableLights[selectedLight][0].name, "temp")
+            defaultRange = getLightSpecs(availableLights[selectedLight].device.name, "temp")
 
-            if availableLights[selectedLight][4] == defaultRange:
+            if availableLights[selectedLight].cctRange == defaultRange:
                 self.colorTempRange.setChecked(False)
                 self.colorTempRange_Min_TF.setEnabled(False)
                 self.colorTempRange_Max_TF.setEnabled(False)
@@ -3130,11 +3147,11 @@ try: # try to load the GUI
                 self.colorTempRange_Min_TF.setEnabled(True)
                 self.colorTempRange_Max_TF.setEnabled(True)
                 
-                self.colorTempRange_Min_TF.setText(str(availableLights[selectedLight][4][0]))
-                self.colorTempRange_Max_TF.setText(str(availableLights[selectedLight][4][1]))
+                self.colorTempRange_Min_TF.setText(str(availableLights[selectedLight].cctRange[0]))
+                self.colorTempRange_Max_TF.setText(str(availableLights[selectedLight].cctRange[1]))
             
             # IF THE OPTION TO SEND ONLY CCT MODE IS ENABLED, THEN ENABLE THAT CHECKBOX
-            if availableLights[selectedLight][5] == True:
+            if availableLights[selectedLight].cctOnly == True:
                 self.onlyCCTModeCheck.setChecked(True)
             else:
                 self.onlyCCTModeCheck.setChecked(False)
@@ -3147,7 +3164,7 @@ try: # try to load the GUI
             for b in range(len(availableLights)):
                 if b != selectedLight:
                     cell = (getLightShowPref(b, "side"), getLightShowPref(b, "depth"))
-                    others.setdefault(cell, []).append(availableLights[b][2] if availableLights[b][2] else availableLights[b][0].name)
+                    others.setdefault(cell, []).append(availableLights[b].name if availableLights[b].name else availableLights[b].device.name)
             self.lightPositionPicker.setOthers(others)
             self.lightOrderSpin.setValue(getLightShowPref(selectedLight, "order"))
             self.lightEyelineCheck.setChecked(bool(getLightShowPref(selectedLight, "eyeline")))
@@ -3171,7 +3188,7 @@ try: # try to load the GUI
                 self.colorTempRange_Max_TF.setEnabled(True)
             else:
                 selectedRows = self.selectedLights() # get the list of currently selected lights
-                defaultSettings = getLightSpecs(availableLights[selectedRows[0]][0].name, "temp")
+                defaultSettings = getLightSpecs(availableLights[selectedRows[0]].device.name, "temp")
 
                 self.colorTempRange_Min_TF.setText(str(defaultSettings[0]))
                 self.colorTempRange_Max_TF.setText(str(defaultSettings[1]))
@@ -3183,7 +3200,7 @@ try: # try to load the GUI
             selectedRows = self.selectedLights() # get the list of currently selected lights
 
             # CHECK DEFAULT SETTINGS AGAINST THE CURRENT SETTINGS
-            defaultSettings = getLightSpecs(availableLights[selectedRows[0]][0].name)
+            defaultSettings = getLightSpecs(availableLights[selectedRows[0]].device.name)
 
             if self.colorTempRange.isChecked():
                 newRange = [testValid("range_min", self.colorTempRange_Min_TF.text(), defaultSettings[1][0], 1000, 5600, True),
@@ -3195,41 +3212,41 @@ try: # try to load the GUI
 
             if len(selectedRows) == 1: # if we have 1 selected light - which should never be false, as we can't use Prefs with more than 1
                 if self.customName.isChecked(): # if we're set to allow a custom name
-                    if availableLights[selectedRows[0]][2] != self.customNameTF.text():
-                        availableLights[selectedRows[0]][2] = self.customNameTF.text() # set this light's custom name to the text box
+                    if availableLights[selectedRows[0]].name != self.customNameTF.text():
+                        availableLights[selectedRows[0]].name = self.customNameTF.text() # set this light's custom name to the text box
                         changedPrefs += 1 # add one to the preferences changed counter
                 else: # we're not supposed to set a custom name (so delete it)
-                    if availableLights[selectedRows[0]][2] != "":
-                        availableLights[selectedRows[0]][2] = "" # clear the old custom name if we've turned this off
+                    if availableLights[selectedRows[0]].name != "":
+                        availableLights[selectedRows[0]].name = "" # clear the old custom name if we've turned this off
                         changedPrefs += 1 # add one to the preferences changed counter
 
                 # IF A CUSTOM NAME IS SET UP FOR THIS LIGHT, THEN CHANGE THE TABLE TO REFLECT THAT
-                if availableLights[selectedRows[0]][2] != "":
-                    self.setTheTable([availableLights[selectedRows[0]][2] + " (" + availableLights[selectedRows[0]][0].name + ")" "\n  [ʀssɪ: " + _get_light_rssi(availableLights[selectedRows[0]]) + " dBm]",
+                if availableLights[selectedRows[0]].name != "":
+                    self.setTheTable([availableLights[selectedRows[0]].name + " (" + availableLights[selectedRows[0]].device.name + ")" "\n  [ʀssɪ: " + _get_light_rssi(availableLights[selectedRows[0]]) + " dBm]",
                                     "", "", ""], selectedRows[0])
                 else: # if there is no custom name, then reset the table to show that
-                    self.setTheTable([availableLights[selectedRows[0]][0].name + "\n  [ʀssɪ: " + _get_light_rssi(availableLights[selectedRows[0]]) + " dBm]",
+                    self.setTheTable([availableLights[selectedRows[0]].device.name + "\n  [ʀssɪ: " + _get_light_rssi(availableLights[selectedRows[0]]) + " dBm]",
                                     "", "", ""], selectedRows[0])
 
                 if self.colorTempRange.isChecked(): # if we've asked to save a custom temperature range for this light
-                    if availableLights[selectedRows[0]][4] != newRange: # change the range in the available lights table if they are different
+                    if availableLights[selectedRows[0]].cctRange != newRange: # change the range in the available lights table if they are different
                         if defaultSettings[1] != newRange:
-                            availableLights[selectedRows[0]][4][0] = newRange[0]
-                            availableLights[selectedRows[0]][4][1] = newRange[1]
+                            availableLights[selectedRows[0]].cctRange[0] = newRange[0]
+                            availableLights[selectedRows[0]].cctRange[1] = newRange[1]
                             changedPrefs += 1 # add one to the preferences changed counter
                         else: # the ranges are the same as the default range, so we're not modifying those values
                             printDebugString("You asked for a custom range of color temperatures, but didn't specify a custom range, so not changing!")
                 else: # if the custom temp checkbox is not clicked
-                    if availableLights[selectedRows[0]][4] != defaultSettings[1]: # and the settings are not the defaults
-                        availableLights[selectedRows[0]][4] = defaultSettings[1] # restore them to the defaults
+                    if availableLights[selectedRows[0]].cctRange != defaultSettings[1]: # and the settings are not the defaults
+                        availableLights[selectedRows[0]].cctRange = defaultSettings[1] # restore them to the defaults
                         changedPrefs += 1 # add one to the preferences changed counter
 
-                if availableLights[selectedRows[0]][5] != self.onlyCCTModeCheck.isChecked():
-                    availableLights[selectedRows[0]][5] = self.onlyCCTModeCheck.isChecked() # if the option to send BRI and HUE separately is checked, then turn that on
+                if availableLights[selectedRows[0]].cctOnly != self.onlyCCTModeCheck.isChecked():
+                    availableLights[selectedRows[0]].cctOnly = self.onlyCCTModeCheck.isChecked() # if the option to send BRI and HUE separately is checked, then turn that on
                     changedPrefs += 1
 
                 # SHOW SETTINGS (role, position, sweep order, eye line, brightness limits, locked)
-                lightMAC = availableLights[selectedRows[0]][0].address.upper()
+                lightMAC = availableLights[selectedRows[0]].id
                 side, depth, height = self.lightPositionPicker.value()
                 newShowPrefs = {"role": LIGHT_ROLES[self.lightRoleCombo.currentIndex()],
                                 "side": side, "depth": depth, "height": height, "aim": self.lightPositionPicker.aim(),
@@ -3245,17 +3262,14 @@ try: # try to load the GUI
 
                 # PREFERRED ID FOR LIGHT ALIASING
                 newPrefID = self.preferredIDSpin.value()
-                oldPrefID = availableLights[selectedRows[0]][8] if len(availableLights[selectedRows[0]]) > 8 else 0
+                oldPrefID = availableLights[selectedRows[0]].prefId
                 if newPrefID != oldPrefID:
-                    if len(availableLights[selectedRows[0]]) > 8:
-                        availableLights[selectedRows[0]][8] = newPrefID
-                    else:
-                        availableLights[selectedRows[0]].append(newPrefID)
+                    availableLights[selectedRows[0]].prefId = newPrefID
                     changedPrefs += 1
 
                 if changedPrefs > 0:
                     # IF ALL THE SETTINGS ARE THE SAME AS THE DEFAULT, THEN DELETE THE PREFS FILE (IF IT EXISTS)
-                    currentPrefID = availableLights[selectedRows[0]][8] if len(availableLights[selectedRows[0]]) > 8 else 0
+                    currentPrefID = availableLights[selectedRows[0]].prefId
                     if defaultSettings[0] == self.customNameTF.text() and \
                     defaultSettings[1] == newRange and \
                     defaultSettings[2] == self.onlyCCTModeCheck.isChecked() and \
@@ -3266,11 +3280,11 @@ try: # try to load the GUI
                         saveLightPrefs(selectedRows[0]) # save the light settings to a special file
 
                     loadLightAliases() # refresh alias table so names/IDs take effect immediately
-                    savedMAC = availableLights[selectedRows[0]][0].address.upper()
+                    savedMAC = availableLights[selectedRows[0]].id
                     self.updateLights(False) # reorder table to reflect any preferred ID changes
                     # the reload clears the selection (which switched tabs); stay on this light's preferences
                     for row in range(len(availableLights)):
-                        if availableLights[row][0].address.upper() == savedMAC:
+                        if availableLights[row].id == savedMAC:
                             self.lightTable.selectRow(row)
                             break
                     self.ColorModeTabWidget.setCurrentIndex(self.TAB_LIGHTPREFS)
@@ -3841,7 +3855,7 @@ try: # try to load the GUI
 
                     self.ColorModeTabWidget.setTabEnabled(0, True)
 
-                    if availableLights[selectedRows[0]][5] == True: # if this light is CCT only, then disable the HSI and ANM tabs
+                    if availableLights[selectedRows[0]].cctOnly == True: # if this light is CCT only, then disable the HSI and ANM tabs
                         self.ColorModeTabWidget.setTabEnabled(1, False) # disable the HSI mode tab
                         self.ColorModeTabWidget.setTabEnabled(2, False) # disable the ANM/SCENE tab
                     else: # we can use HSI and ANM/SCENE modes, so enable those tabs
@@ -3857,7 +3871,7 @@ try: # try to load the GUI
                     if self.ColorModeTabWidget.currentIndex() == self.TAB_SOUND:
                         pass
                     elif availableLights[currentlySelectedRow][3] != []: # if the last set parameters aren't empty
-                        if availableLights[currentlySelectedRow][6] != False: # if the light is listed as being turned ON
+                        if availableLights[currentlySelectedRow].on != False: # if the light is listed as being turned ON
                             sendValue = availableLights[currentlySelectedRow][3] # make the current "sendValue" the last set parameter so it doesn't re-send it on re-load
 
                             if sendValue[1] == 135: # the last parameter was a CCT mode change
@@ -4273,27 +4287,27 @@ try: # try to load the GUI
 
             for a in range(len(availableLights)):
                 _rssi_str = _get_light_rssi(availableLights[a])
-                if availableLights[a][1] == "": # the light does not currently have a Bleak object connected to it
-                    if availableLights[a][2] != "": # the light has a custom name, so add the custom name to the light
-                        self.setTheTable([availableLights[a][2] + " (" + availableLights[a][0].name + ")" + "\n  [ʀssɪ: " + _rssi_str + " dBm]", availableLights[a][0].address, "Waiting", "Waiting to connect..."])
+                if availableLights[a].client == "": # the light does not currently have a Bleak object connected to it
+                    if availableLights[a].name != "": # the light has a custom name, so add the custom name to the light
+                        self.setTheTable([availableLights[a].name + " (" + availableLights[a].device.name + ")" + "\n  [ʀssɪ: " + _rssi_str + " dBm]", availableLights[a].device.address, "Waiting", "Waiting to connect..."])
                     else: # the light does not have a custom name, so just use the model # of the light
-                        self.setTheTable([availableLights[a][0].name + "\n  [ʀssɪ: " + _rssi_str + " dBm]", availableLights[a][0].address, "Waiting", "Waiting to connect..."])
+                        self.setTheTable([availableLights[a].device.name + "\n  [ʀssɪ: " + _rssi_str + " dBm]", availableLights[a].device.address, "Waiting", "Waiting to connect..."])
                 else: # the light does have a Bleak object connected to it
-                    if availableLights[a][2] != "": # the light has a custom name, so add the custom name to the light
-                        if availableLights[a][1].is_connected: # we have a connection to the light
-                            self.setTheTable([availableLights[a][2] + " (" + availableLights[a][0].name + ")" + "\n  [ʀssɪ: " + _rssi_str + " dBm]", availableLights[a][0].address, "LINKED", "Waiting to send..."])
+                    if availableLights[a].name != "": # the light has a custom name, so add the custom name to the light
+                        if availableLights[a].client.is_connected: # we have a connection to the light
+                            self.setTheTable([availableLights[a].name + " (" + availableLights[a].device.name + ")" + "\n  [ʀssɪ: " + _rssi_str + " dBm]", availableLights[a].device.address, "LINKED", "Waiting to send..."])
                         else: # we're still trying to connect, or haven't started trying yet
-                            self.setTheTable([availableLights[a][2] + " (" + availableLights[a][0].name + ")" + "\n  [ʀssɪ: " + _rssi_str + " dBm]", availableLights[a][0].address, "Waiting", "Waiting to connect..."])
+                            self.setTheTable([availableLights[a].name + " (" + availableLights[a].device.name + ")" + "\n  [ʀssɪ: " + _rssi_str + " dBm]", availableLights[a].device.address, "Waiting", "Waiting to connect..."])
                     else: # the light does not have a custom name, so just use the model # of the light
-                        if availableLights[a][1].is_connected:
-                            self.setTheTable([availableLights[a][0].name + "\n  [ʀssɪ: " + _rssi_str + " dBm]", availableLights[a][0].address, "LINKED", "Waiting to send..."])
+                        if availableLights[a].client.is_connected:
+                            self.setTheTable([availableLights[a].device.name + "\n  [ʀssɪ: " + _rssi_str + " dBm]", availableLights[a].device.address, "LINKED", "Waiting to send..."])
                         else:
-                            self.setTheTable([availableLights[a][0].name + "\n  [ʀssɪ: " + _rssi_str + " dBm]", availableLights[a][0].address, "Waiting", "Waiting to connect..."])
+                            self.setTheTable([availableLights[a].device.name + "\n  [ʀssɪ: " + _rssi_str + " dBm]", availableLights[a].device.address, "Waiting", "Waiting to connect..."])
 
             # Update vertical header labels to show effective IDs (preferred ID if set, else row number)
             headerLabels = []
             for a in range(len(availableLights)):
-                prefID = availableLights[a][8] if len(availableLights[a]) > 8 else 0
+                prefID = availableLights[a].prefId
                 if prefID > 0:
                     headerLabels.append(str(prefID))
                 else:
@@ -4844,23 +4858,23 @@ def saveLightPrefs(lightID, deleteFile = False): # save a sidecar file with the 
     createLightPrefsFolder() # create the light_prefs folder if it doesn't exist
 
     # GET THE CUSTOM FILENAME FOR THIS FILE, NOTED FROM THE MAC ADDRESS OF THE CURRENT LIGHT
-    exportFileName = availableLights[lightID][0].address.split(":") # take the colons out of the MAC address
+    exportFileName = availableLights[lightID].device.address.split(":") # take the colons out of the MAC address
     exportFileName = os.path.dirname(os.path.abspath(sys.argv[0])) + os.sep + "light_prefs" + os.sep + "".join(exportFileName)
 
     if deleteFile == True:
         if os.path.exists(exportFileName):
             os.remove(exportFileName) # delete the old preferences file (if it exists)
     else:
-        customName = availableLights[lightID][2] # the custom name for this light
-        defaultSettings = getLightSpecs(availableLights[lightID][0].name)
+        customName = availableLights[lightID].name # the custom name for this light
+        defaultSettings = getLightSpecs(availableLights[lightID].device.name)
 
-        if defaultSettings[1] != availableLights[lightID][4]:
-            customTempRange = str(availableLights[lightID][4][0]) + "," + str(availableLights[lightID][4][1]) # the color temperature range available
+        if defaultSettings[1] != availableLights[lightID].cctRange:
+            customTempRange = str(availableLights[lightID].cctRange[0]) + "," + str(availableLights[lightID].cctRange[1]) # the color temperature range available
         else:
             customTempRange = "" # if the range is the same as the default range, then just leave this entry blank
 
-        if defaultSettings[2] != availableLights[lightID][5]:
-            onlyCCTMode = str(availableLights[lightID][5]) # whether or not the light can only use CCT mode
+        if defaultSettings[2] != availableLights[lightID].cctOnly:
+            onlyCCTMode = str(availableLights[lightID].cctOnly) # whether or not the light can only use CCT mode
         else:
             onlyCCTMode = "" # if the CCT mode enable is the same as the default value, then just leave this entry blank
 
@@ -4878,20 +4892,20 @@ def saveLightPrefs(lightID, deleteFile = False): # save a sidecar file with the 
             exportString += "|" # empty lastSettings field so preferredID stays in correct position
 
         # Preferred ID (5th pipe field), 0 means auto/no preference
-        preferredID = availableLights[lightID][8] if len(availableLights[lightID]) > 8 else 0
+        preferredID = availableLights[lightID].prefId
         exportString += "|" + str(preferredID)
 
         # Show settings (fields 6-14), only written when something isn't default
-        exportString += showPrefsToFields(lightShowPrefs.get(availableLights[lightID][0].address.upper(), SHOW_PREF_DEFAULTS))
+        exportString += showPrefsToFields(lightShowPrefs.get(availableLights[lightID].id, SHOW_PREF_DEFAULTS))
 
         # WRITE THE PREFERENCES FILE
         with open(exportFileName, mode="w", encoding="utf-8") as prefsFileToWrite:
             prefsFileToWrite.write(exportString)
 
         if customName != "":
-            printDebugString("Exported preferences for " + customName + " [" + availableLights[lightID][0].name + "] to " + exportFileName)
+            printDebugString("Exported preferences for " + customName + " [" + availableLights[lightID].device.name + "] to " + exportFileName)
         else:
-            printDebugString("Exported preferences for [" + availableLights[lightID][0].name + "] to " + exportFileName)
+            printDebugString("Exported preferences for [" + availableLights[lightID].device.name + "] to " + exportFileName)
 
 # WORKING WITH CUSTOM PRESETS
 def customPresetInfoBuilder(numOfPreset, formatForHTTP = False):
@@ -4929,10 +4943,10 @@ def customPresetInfoBuilder(numOfPreset, formatForHTTP = False):
             currentLight = returnLightIndexesFromMacAddress(customLightPresets[numOfPreset][a][0]) # find the light in the current list
 
             if currentLight != []: # if we have a match, add it to the list of lights to highlight
-                if availableLights[currentLight[0]][2] != "": # if the custom name is filled in
-                    toolTipBuilder.append(" FOR: " + availableLights[currentLight[0]][2] + " [" + availableLights[currentLight[0]][0].name + "]")
+                if availableLights[currentLight[0]].name != "": # if the custom name is filled in
+                    toolTipBuilder.append(" FOR: " + availableLights[currentLight[0]].name + " [" + availableLights[currentLight[0]].device.name + "]")
                 else:
-                    toolTipBuilder.append(" FOR: " + availableLights[currentLight[0]][0].name)
+                    toolTipBuilder.append(" FOR: " + availableLights[currentLight[0]].device.name)
             else:
                 toolTipBuilder.append("FOR: ---LIGHT NOT AVAILABLE AT THE MOMENT---") # if the light is not found (yet), display that
 
@@ -5440,21 +5454,21 @@ def listBuilder(selectedLight):
         listToWorkWith = sendValue # we're using the last sent parameter on any light for this
     else: # we're recalling the params for a specific light
         # Use preferred ID or custom name if available (makes presets portable)
-        prefID = availableLights[selectedLight][8] if len(availableLights[selectedLight]) > 8 else 0
-        customName = availableLights[selectedLight][2]
+        prefID = availableLights[selectedLight].prefId
+        customName = availableLights[selectedLight].name
         if prefID > 0:
             lightMACAddress = str(prefID)  # numeric ID as string
         elif customName:
             lightMACAddress = customName  # alias name
         else:
-            lightMACAddress = availableLights[selectedLight][0].address  # MAC fallback
+            lightMACAddress = availableLights[selectedLight].device.address  # MAC fallback
         listToWorkWith = availableLights[selectedLight][3] # we're specificially using the last parameter for the specified light for this
 
     if listToWorkWith != []: # if we have elements in this list, then sort them out
         if selectedLight == -1:
             # Global preset, assume light is ON (user just set this value)
             paramsListBuilder.append(listToWorkWith[1] - 130)
-        elif availableLights[selectedLight][6] == False:
+        elif availableLights[selectedLight].on == False:
             paramsListBuilder.append(listToWorkWith[1] - 127) # the first value is the mode, but -127 to simplify it (and mark it as being OFF)
         else:
             paramsListBuilder.append(listToWorkWith[1] - 130) # the first value is the mode, but -130 to simplify it (and mark it as being ON)
@@ -5597,11 +5611,11 @@ def _get_rssi(device, adv_data=None):
         return "?"
 
 def _get_light_rssi(light_entry):
-    """RSSI display string for an availableLights entry, from index [9] or the device object."""
-    if len(light_entry) > 9 and light_entry[9] is not None:
-        return str(light_entry[9])
+    """RSSI display string for a light, from its stored rssi or the device object."""
+    if light_entry.rssi is not None:
+        return str(light_entry.rssi)
     try:
-        return str(light_entry[0].rssi)
+        return str(light_entry.device.rssi)
     except (AttributeError, TypeError):
         return "?"
 
@@ -5805,18 +5819,14 @@ async def findDevices():
 
         # check the "new light" against the global list
         for b in range(len(availableLights)):
-            if device.address == availableLights[b][0].address: # if the new light's MAC address matches one already in the global list
+            if device.address == availableLights[b].device.address: # if the new light's MAC address matches one already in the global list
                 printDebugString("Light found! [" + device.name + "] " + returnMACname() + " " + device.address + " but it's already in the list.  It may have disconnected, so relinking might be necessary.")
                 newLight = False # then don't add another instance of it
 
                 # if we found the light *again*, it's most likely the light disconnected, so we need to link it again
-                availableLights[b][0] = device  # replace with fresh device object
-                # Update stored RSSI (index 9), extending list if needed
-                if len(availableLights[b]) > 9:
-                    availableLights[b][9] = rssi
-                else:
-                    availableLights[b].append(rssi)
-                availableLights[b][1] = "" # clear the Bleak connection (as it's changed) to force the light to need re-linking
+                availableLights[b].device = device  # replace with fresh device object
+                availableLights[b].rssi = rssi
+                availableLights[b].client = "" # clear the Bleak connection (as it's changed) to force the light to need re-linking
                 _forgetNotify(device.address)
 
                 break # stop checking if we've found a negative result
@@ -5829,9 +5839,9 @@ async def findDevices():
                 lightShowPrefs[device.address.upper()] = parseShowPrefFields([str(x) for x in customPrefs])
 
             if customPrefs[3] is not None and isinstance(customPrefs[3], list): # we have previously stored parameters
-                availableLights.append([device, "", customPrefs[0], customPrefs[3], customPrefs[1], customPrefs[2], True, ["---", "---"], prefID, rssi])
+                availableLights.append(Light(device, "", customPrefs[0], customPrefs[3], customPrefs[1], customPrefs[2], prefId=prefID, rssi=rssi))
             else: # no stored parameters, use defaults
-                availableLights.append([device, "", customPrefs[0], [120, 135, 2, 20, 56, 77], customPrefs[1], customPrefs[2], True, ["---", "---"], prefID, rssi])
+                availableLights.append(Light(device, "", customPrefs[0], [120, 135, 2, 20, 56, 77], customPrefs[1], customPrefs[2], prefId=prefID, rssi=rssi))
 
     if threadAction != "quit":
         return "" # once the device scan is over, set the threadAction to nothing
@@ -5845,7 +5855,7 @@ def addSimulatedLights(count, includeCCTOnly=False, faults=False):
     faultSettings = sim.SimFaults(dropRate=0.02, disconnectMeanSec=300) if faults else None
     added = 0
     for device, preset in sim.buildRig(count, includeCCTOnly, faultSettings):
-        if any(light[0].address == device.address for light in availableLights):
+        if any(light.device.address == device.address for light in availableLights):
             continue
         hasSidecar = os.path.exists(os.path.dirname(os.path.abspath(sys.argv[0])) + os.sep + "light_prefs" + os.sep + "".join(device.address.split(":")))
         customPrefs = getCustomLightPrefs(device.address, device.name)
@@ -5856,7 +5866,7 @@ def addSimulatedLights(count, includeCCTOnly=False, faults=False):
         elif len(customPrefs) > 5:
             lightShowPrefs[device.address.upper()] = parseShowPrefFields([str(x) for x in customPrefs])
         lastParams = customPrefs[3] if isinstance(customPrefs[3], list) else [120, 135, 2, 20, 56, 77]
-        availableLights.append([device, "", customPrefs[0], lastParams, customPrefs[1], customPrefs[2], True, ["---", "---"], prefID, -40])
+        availableLights.append(Light(device, "", customPrefs[0], lastParams, customPrefs[1], customPrefs[2], prefId=prefID, rssi=-40))
         if not hasSidecar:
             # Save the preset as the light's own preferences right away, so its ID and role
             # resolve like any light's and survive the alias reload after a preferences save
@@ -6008,31 +6018,31 @@ async def connectToLight(selectedLight, updateGUI=True):
     isConnected = False # whether or not the light is connected
     returnValue = "" # the value to return to the thread (in GUI mode, a string) or True/False (in CLI mode, a boolean value)
 
-    lightName = availableLights[selectedLight][0].name # the Name of the light (for status updates)
-    lightMAC = availableLights[selectedLight][0].address # the MAC address of the light (to keep track of the light even if the index number changes)
+    lightName = availableLights[selectedLight].device.name # the Name of the light (for status updates)
+    lightMAC = availableLights[selectedLight].device.address # the MAC address of the light (to keep track of the light even if the index number changes)
 
     createNewBleakInstance = False
 
     # CHECK TO SEE IF A BLEAK OBJECT EXISTS
-    if availableLights[returnLightIndexesFromMacAddress(lightMAC)[0]][1] == "":
+    if availableLights[returnLightIndexesFromMacAddress(lightMAC)[0]].client == "":
         createNewBleakInstance = True
     else: # if the object exists, but nothing is connected to it, then make a new instance
-        if not availableLights[returnLightIndexesFromMacAddress(lightMAC)[0]][1].is_connected:
+        if not availableLights[returnLightIndexesFromMacAddress(lightMAC)[0]].client.is_connected:
             createNewBleakInstance = True
 
-    if createNewBleakInstance == True: # FILL THE [1] ELEMENT OF THE availableLights ARRAY WITH A NEW BLEAK CONNECTION OBJECT
+    if createNewBleakInstance == True: # GIVE THE LIGHT A NEW BLEAK CONNECTION OBJECT
         lightIdx = returnLightIndexesFromMacAddress(lightMAC)[0]
-        device = availableLights[lightIdx][0]
+        device = availableLights[lightIdx].device
         try:
             if sim.isSimulated(device):
-                availableLights[lightIdx][1] = device.makeClient()
+                availableLights[lightIdx].client = device.makeClient()
             else:
-                availableLights[lightIdx][1] = BleakClient(device)
+                availableLights[lightIdx].client = BleakClient(device)
         except (AttributeError, TypeError):
             # BLEDevice.details may be None if re-discovered without advertisement data
             # Fall back to MAC address string
             printDebugString("BLEDevice details unavailable for " + lightMAC + ", using address string")
-            availableLights[lightIdx][1] = BleakClient(lightMAC)
+            availableLights[lightIdx].client = BleakClient(lightMAC)
         await asyncio.sleep(0.25) # wait just a short time before trying to connect
 
     # TRY TO CONNECT TO THE LIGHT SEVERAL TIMES BEFORE GIVING UP THE LINK
@@ -6041,9 +6051,9 @@ async def connectToLight(selectedLight, updateGUI=True):
     while isConnected == False and currentAttempt <= maxNumOfAttempts:
         if threadAction != "quit":
             try:
-                if not availableLights[returnLightIndexesFromMacAddress(lightMAC)[0]][1].is_connected: # if the current device isn't linked to Bluetooth
+                if not availableLights[returnLightIndexesFromMacAddress(lightMAC)[0]].client.is_connected: # if the current device isn't linked to Bluetooth
                     printDebugString("Attempting to link to light [" + lightName + "] " + returnMACname() + " " + lightMAC + " (Attempt " + str(currentAttempt) + " of " + str(maxNumOfAttempts) + ")")
-                    isConnected = await availableLights[returnLightIndexesFromMacAddress(lightMAC)[0]][1].connect() # try connecting it (and return the connection status)
+                    isConnected = await availableLights[returnLightIndexesFromMacAddress(lightMAC)[0]].client.connect() # try connecting it (and return the connection status)
                 else:
                     isConnected = True # the light is already connected, so mark it as being connected
             except Exception as e:
@@ -6088,8 +6098,8 @@ async def connectToLight(selectedLight, updateGUI=True):
     return returnValue # once the connection is over, then return either True or False (for CLI) or nothing (for GUI)
 
 async def readNotifyCharacteristic(selectedLight, diagCommand, typeOfData):
-    client = availableLights[selectedLight][1]
-    mac = availableLights[selectedLight][0].address
+    client = availableLights[selectedLight].client
+    mac = availableLights[selectedLight].device.address
 
     if _notifyClients.get(mac) is not client: # not yet subscribed on this connection
         try:
@@ -6165,44 +6175,44 @@ async def getLightChannelandPower(selectedLight):
     except IndexError:
         # if we have an IndexError (the information returned isn't blank, but also isn't enough to descipher the status)
         # then just error out, but print the information that *was* returned for debugging purposes
-        printDebugString("We don't have enough information from light [" + availableLights[selectedLight][0].name + "] to get the status.")
+        printDebugString("We don't have enough information from light [" + availableLights[selectedLight].device.name + "] to get the status.")
         print(powerInfo)
 
-    availableLights[selectedLight][7][0] = returnInfo[0]
+    availableLights[selectedLight].status[0] = returnInfo[0]
 
-    if availableLights[selectedLight][1] != "---" and returnInfo[1] != "---":
-        availableLights[selectedLight][7][1] = returnInfo[1]
+    if availableLights[selectedLight].client != "---" and returnInfo[1] != "---":
+        availableLights[selectedLight].status[1] = returnInfo[1]
 
 # DISCONNECT FROM A LIGHT
 async def disconnectFromLight(selectedLight, updateGUI=True):
     returnValue = "" # same as above, string for GUI mode and boolean for CLI mode, default to blank string
 
-    if availableLights[selectedLight][1] != "": # if there is a Bleak object attached to the light, try to disconnect
-        mac = availableLights[selectedLight][0].address
-        if _notifyClients.get(mac) is availableLights[selectedLight][1]:
+    if availableLights[selectedLight].client != "": # if there is a Bleak object attached to the light, try to disconnect
+        mac = availableLights[selectedLight].device.address
+        if _notifyClients.get(mac) is availableLights[selectedLight].client:
             try:
-                await availableLights[selectedLight][1].stop_notify(notifyLightUUID)
+                await availableLights[selectedLight].client.stop_notify(notifyLightUUID)
             except Exception:
                 pass # the light may already be gone
         _forgetNotify(mac)
 
         try:
-            if availableLights[selectedLight][1].is_connected: # if the current light is connected
-                await availableLights[selectedLight][1].disconnect() # disconnect the selected light
+            if availableLights[selectedLight].client.is_connected: # if the current light is connected
+                await availableLights[selectedLight].client.disconnect() # disconnect the selected light
         except Exception as e:
             returnValue = False # if we're in CLI mode, then return False if there is an error disconnecting
 
-            printDebugString("Error unlinking from light " + str(selectedLight + 1) + " [" + availableLights[selectedLight][0].name + "] " + returnMACname() + " " + availableLights[selectedLight][0].address)
+            printDebugString("Error unlinking from light " + str(selectedLight + 1) + " [" + availableLights[selectedLight].device.name + "] " + returnMACname() + " " + availableLights[selectedLight].device.address)
             print(e)
 
         try:
-            if not availableLights[selectedLight][1].is_connected: # if the current light is NOT connected, then we're good
+            if not availableLights[selectedLight].client.is_connected: # if the current light is NOT connected, then we're good
                 if updateGUI == True: # if we're using the GUI, update the display (if we're waiting)
                     if mainWindow is not None: mainWindow._tableUpdateSignal.emit(["", "", "NOT\nLINKED", "Light disconnected!"], selectedLight) # show the new status in the table
                 else: # if we're not, then indicate that we're good
                     returnValue = True # if we're in CLI mode, then return False if there is an error disconnecting
 
-                printDebugString("Successfully unlinked from light " + str(selectedLight + 1) + " [" + availableLights[selectedLight][0].name + "] " + returnMACname() + " " + availableLights[selectedLight][0].address)
+                printDebugString("Successfully unlinked from light " + str(selectedLight + 1) + " [" + availableLights[selectedLight].device.name + "] " + returnMACname() + " " + availableLights[selectedLight].device.address)
         except AttributeError:
             printDebugString("Light " + str(selectedLight + 1) + " has no Bleak object attached to it, so not attempting to disconnect from it")
 
@@ -6251,13 +6261,13 @@ async def writeToLight(selectedLights=0, updateGUI=True, useGlobalValue=True, fr
                             availableLights[selectedLights[a]][3][0] = 120 # reset the light's value to the normal value
                             currentSendValue = [120, 129, 1, 2, 252] # set the send value to turn the light off downstream
                         else: # we want to turn the light on and run a snapshot preset
-                            await availableLights[int(selectedLights[a])][1].write_gatt_char(setLightUUID, bytearray([120, 129, 1, 1, 251]), False) # force this light to turn on
-                            availableLights[int(selectedLights[a])][6] = True # set the ON flag of this light to True
+                            await availableLights[int(selectedLights[a])].client.write_gatt_char(setLightUUID, bytearray([120, 129, 1, 1, 251]), False) # force this light to turn on
+                            availableLights[int(selectedLights[a])].on = True # set the ON flag of this light to True
                             await asyncio.sleep(0.05)
 
                             currentSendValue = availableLights[selectedLights[a]][3] # set the send value to set the preset downstream
 
-                    if availableLights[selectedLights[a]][1] != "": # if a Bleak connection is there
+                    if availableLights[selectedLights[a]].client != "": # if a Bleak connection is there
                         try:
                             # Clamp CCT temperature to the light's effective range
                             if currentSendValue[1] == 135:  # CCT mode
@@ -6276,48 +6286,48 @@ async def writeToLight(selectedLights=0, updateGUI=True, useGlobalValue=True, fr
                                 if not _flashAllowed(int(selectedLights[a]), currentSendValue):
                                     continue  # held back by the flash guard
 
-                            if availableLights[(int(selectedLights[a]))][5] == True: # if we're using the old style of light
+                            if availableLights[(int(selectedLights[a]))].cctOnly == True: # if we're using the old style of light
                                 if currentSendValue[1] == 135: # if we're on CCT mode
                                     if CCTSlider == -1: # and we need to write both HUE and BRI to the light
                                         splitCommands = calculateSeparateBytestrings(currentSendValue) # get both commands from the converter
 
                                         # WRITE BOTH LUMINANCE AND HUE VALUES TOGETHER, BUT SEPARATELY
-                                        await availableLights[int(selectedLights[a])][1].write_gatt_char(setLightUUID, bytearray(splitCommands[0]), False)
+                                        await availableLights[int(selectedLights[a])].client.write_gatt_char(setLightUUID, bytearray(splitCommands[0]), False)
                                         await asyncio.sleep(0.05) # wait 1/20th of a second to give the Bluetooth bus a little time to recover
-                                        await availableLights[int(selectedLights[a])][1].write_gatt_char(setLightUUID, bytearray(splitCommands[1]), False)
+                                        await availableLights[int(selectedLights[a])].client.write_gatt_char(setLightUUID, bytearray(splitCommands[1]), False)
                                     else: # we're only writing either HUE or BRI independently
-                                        await availableLights[int(selectedLights[a])][1].write_gatt_char(setLightUUID, bytearray(calculateSeparateBytestrings(currentSendValue)), False)
+                                        await availableLights[int(selectedLights[a])].client.write_gatt_char(setLightUUID, bytearray(calculateSeparateBytestrings(currentSendValue)), False)
                                 elif currentSendValue[1] == 129: # we're using an old light, but we're either turning the light on or off
-                                    await availableLights[int(selectedLights[a])][1].write_gatt_char(setLightUUID, bytearray(currentSendValue), False)
+                                    await availableLights[int(selectedLights[a])].client.write_gatt_char(setLightUUID, bytearray(currentSendValue), False)
                                 elif currentSendValue[1] in (134, 136): # HSI or ANM mode on CCT-only light
                                     convertedVal = applyCCTFallback(int(selectedLights[a]), currentSendValue)
                                     if convertedVal is not None:
                                         # Send converted CCT value using split commands for old-style lights
                                         splitCommands = calculateSeparateBytestrings(convertedVal)
-                                        await availableLights[int(selectedLights[a])][1].write_gatt_char(setLightUUID, bytearray(splitCommands[0]), False)
+                                        await availableLights[int(selectedLights[a])].client.write_gatt_char(setLightUUID, bytearray(splitCommands[0]), False)
                                         await asyncio.sleep(0.05)
-                                        await availableLights[int(selectedLights[a])][1].write_gatt_char(setLightUUID, bytearray(splitCommands[1]), False)
+                                        await availableLights[int(selectedLights[a])].client.write_gatt_char(setLightUUID, bytearray(splitCommands[1]), False)
                                         currentSendValue = convertedVal  # for status display
                                     elif updateGUI == True:
                                         modeName = "HSI" if currentSendValue[1] == 134 else "ANM/SCENE"
                                         if mainWindow is not None: mainWindow._tableUpdateSignal.emit(["", "", "", modeName + " mode ignored (CCT-only)"], int(selectedLights[a]))
                             else: # we're using a "newer" Neewer light, so just send the original calculated value
-                                await availableLights[int(selectedLights[a])][1].write_gatt_char(setLightUUID, bytearray(currentSendValue), False)
+                                await availableLights[int(selectedLights[a])].client.write_gatt_char(setLightUUID, bytearray(currentSendValue), False)
                             _recordWritten(int(selectedLights[a]), currentSendValue)
 
                             if updateGUI == True:
                                 # if we're not looking at an old light, or if we are, we're not in either HSI or ANM modes, then update the status of that light
-                                if not (availableLights[(int(selectedLights[a]))][5] == True and (currentSendValue[1] == 134 or currentSendValue[1] == 136)):
+                                if not (availableLights[(int(selectedLights[a]))].cctOnly == True and (currentSendValue[1] == 134 or currentSendValue[1] == 136)):
                                     if currentSendValue[1] != 129: # if we're not turning the light on or off
                                         if mainWindow is not None: mainWindow._tableUpdateSignal.emit(["", "", "", updateStatus(True, currentSendValue)], int(selectedLights[a]))
                                     else: # we ARE turning the light on or off
                                         if currentSendValue[3] == 1: # we turned the light on
-                                            availableLights[int(selectedLights[a])][6] = True # toggle the "light on" parameter of this light to ON
+                                            availableLights[int(selectedLights[a])].on = True # toggle the "light on" parameter of this light to ON
 
                                             if mainWindow is not None: mainWindow._lightPowerSignal.emit(int(selectedLights[a]), True)
 
                                         else: # we turned the light off
-                                            availableLights[int(selectedLights[a])][6] = False # toggle the "light on" parameter of this light to OFF
+                                            availableLights[int(selectedLights[a])].on = False # toggle the "light on" parameter of this light to OFF
 
                                             if mainWindow is not None: mainWindow._lightPowerSignal.emit(int(selectedLights[a]), False)
                             else:
@@ -6366,7 +6376,7 @@ async def connectToOneLight(MACAddress):
     try:
         currentLightToAdd = await BleakScanner.find_device_by_address(MACAddress)
         customLightPrefs = getCustomLightPrefs(currentLightToAdd.address, currentLightToAdd.name)
-        availableLights = [[currentLightToAdd, "", customLightPrefs[0], [], customLightPrefs[1], customLightPrefs[2], True, ["---", "---"], customLightPrefs[4] if len(customLightPrefs) > 4 else 0]]
+        availableLights = [Light(currentLightToAdd, "", customLightPrefs[0], [], customLightPrefs[1], customLightPrefs[2], prefId=customLightPrefs[4] if len(customLightPrefs) > 4 else 0)]
     except Exception as e:
         printDebugString("Error finding the Neewer light with MAC address " + MACAddress)
         print(e)
@@ -6409,7 +6419,7 @@ def _flashAllowed(lightIdx, byteVal):
     shown = applyCCTFallback(lightIdx, byteVal)
     if shown is None:
         return True
-    if guard.allow(availableLights[lightIdx][0].address, show.bytesToCommand(shown), getLightDisplayState(lightIdx)[0]):
+    if guard.allow(availableLights[lightIdx].device.address, show.bytesToCommand(shown), getLightDisplayState(lightIdx)[0]):
         _flashHeld.pop(lightIdx, None)
         return True
     # remember it: if nothing newer comes (the last value of a fast dial, the end of a
@@ -6423,14 +6433,14 @@ def _recordWritten(lightIdx, byteVal):
     """Remember what a light was actually sent, for the Stage window, swatches and status.
     availableLights[i][3] keeps the requested value (before the CCT-only conversion), which
     is what presets and reverts need, so display can't use it directly."""
-    mac = availableLights[lightIdx][0].address
+    mac = availableLights[lightIdx].device.address
     if byteVal[1] == 129:
         if byteVal[3] == 2:
             _lightsOff.add(mac)
         else:
             _lightsOff.discard(mac)
         return
-    if availableLights[lightIdx][5] and byteVal[1] in (134, 136):
+    if availableLights[lightIdx].cctOnly and byteVal[1] in (134, 136):
         return  # a CCT-only light was sent a converted value, or nothing ("ignore"), never this
     _lastWritten[mac] = list(byteVal)
     _lightsOff.discard(mac) # assumed: a colour command wakes the light (as neewerlux_sim does)
@@ -6440,7 +6450,7 @@ async def parallelWriteToLights(lightIndices, fromShow=False):
     Used by HTTP commands, batches, hotkeys and (with fromShow=True) the show engine."""
     async def writeSingleLight(idx):
         try:
-            if idx < len(availableLights) and availableLights[idx][1] != "":
+            if idx < len(availableLights) and availableLights[idx].client != "":
                 currentSendValue = availableLights[idx][3]
                 if currentSendValue is not None and not fromShow and showEngine is not None:
                     blocked, shown = showEngine.interceptBaseWrite(idx, currentSendValue)
@@ -6465,22 +6475,22 @@ async def parallelWriteToLights(lightIndices, fromShow=False):
                     sendVal = applyBrightnessEnvelope(idx, sendVal)
                     if not _flashAllowed(idx, sendVal):
                         return  # held back: this frame would flash faster than the guard allows
-                    if fromShow and sendVal[1] != 129 and availableLights[idx][0].address in _lightsOff:
+                    if fromShow and sendVal[1] != 129 and availableLights[idx].device.address in _lightsOff:
                         # a show taking a light that is off powers it on first: lights in
                         # standby ignore colour commands (switched off by hand while a show
                         # plays, the show leaves it alone, see interceptBaseWrite)
-                        await availableLights[int(idx)][1].write_gatt_char(setLightUUID, bytearray([120, 129, 1, 1, 251]), False)
-                        availableLights[int(idx)][6] = True
+                        await availableLights[int(idx)].client.write_gatt_char(setLightUUID, bytearray([120, 129, 1, 1, 251]), False)
+                        availableLights[int(idx)].on = True
                         _recordWritten(int(idx), [120, 129, 1, 1, 251])
                         await asyncio.sleep(0.05)
-                    if availableLights[idx][5] == True and sendVal[1] == 135:
+                    if availableLights[idx].cctOnly == True and sendVal[1] == 135:
                         # Old-style CCT light needs split commands
                         splitCmds = calculateSeparateBytestrings(sendVal)
-                        await availableLights[int(idx)][1].write_gatt_char(setLightUUID, bytearray(splitCmds[0]), False)
+                        await availableLights[int(idx)].client.write_gatt_char(setLightUUID, bytearray(splitCmds[0]), False)
                         await asyncio.sleep(0.05)
-                        await availableLights[int(idx)][1].write_gatt_char(setLightUUID, bytearray(splitCmds[1]), False)
+                        await availableLights[int(idx)].client.write_gatt_char(setLightUUID, bytearray(splitCmds[1]), False)
                     else:
-                        await availableLights[int(idx)][1].write_gatt_char(setLightUUID, bytearray(sendVal), False)
+                        await availableLights[int(idx)].client.write_gatt_char(setLightUUID, bytearray(sendVal), False)
                     _recordWritten(int(idx), sendVal)
         except Exception as e:
             printDebugString("Parallel write error on light " + str(idx + 1) + ": " + str(e))
@@ -6529,31 +6539,31 @@ def workerThread(_loop):
                 # CHECK EACH LIGHT AGAINST THE TABLE TO SEE IF THERE ARE CONNECTION ISSUES
                 for a in range(len(availableLights)):
                     if threadAction == "" and not _pendingSends and not _flashHeld: # if we're not sending, then update the light info... (check this before scanning each light)
-                        if availableLights[a][1] != "": # if there is a Bleak object, then check to see if it's connected
-                            if not availableLights[a][1].is_connected: # the light is disconnected, but we're reporting it isn't
+                        if availableLights[a].client != "": # if there is a Bleak object, then check to see if it's connected
+                            if not availableLights[a].client.is_connected: # the light is disconnected, but we're reporting it isn't
                                 if hasGUI: mainWindow._tableUpdateSignal.emit(["", "", "NOT\nLINKED", "Light disconnected!"], a) # show the new status in the table
-                                availableLights[a][1] = "" # clear the Bleak object
-                                _forgetNotify(availableLights[a][0].address)
+                                availableLights[a].client = "" # clear the Bleak object
+                                _forgetNotify(availableLights[a].device.address)
 
                                 # Queue this light for auto-reconnect if enabled
-                                if autoReconnectOnDisconnect and backoff.due(availableLights[a][0].address):
+                                if autoReconnectOnDisconnect and backoff.due(availableLights[a].device.address):
                                     lightsNeedingReconnect.append(a)
                                     printDebugString("Light " + str(a + 1) + " disconnected - will attempt auto-reconnect")
                             else:
                                 anyConnected = True
-                                backoff.forget(availableLights[a][0].address)
+                                backoff.forget(availableLights[a].device.address)
                                 showStarted = showEngine is not None and showEngine.anyActive() # re-checked per light: a show may start mid-poll
-                                if getLightCaps(availableLights[a][0].name)["reports_status"] and not showStarted: # lights that answer status queries, outside shows
+                                if getLightCaps(availableLights[a].device.name)["reports_status"] and not showStarted: # lights that answer status queries, outside shows
                                     try:
                                         _loop.run_until_complete(getLightChannelandPower(a)) # then check the power and light status of that light
                                     except Exception as e:
                                         printDebugString("Error reading power/channel for light " + str(a + 1) + ": " + str(e))
-                                    if hasGUI: mainWindow._tableUpdateSignal.emit(["", "", "LINKED\n" + availableLights[a][7][0] + " / ᴄʜ. " + str(availableLights[a][7][1]), "Waiting to send..."], a)
+                                    if hasGUI: mainWindow._tableUpdateSignal.emit(["", "", "LINKED\n" + availableLights[a].status[0] + " / ᴄʜ. " + str(availableLights[a].status[1]), "Waiting to send..."], a)
                                 else: # if the light we're scanning doesn't supply power or channel status, then just show "LINKED"
                                     if hasGUI: mainWindow._tableUpdateSignal.emit(["", "", "LINKED", "Waiting to send..."], a)
                         else:
                             # Bleak object is empty - light was previously cleared; retry when its wait is up
-                            if autoReconnectOnDisconnect and backoff.due(availableLights[a][0].address):
+                            if autoReconnectOnDisconnect and backoff.due(availableLights[a].device.address):
                                 lightsNeedingReconnect.append(a)
 
                 # ATTEMPT AUTO-RECONNECT FOR DISCONNECTED LIGHTS
@@ -6591,8 +6601,8 @@ def workerThread(_loop):
                         printDebugString("Auto-reconnect error: " + str(e))
                     for lightIdx in lightsNeedingReconnect:
                         if lightIdx < len(availableLights):
-                            client = availableLights[lightIdx][1]
-                            wait = backoff.tried(availableLights[lightIdx][0].address, client != "" and client.is_connected)
+                            client = availableLights[lightIdx].client
+                            wait = backoff.tried(availableLights[lightIdx].device.address, client != "" and client.is_connected)
                             if wait and hasGUI:
                                 mainWindow._tableUpdateSignal.emit(["", "", "NOT\nLINKED", "Couldn't reconnect; trying again in " + str(wait) + " s"], lightIdx)
 
@@ -6614,8 +6624,8 @@ def workerThread(_loop):
                             printDebugString("Frozen EXE detected, performing silent BLE warm-up connect...")
                             _loop.run_until_complete(parallelAction("connect", [-1], False))
                             for _wIdx in range(len(availableLights)):
-                                if availableLights[_wIdx][1] != "" and not availableLights[_wIdx][1].is_connected:
-                                    availableLights[_wIdx][1] = ""
+                                if availableLights[_wIdx].client != "" and not availableLights[_wIdx].client.is_connected:
+                                    availableLights[_wIdx].client = ""
                             time.sleep(1)
                         _loop.run_until_complete(parallelAction("connect", [-1]))
 
@@ -7167,7 +7177,7 @@ def processHTMLCommands(paramsList, loop):
             if len(nameInfo) > 1:
                 nameInfo[0] = int(nameInfo[0])
                 nameInfo[1] = urllib.parse.unquote(nameInfo[1])
-                availableLights[nameInfo[0]][2] = nameInfo[1]
+                availableLights[nameInfo[0]].name = nameInfo[1]
                 saveLightPrefs(nameInfo[0])
                 loadLightAliases()
 
@@ -7210,7 +7220,7 @@ def reorderByPreferredID():
     withoutPrefID = [] # (originalIndex, light)
 
     for i, light in enumerate(availableLights):
-        prefID = light[8] if len(light) > 8 else 0
+        prefID = light.prefId
         if prefID > 0:
             withPrefID.append((prefID, light))
         else:
@@ -7294,7 +7304,7 @@ def returnLightIndexesFromMacAddress(addresses):
         # Resolve MAC to availableLights index
         if resolvedMAC:
             for b in range(len(availableLights)):
-                if resolvedMAC == availableLights[b][0].address.upper():
+                if resolvedMAC == availableLights[b].id:
                     foundIndexes.append(b)
                     break
 
@@ -7311,7 +7321,7 @@ def lightSweepKey(lightIdx):
     """Sort key for sweeps: a set sweep order first, then position (left to right, front to
     back, low to high), then preferred ID or discovery order."""
     light = availableLights[lightIdx]
-    effectiveID = light[8] if len(light) > 8 and light[8] > 0 else lightIdx + 1
+    effectiveID = light.prefId if light.prefId > 0 else lightIdx + 1
     order = getLightShowPref(lightIdx, "order")
     return (0, order, (0, 0, 0), effectiveID) if order > 0 else (1, 0, _positionKey(lightIdx), effectiveID)
 
@@ -7572,8 +7582,8 @@ def getEffectiveCCTRange(lightIdx=None):
     """Get the effective CCT range for a light. Per-light overrides global.
     Returns (minK, maxK) in Kelvin (e.g. 3200, 5600)."""
     if lightIdx is not None and lightIdx < len(availableLights):
-        lightRange = availableLights[lightIdx][4]
-        defaultRange = getLightSpecs(availableLights[lightIdx][0].name, "temp")
+        lightRange = availableLights[lightIdx].cctRange
+        defaultRange = getLightSpecs(availableLights[lightIdx].device.name, "temp")
         if lightRange != defaultRange:
             # Per-light custom range set, use it
             return (lightRange[0], lightRange[1])
@@ -7596,7 +7606,7 @@ def clampCCTForLight(lightIdx, tempValue):
 def applyCCTFallback(lightIdx, byteVal, mode=None, hue=0, bri=100):
     """Check if a light is CCT-only and apply fallback based on cctFallbackMode.
     Returns the (possibly converted) byte value, or None if the command should be skipped."""
-    if lightIdx >= len(availableLights) or availableLights[lightIdx][5] != True:
+    if lightIdx >= len(availableLights) or availableLights[lightIdx].cctOnly != True:
         return byteVal  # not CCT-only, pass through
 
     # Check if the byte value is an HSI or ANM command
@@ -7669,7 +7679,7 @@ def commandToByteValue(lightIdx, cmd):
 def getLightShowPref(lightIdx, key):
     """A light's show setting (role, side, depth, height, order, eyeline, maxBri, minBri, locked), or its default."""
     if 0 <= lightIdx < len(availableLights):
-        prefs = lightShowPrefs.get(availableLights[lightIdx][0].address.upper())
+        prefs = lightShowPrefs.get(availableLights[lightIdx].id)
         if prefs is not None and key in prefs:
             return prefs[key]
     return SHOW_PREF_DEFAULTS[key]
@@ -8336,12 +8346,12 @@ class SequenceEditorHost:
         result = []
         for idx in order:
             light = availableLights[idx]
-            prefID = light[8] if len(light) > 8 else 0
+            prefID = light.prefId
             result.append({"index": idx, "id": prefID if prefID > 0 else idx + 1,
-                           "name": light[2] if light[2] else light[0].name,
+                           "name": light.name if light.name else light.device.name,
                            "role": getLightShowPref(idx, "role"), "side": getLightShowPref(idx, "side"),
                            "depth": getLightShowPref(idx, "depth"), "height": getLightShowPref(idx, "height"), "aim": getLightShowPref(idx, "aim"),
-                           "simulated": sim.isSimulated(light[0])})
+                           "simulated": sim.isSimulated(light.device)})
         return result
 
     def resolveTarget(self, target):
@@ -8427,12 +8437,12 @@ def renderSequence(nameOrData, stepMs=None, startMs=0, endMs=None):
 
     lights, changes, last, baseShown, samples = [], {}, {}, {}, {}
     for idx, light in enumerate(availableLights):
-        prefID = light[8] if len(light) > 8 else 0
+        prefID = light.prefId
         lightID = str(prefID if prefID > 0 else idx + 1)
-        lights.append({"id": lightID, "name": light[2] if light[2] else light[0].name,
+        lights.append({"id": lightID, "name": light.name if light.name else light.device.name,
                        "role": getLightShowPref(idx, "role"), "side": getLightShowPref(idx, "side"),
                        "depth": getLightShowPref(idx, "depth"), "height": getLightShowPref(idx, "height"), "aim": getLightShowPref(idx, "aim"),
-                       "locked": bool(getLightShowPref(idx, "locked")), "simulated": sim.isSimulated(light[0])})
+                       "locked": bool(getLightShowPref(idx, "locked")), "simulated": sim.isSimulated(light.device)})
         changes[lightID] = []
         intent = showEngine.baseStates.get(idx) if showEngine is not None else None
         output = _outputBytes(idx, intent if intent is not None else light[3])
@@ -8625,17 +8635,17 @@ def getLightDisplayState(lightIdx):
     Simulated lights report the state built from packets they accepted; real lights report
     the last value sent to them."""
     light = availableLights[lightIdx]
-    simulated = sim.isSimulated(light[0])
+    simulated = sim.isSimulated(light.device)
     if simulated:
-        cmd = light[0].state.toCommand()
-    elif light[0].address in _lightsOff:
+        cmd = light.device.state.toCommand()
+    elif light.device.address in _lightsOff:
         cmd = {"mode": "OFF"}
-    elif light[0].address in _lastWritten:
-        cmd = show.bytesToCommand(_lastWritten[light[0].address])
+    elif light.device.address in _lastWritten:
+        cmd = show.bytesToCommand(_lastWritten[light.device.address])
     else:
         cmd = show.bytesToCommand(_outputBytes(lightIdx, light[3])) # nothing sent yet this session
     try:
-        linked = light[1] != "" and bool(light[1].is_connected)
+        linked = light.client != "" and bool(light.client.is_connected)
     except Exception:
         linked = False
     return cmd, show.commandToRGB(cmd), linked, simulated
@@ -8657,7 +8667,7 @@ def getStageTiles():
     for idx in sorted(range(len(availableLights)), key=lightSweepKey):
         cmd, rgb, linked, simulated = getLightDisplayState(idx)
         light = availableLights[idx]
-        tiles.append({"name": light[2] if light[2] else light[0].name, "role": getLightShowPref(idx, "role"),
+        tiles.append({"name": light.name if light.name else light.device.name, "role": getLightShowPref(idx, "role"),
                       "side": getLightShowPref(idx, "side"), "depth": getLightShowPref(idx, "depth"),
                       "height": getLightShowPref(idx, "height"), "aim": getLightShowPref(idx, "aim"), "camera": cameraPosition,
                       "rgb": rgb, "mode": cmd["mode"] if cmd else "", "bri": cmd.get("bri", "") if cmd else "",
@@ -9114,7 +9124,7 @@ def _recallPresetSounds(numOfPreset):
 def _soundAssignments(player):
     """Which mode each light follows, lights by the ID HTTP clients use (null: the mode's own targets)."""
     def lightID(idx):
-        prefID = availableLights[idx][8] if idx < len(availableLights) and len(availableLights[idx]) > 8 else 0
+        prefID = availableLights[idx].prefId if idx < len(availableLights) else 0
         return prefID if prefID > 0 else idx + 1
     with showEngine.lock:
         found = player.assignments()
@@ -9217,10 +9227,10 @@ def getShowStatus():
     st = showEngine.status()
     lights = []
     for idx, light in enumerate(availableLights):
-        prefID = light[8] if len(light) > 8 else 0
+        prefID = light.prefId
         cmd, rgb, linked, simulated = getLightDisplayState(idx)
         lights.append({"id": prefID if prefID > 0 else idx + 1,
-                       "name": light[2] if light[2] else light[0].name,
+                       "name": light.name if light.name else light.device.name,
                        "role": getLightShowPref(idx, "role"), "side": getLightShowPref(idx, "side"),
                        "depth": getLightShowPref(idx, "depth"), "height": getLightShowPref(idx, "height"), "aim": getLightShowPref(idx, "aim"),
                        "locked": bool(getLightShowPref(idx, "locked")),
@@ -9254,7 +9264,7 @@ def lightStateJSON(lightIdx):
     and channel from its last status reply, and its capabilities and show settings."""
     light = availableLights[lightIdx]
     cmd, rgb, linked, simulated = getLightDisplayState(lightIdx)
-    reported = light[7] if isinstance(light[7], list) and len(light[7]) > 1 else ["---", "---"]
+    reported = light.status if isinstance(light.status, list) and len(light.status) > 1 else ["---", "---"]
     power = {"ON": "on", "STBY": "standby"}.get(reported[0])
     channel = reported[1] if isinstance(reported[1], int) else None
     minK, maxK = getEffectiveCCTRange(lightIdx)
@@ -9264,7 +9274,7 @@ def lightStateJSON(lightIdx):
     return {"simulated": simulated, "power": power, "channel": channel,
             "setting": _commandJSON(show.bytesToCommand(light[3])),
             "output": dict(_commandJSON(cmd) or {}, color=show.rgbHex(rgb)) if cmd else None,
-            "cctRange": [minK, maxK], "cctOnly": bool(light[5]),
+            "cctRange": [minK, maxK], "cctOnly": bool(light.cctOnly),
             "role": getLightShowPref(lightIdx, "role"), "side": getLightShowPref(lightIdx, "side"),
             "depth": getLightShowPref(lightIdx, "depth"), "height": getLightShowPref(lightIdx, "height"), "aim": getLightShowPref(lightIdx, "aim"),
             "locked": bool(getLightShowPref(lightIdx, "locked")), "layer": layer}
@@ -9301,12 +9311,12 @@ def getWebSettings():
     """Everything the dashboard's settings panels show."""
     lights = []
     for idx, light in enumerate(availableLights):
-        prefID = light[8] if len(light) > 8 else 0
-        defaults = getLightSpecs(light[0].name)
-        entry = {"index": idx, "id": prefID if prefID > 0 else idx + 1, "model": light[0].name, "mac": light[0].address,
-                 "customName": light[2], "preferredID": prefID, "tempRange": list(light[4]),
-                 "defaultTempRange": list(defaults[1]), "cctOnly": bool(light[5]),
-                 "simulated": sim.isSimulated(light[0])}
+        prefID = light.prefId
+        defaults = getLightSpecs(light.device.name)
+        entry = {"index": idx, "id": prefID if prefID > 0 else idx + 1, "model": light.device.name, "mac": light.device.address,
+                 "customName": light.name, "preferredID": prefID, "tempRange": list(light.cctRange),
+                 "defaultTempRange": list(defaults[1]), "cctOnly": bool(light.cctOnly),
+                 "simulated": sim.isSimulated(light.device)}
         for key in SHOW_PREF_DEFAULTS:
             entry[key] = getLightShowPref(idx, key)
         lights.append(entry)
@@ -9410,10 +9420,10 @@ def setWebLightSettings(lightIdx, changes):
     if not isinstance(changes, dict):
         return {"success": False, "errors": ["settings must be an object"]}
     light = availableLights[lightIdx]
-    defaults = getLightSpecs(light[0].name)
+    defaults = getLightSpecs(light.device.name)
     errors = []
-    name = str(changes.get("customName", light[2]))[:64].replace("|", "")
-    tempRange = changes.get("tempRange", light[4])
+    name = str(changes.get("customName", light.name))[:64].replace("|", "")
+    tempRange = changes.get("tempRange", light.cctRange)
     if tempRange is None:
         tempRange = list(defaults[1])
     try:
@@ -9422,14 +9432,14 @@ def setWebLightSettings(lightIdx, changes):
             errors.append("tempRange must be [min, max] with min 1000 to 5600, max up to 10000, min below max")
     except (TypeError, ValueError, IndexError):
         errors.append("tempRange must be [min, max] in kelvin")
-    cctOnly = changes.get("cctOnly", light[5]) in (True, 1, "1", "true", "True")
+    cctOnly = changes.get("cctOnly", light.cctOnly) in (True, 1, "1", "true", "True")
     try:
-        prefID = int(changes.get("preferredID", light[8] if len(light) > 8 else 0))
+        prefID = int(changes.get("preferredID", light.prefId))
         if not 0 <= prefID <= 99:
             errors.append("preferredID must be 0 (automatic) to 99")
     except (TypeError, ValueError):
         errors.append("preferredID must be a whole number")
-    mac = light[0].address.upper()
+    mac = light.id
     newShow = dict(lightShowPrefs.get(mac, SHOW_PREF_DEFAULTS))
     for key, default in SHOW_PREF_DEFAULTS.items():
         if key not in changes:
@@ -9465,13 +9475,10 @@ def setWebLightSettings(lightIdx, changes):
     if errors:
         return {"success": False, "errors": errors}
 
-    light[2] = name
-    light[4] = tempRange
-    light[5] = cctOnly
-    if len(light) > 8:
-        light[8] = prefID
-    else:
-        light.append(prefID)
+    light.name = name
+    light.cctRange = tempRange
+    light.cctOnly = cctOnly
+    light.prefId = prefID
     if newShow == SHOW_PREF_DEFAULTS:
         lightShowPrefs.pop(mac, None)
     else:
@@ -9762,10 +9769,10 @@ def loadLightAliases():
     # macOS addresses are GUIDs, so their sidecars aren't 12-hex names; read show
     # settings for lights already found by their own sidecar path
     for light in availableLights:
-        address = light[0].address.upper()
+        address = light.id
         if address in lightShowPrefs:
             continue
-        sidecar = prefsDir + os.sep + "".join(light[0].address.split(":"))
+        sidecar = prefsDir + os.sep + "".join(light.device.address.split(":"))
         if os.path.isfile(sidecar):
             try:
                 with open(sidecar, mode="r", encoding="utf-8") as f:
@@ -9920,11 +9927,11 @@ class NLPythonServer(BaseHTTPRequestHandler):
 
                     lightsData = []
                     for idx, light in enumerate(availableLights):
-                        prefID = light[8] if len(light) > 8 else 0
+                        prefID = light.prefId
                         effectiveID = prefID if prefID > 0 else idx + 1
-                        name = light[2] if light[2] else light[0].name
-                        mac = light[0].address
-                        linked = bool(light[1] != "" and hasattr(light[1], 'is_connected') and light[1].is_connected)
+                        name = light.name if light.name else light.device.name
+                        mac = light.device.address
+                        linked = bool(light.client != "" and hasattr(light.client, 'is_connected') and light.client.is_connected)
                         try:
                             if light[3] is not None and isinstance(light[3], list) and len(light[3]) > 3:
                                 status = updateStatus(True, light[3])
@@ -9933,7 +9940,7 @@ class NLPythonServer(BaseHTTPRequestHandler):
                         except Exception:
                             status = ""
                         entry = {"id": effectiveID, "name": name, "mac": mac,
-                                 "linked": linked, "status": status, "model": light[0].name}
+                                 "linked": linked, "status": status, "model": light.device.name}
                         entry.update(lightStateJSON(idx))
                         lightsData.append(entry)
 
@@ -10128,13 +10135,13 @@ class NLPythonServer(BaseHTTPRequestHandler):
                             for a in range(totalLights):
                                 self.wfile.write(bytes("  <TR>\n", "utf-8"))
                                 self.wfile.write(bytes("     <TD STYLE='background-color:rgb(173,255,47)'>" + str(a + 1) + "</TD>\n", "utf-8")) # light ID #
-                                self.wfile.write(bytes("     <TD STYLE='background-color:rgb(240,248,255)'><button onclick='editLight(" + str(a) + ", \"" + availableLights[a][0].name + "\", \"" + availableLights[a][2] + "\")'>Edit</button>&nbsp;&nbsp;" + availableLights[a][2] + "</TD>\n", "utf-8")) # light custom name
-                                self.wfile.write(bytes("     <TD STYLE='background-color:rgb(240,248,255)'>" + availableLights[a][0].name + "</TD>\n", "utf-8")) # light type
-                                self.wfile.write(bytes("     <TD STYLE='background-color:rgb(240,248,255)'>" + availableLights[a][0].address + "</TD>\n", "utf-8")) # light MAC address
+                                self.wfile.write(bytes("     <TD STYLE='background-color:rgb(240,248,255)'><button onclick='editLight(" + str(a) + ", \"" + availableLights[a].device.name + "\", \"" + availableLights[a].name + "\")'>Edit</button>&nbsp;&nbsp;" + availableLights[a].name + "</TD>\n", "utf-8")) # light custom name
+                                self.wfile.write(bytes("     <TD STYLE='background-color:rgb(240,248,255)'>" + availableLights[a].device.name + "</TD>\n", "utf-8")) # light type
+                                self.wfile.write(bytes("     <TD STYLE='background-color:rgb(240,248,255)'>" + availableLights[a].device.address + "</TD>\n", "utf-8")) # light MAC address
                                 self.wfile.write(bytes("     <TD STYLE='background-color:rgb(240,248,255)'>" + _get_light_rssi(availableLights[a]) + " dBm</TD>\n", "utf-8")) # light RSSI (signal quality)
 
                                 try:
-                                    if availableLights[a][1].is_connected:
+                                    if availableLights[a].client.is_connected:
                                         self.wfile.write(bytes("     <TD STYLE='background-color:rgb(240,248,255)'>" + "Yes" + "</TD>\n", "utf-8")) # is the light linked?
                                     else:
                                         self.wfile.write(bytes("     <TD STYLE='background-color:rgb(240,248,255)'>" + "<A HREF='doAction?link=" + str(a + 1) + "'>No</A></TD>\n", "utf-8")) # is the light linked?
@@ -11005,10 +11012,10 @@ if __name__ == '__main__':
 
                 # PRINT THE LIGHTS
                 for a in range(len(availableLights)):
-                    lightName = availableLights[a][2] + "(" + availableLights[a][0].name + ")"
+                    lightName = availableLights[a].name + "(" + availableLights[a].device.name + ")"
 
                     print(formatStringForConsole(lightName, nameCharsAllowed) + " " + \
-                          formatStringForConsole(availableLights[a][0].address, addressCharsAllowed))
+                          formatStringForConsole(availableLights[a].device.address, addressCharsAllowed))
 
                     print(formatStringForConsole(" > RSSI: " + _get_light_rssi(availableLights[a]) + "dBm", nameCharsAllowed))
             else:
