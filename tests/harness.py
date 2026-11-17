@@ -166,7 +166,10 @@ class Rig:
         """Every light holding bytesForAll (default START_BYTES) as its stored value; on sets
         their on/off flag too."""
         for light in self.nl.availableLights:
-            light[3] = list(bytesForAll or START_BYTES)
+            if hasattr(self.nl, "Light"):
+                light.state = self.nl.neewer.decode(list(bytesForAll or START_BYTES))
+            else:  # v1.3.0's positional lists, for compare_legacy
+                light[3] = list(bytesForAll or START_BYTES)
             if on is not None:
                 light.on = bool(on)
 

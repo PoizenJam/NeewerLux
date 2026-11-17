@@ -19,6 +19,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 sys.path.insert(0, ROOT)
 import harness  # noqa: E402
+import neewerlux_neewer as neewer  # noqa: E402
 
 KEY, FILL, RIM, AMB = 0, 1, 2, 3
 RESULTS = []
@@ -704,12 +705,12 @@ def t_guidSidecar(rig):
     """macOS addresses are GUIDs; their sidecars must still load show settings."""
     guid = "6F3A1C2E-0000-4000-8000-00000000ABCD"
     light = rig.nl.availableLights[AMB]
-    oldDevice, oldClient = light[0], light[1]
+    oldDevice, oldClient = light.device, light.client
     # Detach the connection while the address is swapped: otherwise the worker's status poll
     # can subscribe this client under the GUID, and after the swap back the light's replies
     # keep going to the GUID's slot (a test artefact; a real light's address never changes)
-    light[1] = ""
-    light[0] = rig.nl.sim.SimDevice(guid, oldDevice.name)
+    light.client = ""
+    light.device = rig.nl.sim.SimDevice(guid, oldDevice.name)
     path = os.path.join(rig.workdir, "light_prefs", guid)
     try:
         open(path, "w", encoding="utf-8").write("Ambient||||0|practical|left|0||60|-1|")
@@ -717,8 +718,8 @@ def t_guidSidecar(rig):
         check(rig.nl.lightShowPrefs.get(guid, {}).get("role") == "practical", "GUID sidecar not loaded")
         check(rig.nl.getLightShowPref(AMB, "maxBri") == 60, "GUID light limit")
     finally:
-        light[0] = oldDevice
-        light[1] = oldClient
+        light.device = oldDevice
+        light.client = oldClient
         rig.nl._forgetNotify(guid)
         os.remove(path)
         rig.nl.loadLightAliases()
@@ -749,11 +750,17 @@ def t_driftVirtualClock(rig):
         def lightCount(self):
             return 1
 
-        def encode(self, idx, cmd):
+        def stateFor(self, idx, cmd):
             return [cmd.get("hue", 0)]
 
-        def currentBytes(self, idx):
-            return [1, 2, 3, 4, 5]
+        def currentState(self, idx):
+            return neewer.LightState(mode=None, power=True)  # nothing to fade from
+
+        def base(self, idx):
+            return None
+
+        def setBase(self, idx, state):
+            pass
 
         def isLocked(self, idx):
             return False
@@ -789,7 +796,7 @@ def t_driftVirtualClock(rig):
         vt[0] = k * 0.010 + rnd.uniform(0, 0.008) + (0.040 if rnd.random() < 0.002 else 0)
         comp.tick(vt[0])
         box = comp.takeMailbox()
-        if 0 in box:
+        if 0 in box and isinstance(box[0][0], list):  # a frame, not the base state at the end
             onsets.setdefault(box[0][0][0], vt[0])
     errs = []
     for i in range(n):
@@ -846,36 +853,36 @@ def t_simStateFollowsCommands(rig):
     rig.get("light=2&mode=CCT&temp=40&bri=30", 0.4)
     rig.get("light=3&off", 0.4)
     nl = rig.nl
-    check(nl.availableLights[KEY][0].state.toCommand() == {"mode": "HSI", "hue": 200, "sat": 80, "bri": 60}, "key state")
-    check(nl.availableLights[FILL][0].state.toCommand() == {"mode": "CCT", "temp": 40, "bri": 30}, "fill state")
-    check(nl.availableLights[RIM][0].state.toCommand() == {"mode": "OFF"}, "rim off")
-    rejected = [(l[0].address, l[0].state.lastRejected) for l in nl.availableLights if l[0].state.rejected]
+    check(nl.availableLights[KEY].device.state.toCommand() == {"mode": "HSI", "hue": 200, "sat": 80, "bri": 60}, "key state")
+    check(nl.availableLights[FILL].device.state.toCommand() == {"mode": "CCT", "temp": 40, "bri": 30}, "fill state")
+    check(nl.availableLights[RIM].device.state.toCommand() == {"mode": "OFF"}, "rim off")
+    rejected = [(l.device.address, l.device.state.lastRejected) for l in nl.availableLights if l.device.state.rejected]
     check(not rejected, "lights rejected packets: " + str(rejected))
 
 
 def t_statusPollThroughNotifications(rig):
     # The worker polls every few seconds while idle; a round takes longer on Windows, where
     # short sleeps round up to the 15.6 ms timer tick, so wait for a full round rather than a fixed time
-    expected = [["ON" if l[0].state.power else "STBY", 1] for l in rig.nl.availableLights]
+    expected = [["ON" if l.device.state.power else "STBY", 1] for l in rig.nl.availableLights]
     end = time.monotonic() + 12
-    while time.monotonic() < end and [l[7] for l in rig.nl.availableLights] != expected:
+    while time.monotonic() < end and [l.status for l in rig.nl.availableLights] != expected:
         time.sleep(0.25)
-    statuses = [l[7] for l in rig.nl.availableLights]
+    statuses = [l.status for l in rig.nl.availableLights]
     check(statuses == expected, "status poll results %s, lights are %s" % (statuses, expected))
-    check(all(rig.nl._notifyClients.get(l[0].address) is l[1] for l in rig.nl.availableLights), "one subscription per light")
+    check(all(rig.nl._notifyClients.get(l.device.address) is l.client for l in rig.nl.availableLights), "one subscription per light")
 
 
 def t_cctOnlySplitPackets(rig):
     nl = rig.nl
-    nl.availableLights[AMB][5] = True  # behave like an older CCT-only light
+    nl.availableLights[AMB].cctOnly = True  # behave like an older CCT-only light
     try:
         rig.get("light=4&mode=CCT&temp=45&bri=35", 0.5)
-        st = nl.availableLights[AMB][0].state
+        st = nl.availableLights[AMB].device.state
         check(st.toCommand() == {"mode": "CCT", "temp": 45, "bri": 35} and st.lastKind in ("BRI", "TEMP"), "split CCT: %s %s" % (st.toCommand(), st.lastKind))
         rig.get("light=4&mode=HSI&hue=0&sat=100&bri=50", 0.5)
         check(st.mode == "CCT", "an HSI command must reach a CCT-only light as CCT (fallback), got " + st.mode)
     finally:
-        nl.availableLights[AMB][5] = False
+        nl.availableLights[AMB].cctOnly = False
 
 
 def t_cctOnlyDisplayAndRender(rig):
@@ -883,13 +890,13 @@ def t_cctOnlyDisplayAndRender(rig):
     render must show what it was sent, not what was asked for. Uses the real-light display
     path (last written bytes), since only simulated lights report their own state."""
     nl = rig.nl
-    nl.availableLights[AMB][5] = True
+    nl.availableLights[AMB].cctOnly = True
     try:
         rig.get("light=4&mode=HSI&hue=0&sat=100&bri=50", 0.5)
-        mac = nl.availableLights[AMB][0].address
+        mac = nl.availableLights[AMB].device.address
         check(nl._lastWritten[mac][1] == 135, "recorded output should be the converted CCT value: " + str(nl._lastWritten.get(mac)))
-        check(nl.availableLights[AMB][3][1] == 134, "the requested HSI value stays in [3] for presets and reverts")
-        dev = nl.availableLights[AMB][0]
+        check(nl.availableLights[AMB].state.mode == "HSI", "the requested HSI value stays in the light's state for presets and reverts")
+        dev = nl.availableLights[AMB].device
         real = nl.sim.isSimulated
         nl.sim.isSimulated = lambda d: False if d is dev else real(d)
         try:
@@ -908,7 +915,7 @@ def t_cctOnlyDisplayAndRender(rig):
         seqCh = [c for c in r["changes"][byRole["background"]] if c[4] == "sequence"]
         check(seqCh and all(c[3] == "CCT" for c in seqCh), "render of colour cues on a CCT-only light: " + str(seqCh[:2]))
     finally:
-        nl.availableLights[AMB][5] = False
+        nl.availableLights[AMB].cctOnly = False
 
 
 def t_dimColoursStayVisible(rig):
@@ -995,15 +1002,15 @@ def t_addSimulatedRig(rig):
         added = nl.addSimulatedLights(2, includeCCTOnly=True)
         check(added == 3, "added %d lights" % added)
         newLights = nl.availableLights[before:]
-        check([l[0].name for l in newLights] == ["SIM-RGB660-Key", "SIM-RGB660-Fill", "SIM-SNL660-Practical"], "names")
-        check([l[8] for l in newLights] == [91, 92, 95], "preferred IDs %s" % [l[8] for l in newLights])
-        check(newLights[2][5] is True and newLights[2][4] == [3200, 5600], "CCT-only light takes its model's specs")
+        check([l.device.name for l in newLights] == ["SIM-RGB660-Key", "SIM-RGB660-Fill", "SIM-SNL660-Practical"], "names")
+        check([l.prefId for l in newLights] == [91, 92, 95], "preferred IDs %s" % [l.prefId for l in newLights])
+        check(newLights[2].cctOnly is True and newLights[2].cctRange == [3200, 5600], "CCT-only light takes its model's specs")
         check(nl.getLightShowPref(before + 2, "role") == "practical", "preset role")
         check(nl.addSimulatedLights(2, includeCCTOnly=True) == 0, "adding the same rig twice must not duplicate it")
         check(nl.returnLightIndexesFromMacAddress("91") == [before], "ID 91 resolves to the simulated key")
     finally:
         for l in nl.availableLights[before:]:
-            nl.lightShowPrefs.pop(l[0].address.upper(), None)
+            nl.lightShowPrefs.pop(l.device.address.upper(), None)
         del nl.availableLights[before:]
 
 
@@ -1106,11 +1113,11 @@ def t_commandsDontWaitForStatusPoll(rig):
     """Status polling reads each light in turn; with slow replies (a real light, or Windows'
     15.6 ms timer) a round takes a while. Light commands and show starts must not wait for it."""
     nl = rig.nl
-    old = [l[0].latencyMs for l in nl.availableLights]
+    old = [l.device.latencyMs for l in nl.availableLights]
     nl.flashGuardEnabled = False  # this test changes colour faster than the guard allows; it measures polling
     try:
         for l in nl.availableLights:
-            l[0].latencyMs = (60, 60)  # each status query takes about 60 ms to answer
+            l.device.latencyMs = (60, 60)  # each status query takes about 60 ms to answer
         worst = 0.0
         for n in range(8):
             time.sleep(0.37)  # land at different points of the poll cycle
@@ -1135,7 +1142,7 @@ def t_commandsDontWaitForStatusPoll(rig):
         check(worstSeq < 0.25, "a sequence's first cue waited %.0f ms behind status polling" % (worstSeq * 1000))
     finally:
         for l, lat in zip(nl.availableLights, old):
-            l[0].latencyMs = lat
+            l.device.latencyMs = lat
         nl.flashGuardEnabled = True
 
 
@@ -1378,17 +1385,26 @@ def t_shippedContentUnderFlashLimit(rig):
 
 # ----------------------------------------------------------------- 1.4.0: compositor wakes only when due
 
+class _CmdState(tuple):
+    """A frame recorded as its command's items. To the compositor it is a state it can't fade
+    from (a bare power on), so a light handed back to one cuts, as real states it can't fade do."""
+    mode, power = None, True
+
+
 def _compositorRun(nl, start, endMs, fine):
     """Play one item on a virtual clock and record every write. fine=True ticks every
     millisecond (what the old 5 ms loop approximated); otherwise it ticks only at
     nextDueMs, as the compositor thread does. Transition fades are on (300 ms in, 500 ms back)."""
     show = nl.show
     base = list(harness.START_BYTES)
+    baseState, bases = neewer.decode(base), {}
 
     class Hooks:
         def lightCount(self): return len(nl.availableLights)
-        def encode(self, idx, cmd): return tuple(sorted(cmd.items()))
-        def currentBytes(self, idx): return list(base)
+        def stateFor(self, idx, cmd): return _CmdState(sorted(cmd.items()))
+        def currentState(self, idx): return baseState
+        def base(self, idx): return bases.get(idx)
+        def setBase(self, idx, state): bases[idx] = state
         def shownCommand(self, idx): return show.bytesToCommand(base)
         def isLocked(self, idx): return False
         def wake(self): pass
@@ -1421,11 +1437,14 @@ def _compositorRun(nl, start, endMs, fine):
 
 def _virtualCompositor(show, handbackMs=500, fadeInMs=0):
     base = list(harness.START_BYTES)
+    baseState, bases = neewer.decode(base), {}
 
     class Hooks:
         def lightCount(self): return 1
-        def encode(self, idx, cmd): return tuple(sorted(cmd.items()))
-        def currentBytes(self, idx): return list(base)
+        def stateFor(self, idx, cmd): return _CmdState(sorted(cmd.items()))
+        def currentState(self, idx): return baseState
+        def base(self, idx): return bases.get(idx)
+        def setBase(self, idx, state): bases[idx] = state
         def shownCommand(self, idx): return show.bytesToCommand(base)
         def isLocked(self, idx): return False
         def wake(self): pass
@@ -1443,7 +1462,7 @@ def _virtualCompositor(show, handbackMs=500, fadeInMs=0):
         while vt[0] < until:
             vt[0] = round(vt[0] + 0.01, 3)
             comp.tick(vt[0])
-            writes += [(vt[0], dict(b) if isinstance(b[0], tuple) else show.bytesToCommand(b))  # base bytes are raw
+            writes += [(vt[0], dict(b) if isinstance(b, tuple) else show.stateToCommand(b))  # base states are real
                        for _, (b, _) in comp.takeMailbox().items()]
         return writes
     return comp, vt, run
@@ -1748,6 +1767,26 @@ def t_soundCues(rig):
     check(not nl.audioEngine.running, "capture stops when the sequence ends (nothing else listens)")
 
 
+def t_baseFollowsLightAfterSort(rig):
+    """1.5 m1d: what a light returns to is kept on the light. The compositor kept it by list
+    position, so sorting the light table (which reorders the list) gave each light another
+    light's base: a show handing back, or saving the lights on exit, used the wrong colour."""
+    nl = rig.nl
+    for n, (temp, bri) in enumerate([(33, 40), (50, 60), (40, 20), (56, 80)], 1):
+        rig.get("light=%d&mode=CCT&temp=%d&bri=%d" % (n, temp, bri), 0.4)
+    key, fill = nl.availableLights[KEY], nl.availableLights[FILL]
+    order = list(nl.availableLights)
+    try:
+        nl.availableLights[:] = list(reversed(order))  # as sorting by a header does
+        bases = {light.id: nl.showEngine.baseFor(i) for i, light in enumerate(nl.availableLights)}
+        check(bases[key.id] is not None and bases[key.id].kelvin == 3300 and bases[key.id].bri == 40,
+              "the key keeps its own base after a sort: %s" % (bases[key.id],))
+        check(bases[fill.id] is not None and bases[fill.id].kelvin == 5000 and bases[fill.id].bri == 60,
+              "the fill keeps its own base after a sort: %s" % (bases[fill.id],))
+    finally:
+        nl.availableLights[:] = order
+
+
 def t_soundHandsBackToBase(rig):
     """1.4.0: when the sound layer lets go of a light it returns to the light's base state, even
     after the light was switched off and on while sound played (the light's stored value then
@@ -1765,13 +1804,13 @@ def t_soundHandsBackToBase(rig):
     rig.get("light=3&on", 0.3)
     check(_waitLayers(rig, [None, None, "sound", "sound"])[2] == "sound", "the rim follows the sound again after On")
     time.sleep(0.5)
-    check(nl.showEngine.baseFor(RIM)[1] == 135 and nl.showEngine.baseFor(RIM)[4] == 33,
+    check(nl.showEngine.baseFor(RIM).mode == "CCT" and nl.showEngine.baseFor(RIM).kelvin == 3300,
           "its base is still the CCT it had: %s" % nl.showEngine.baseFor(RIM))
     saved = nl.rememberLightsOnExit
     try:
         nl.rememberLightsOnExit = True
         nl.saveLightPrefs(AMB)
-        path = os.path.join(rig.workdir, "light_prefs", nl.availableLights[AMB][0].address.replace(":", ""))
+        path = os.path.join(rig.workdir, "light_prefs", nl.availableLights[AMB].device.address.replace(":", ""))
         with open(path, encoding="utf-8") as f:
             last = f.read().split("|")[3]
         check(last.split(",")[1:5] == ["135", "2", "40", "33"], "saving the lights on exit keeps the base, not a sound frame: %s" % last)
@@ -2613,7 +2652,7 @@ TESTS = [t_maxBrightnessHTTP, t_maxBrightnessAnimationAndSequence, t_minBrightne
          t_fadesOnlyBetweenItems,
          t_addSimulatedRig, t_compositorWakesOnlyWhenDue, t_handBackToRunningLayerFades,
          t_soundModeHTTP, t_soundUnderShowAndEffects, t_soundRespectsLimitsAndLocks, t_soundUnavailable, t_soundModeFilesHTTP,
-         t_offWinsDuringShows, t_animationFlashRates, t_shippedAnimationTags, t_soundCues, t_soundHandsBackToBase, t_manualWriteReleasesSound, t_presetFadeTakesLightsFromSound, t_soundOnSomeLights,
+         t_offWinsDuringShows, t_animationFlashRates, t_shippedAnimationTags, t_soundCues, t_baseFollowsLightAfterSort, t_soundHandsBackToBase, t_manualWriteReleasesSound, t_presetFadeTakesLightsFromSound, t_soundOnSomeLights,
          t_presetSounds, t_paletteLibrary, t_songDrafts, t_draftStyles, t_playBrightness, t_clockFollow, t_presetAsEffect, t_globalScenePreset, t_httpAllowlist, t_accessToken, t_reconnectBackoff, t_songHTTP, t_swatches, t_songTags, t_midiClockHTTP]
 
 

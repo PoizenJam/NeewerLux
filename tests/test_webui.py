@@ -244,13 +244,13 @@ def main():
                     document.getElementById('lpName').value = 'Web Named';
                     saveLightPrefs();""")
         spin(600)
-        mac = nl.availableLights[1][0].address.upper()
+        mac = nl.availableLights[1].device.address.upper()
         prefs = nl.lightShowPrefs.get(mac, {})
         check(prefs.get("role") == "practical" and prefs.get("maxBri") == 45 and prefs.get("locked") is True, "show prefs: " + str(prefs))
         check((prefs.get("side"), prefs.get("depth"), prefs.get("height"), prefs.get("aim")) == ("left", "back", "high", "back"), "position: " + str(prefs))
         check(nl.returnLightIndexesFromMacAddress("@back.left.high") == [1], "position targets")
-        check(nl.availableLights[1][2] == "Web Named", "custom name")
-        sidecar = os.path.join(rig.workdir, "light_prefs", nl.availableLights[1][0].address.replace(":", ""))
+        check(nl.availableLights[1].name == "Web Named", "custom name")
+        sidecar = os.path.join(rig.workdir, "light_prefs", nl.availableLights[1].device.address.replace(":", ""))
         check(os.path.exists(sidecar) and "Web Named" in open(sidecar, encoding="utf-8").read(), "sidecar file")
         # bad input is refused, nothing changes
         js(page, "document.getElementById('lpMaxBri').value = '400'; saveLightPrefs();")

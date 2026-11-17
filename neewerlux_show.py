@@ -18,6 +18,8 @@ import random
 import threading
 import time
 
+from neewerlux_neewer import LightState
+
 LAYER_BASE = 0
 LAYER_SOUND = 1
 LAYER_SHOW = 2
@@ -37,7 +39,7 @@ EFFECT_QUEUE_MAX = 10
 IDLE_TICK_MS = 100        # longest the compositor sleeps while anything plays: it also notices
                           # changes made outside it (a light connecting, Locked, positions)
 
-OFF_BYTES = [120, 129, 1, 2, 252]
+OFF_STATE = LightState(mode=None, power=False)
 
 
 # ============================================================================
@@ -84,6 +86,22 @@ def bytesToCommand(byteVal):
         return {"mode": "HSI", "hue": byteVal[3] + (byteVal[4] << 8), "sat": byteVal[5], "bri": byteVal[6]}
     if byteVal[1] == 136:
         return {"mode": "ANM", "bri": byteVal[3], "scene": byteVal[4]}
+    return None
+
+
+def stateToCommand(state):
+    """A LightState as an animation-style command, for fades that start from the base state.
+    None for states that can't be faded from (none, or a bare power on)."""
+    if state is None:
+        return None
+    if not state.power:
+        return {"mode": "OFF"}
+    if state.mode == "CCT":
+        return {"mode": "CCT", "bri": state.bri, "temp": state.kelvin // 100}
+    if state.mode == "HSI":
+        return {"mode": "HSI", "hue": state.hue, "sat": state.sat, "bri": state.bri}
+    if state.mode == "SCENE":
+        return {"mode": "ANM", "bri": state.bri, "scene": state.scene}
     return None
 
 
@@ -2171,12 +2189,13 @@ class ShowCompositor:
         self.layers = {LAYER_SOUND: None, LAYER_SHOW: None, LAYER_EFFECT: None, LAYER_OVERRIDE: None}
         self.effectQueue = []
         self.owner = {}       # idx -> layer driving it
-        self.baseStates = {}  # idx -> bytes to restore when no layer drives it
-        self.knownBase = {}   # idx -> the last colour set outside the layers (survives Off and On)
-        self.lastSent = {}    # idx -> bytes this compositor last queued
+        # States are LightStates throughout; the hooks turn commands into them, the worker into bytes.
+        # Each light's base (the last colour set outside the layers) lives on the light (hooks.base).
+        self.baseStates = {}  # idx -> state to restore when no layer drives it
+        self.lastSent = {}    # idx -> state this compositor last queued
         self.lastCmd = {}
-        self.mailbox = {}     # idx -> (bytes, parallel)
-        self.released = {}   # idx -> base bytes just restored, until a base write replaces them
+        self.mailbox = {}     # idx -> (state, parallel)
+        self.released = {}   # idx -> base state just restored, until a base write replaces them
         self.fades = {}      # idx -> (start ms, duration ms, command faded from, layer handed to; 0 = base)
         self._absorbUntil = 0.0  # a sequence ending on a preset: its recall becomes the fade's target, not a cut
         self.ownerPlayer = {} # idx -> the player driving it (to tell a replacement from the same player)
@@ -2408,9 +2427,9 @@ class ShowCompositor:
 
     # ------------------------------------------------- worker-side interface
     def interceptBaseWrite(self, idx, value):
-        """Called by the BLE write paths for every base-layer (non-show) write.
+        """Called by the BLE write paths for every base-layer (non-show) write of a LightState.
 
-        Returns (blocked, shownBytes). A light a layer is driving keeps showing the
+        Returns (blocked, shownState). A light a layer is driving keeps showing the
         layer; the write becomes its new revert target instead. Otherwise the write
         goes ahead and any show value still queued for that light is dropped, so a
         stale revert can't land on top of it.
@@ -2423,10 +2442,10 @@ class ShowCompositor:
         """
         deferred = []
         with self.lock:
-            off = isinstance(value, (list, tuple)) and len(value) > 3 and (value[0] == 0 or (value[1] == 129 and value[3] == 2))
-            power = off or (isinstance(value, (list, tuple)) and len(value) > 1 and value[1] == 129)
-            if not power and isinstance(value, (list, tuple)) and len(value) > 3:
-                self.knownBase[idx] = list(value)
+            off = value is not None and not value.power
+            power = off or (value is not None and value.mode is None)
+            if not power and value is not None:
+                self.hooks.setBase(idx, value)
             if off and self.owner.get(idx, 0) > 0:
                 self.poweredOff[idx] = self.ownerPlayer.get(idx)
             elif not off:
@@ -2444,8 +2463,8 @@ class ShowCompositor:
             if off or (soundLetGo and self.owner.get(idx, 0) > 0):
                 self._release(idx)
             if self.owner.get(idx, 0) > 0:
-                if isinstance(value, (list, tuple)) and len(value) > 1:
-                    self.baseStates[idx] = list(OFF_BYTES) if value[0] == 0 else list(value)
+                if value is not None:
+                    self.baseStates[idx] = OFF_STATE if not value.power else value
                 blocked = (True, self.lastSent.get(idx))
             else:
                 self.mailbox.pop(idx, None)
@@ -2462,8 +2481,8 @@ class ShowCompositor:
         drives it, otherwise what it shows."""
         with self.lock:
             if self.owner.get(idx, 0) > 0 and idx in self.baseStates:
-                return list(self.baseStates[idx])
-            return list(self.knownBase.get(idx) or self.hooks.currentBytes(idx) or []) or None
+                return self.baseStates[idx]
+            return self.hooks.base(idx) or self.hooks.currentState(idx)
 
     def _release(self, idx):
         """Forget a light's layer state: it is the base's again, with nothing to fade back."""
@@ -2500,12 +2519,11 @@ class ShowCompositor:
                     self.ownerPlayer.pop(idx, None)
             done = []
             for idx in indexes:
-                to = self.hooks.currentBytes(idx)
-                if not isinstance(to, (list, tuple)) or len(to) < 4:
+                to = self.hooks.currentState(idx)
+                if to is None:
                     continue
-                to = list(OFF_BYTES) if to[0] == 0 else list(to)
-                if to[0] != 0:
-                    self.knownBase[idx] = list(to)
+                to = OFF_STATE if not to.power else to
+                self.hooks.setBase(idx, to)
                 fade = self.fades.get(idx)
                 driven = self.owner.get(idx, 0) in (LAYER_SOUND, LAYER_SHOW, LAYER_EFFECT, LAYER_OVERRIDE) and not (fade and fade[3] == 0)
                 if driven:
@@ -2514,7 +2532,7 @@ class ShowCompositor:
                     continue
                 fromCmd = self.lastCmd.get(idx) if fade else None
                 fromCmd = fromCmd or self.hooks.shownCommand(idx)
-                if durMs <= 0 or fromCmd is None or bytesToCommand(to) is None:
+                if durMs <= 0 or fromCmd is None or stateToCommand(to) is None:
                     continue
                 self.baseStates[idx] = to
                 self.owner[idx] = LAYER_FADE
@@ -2590,10 +2608,10 @@ class ShowCompositor:
         if commit:
             # "Don't revert": the last frame becomes the state the lights return to.
             for idx, cmd in player.lastOut.items():
-                b = self.hooks.encode(idx, cmd)
+                b = self.hooks.stateFor(idx, cmd)
                 if b is not None:
-                    self.baseStates[idx] = list(b)
-                    self.knownBase[idx] = list(b)
+                    self.baseStates[idx] = b
+                    self.hooks.setBase(idx, b)
         self._status("end", layer, player, reason=reason)
         if layer == LAYER_EFFECT and self.effectQueue and self.layers[LAYER_EFFECT] is None:
             self._beginPlayer(LAYER_EFFECT, self.effectQueue.pop(0), nowMs, player)
@@ -2658,9 +2676,9 @@ class ShowCompositor:
                 # A revert queued moments ago may not have reached the light's stored value yet
                 # the light's stored value can be a frame a layer sent (after Off and On during a
                 # show it holds the last one), so the last base write wins over it
-                cur = self.released.pop(idx, None) or self.knownBase.get(idx) or self.hooks.currentBytes(idx)
-                if isinstance(cur, (list, tuple)) and len(cur) > 3:
-                    self.baseStates[idx] = list(cur)
+                cur = self.released.pop(idx, None) or self.hooks.base(idx) or self.hooks.currentState(idx)
+                if cur is not None:
+                    self.baseStates[idx] = cur
             # Who drives the light now, against who did (a fade in progress counts as heading for its target)
             was = fade[3] if fade is not None else (0 if prev == LAYER_FADE else prev)
             changed = win != was or (win > 0 and player is not oldPlayer)
@@ -2694,7 +2712,7 @@ class ShowCompositor:
                 start, dur, fromCmd, _ = fade
                 k = int((nowMs - start) // stepMs) + 1
                 t = min(1.0, k * stepMs / dur)
-                target = frames[win][0][idx] if win > 0 else bytesToCommand(self.baseStates.get(idx))
+                target = frames[win][0][idx] if win > 0 else stateToCommand(self.baseStates.get(idx))
                 if t >= 1.0 or target is None:
                     del self.fades[idx]
                     fade = None
@@ -2705,10 +2723,10 @@ class ShowCompositor:
                     self.owner[idx] = win if win > 0 else (prev or LAYER_FADE)
                     if cmd != self.lastCmd.get(idx):
                         self.lastCmd[idx] = cmd
-                        b = self.hooks.encode(idx, cmd)
+                        b = self.hooks.stateFor(idx, cmd)
                         if b is not None and b != self.lastSent.get(idx):
-                            self.mailbox[idx] = (list(b), True)
-                            self.lastSent[idx] = list(b)
+                            self.mailbox[idx] = (b, True)
+                            self.lastSent[idx] = b
                             queued = True
                     continue  # while fading to base the light stays owned, so base writes become the target
             if win > 0:
@@ -2718,10 +2736,10 @@ class ShowCompositor:
                 cmd = out[idx]
                 if cmd != self.lastCmd.get(idx) or prev != win:
                     self.lastCmd[idx] = cmd
-                    b = self.hooks.encode(idx, cmd)
+                    b = self.hooks.stateFor(idx, cmd)
                     if b is not None and b != self.lastSent.get(idx):
-                        self.mailbox[idx] = (list(b), parallel)
-                        self.lastSent[idx] = list(b)
+                        self.mailbox[idx] = (b, parallel)
+                        self.lastSent[idx] = b
                         queued = True
             elif prev > 0:
                 del self.owner[idx]

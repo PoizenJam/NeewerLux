@@ -824,11 +824,11 @@ def main():
     win.lightMaxBriSpin.setValue(45)
     win.lightLockedCheck.setChecked(True)
     picker.aimButtons["back-right"].click()
-    savedMac = nl.availableLights[win.selectedLights()[0]][0].address
+    savedMac = nl.availableLights[win.selectedLights()[0]].device.address
     win.checkLightPrefs()
     app.processEvents()
     assert win.ColorModeTabWidget.currentIndex() == win.TAB_LIGHTPREFS, "saving stays on Light Preferences"
-    assert win.selectedLights() and nl.availableLights[win.selectedLights()[0]][0].address == savedMac, "saving keeps the light selected"
+    assert win.selectedLights() and nl.availableLights[win.selectedLights()[0]].device.address == savedMac, "saving keeps the light selected"
     mac = rig.mac(0)
     sidecar = os.path.join(rig.workdir, "light_prefs", mac.replace(":", ""))
     assert os.path.exists(sidecar), "sidecar not written"

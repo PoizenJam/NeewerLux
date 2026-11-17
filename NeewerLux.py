@@ -207,46 +207,29 @@ availableLights = [] # the list of Neewer lights currently available to control 
 
 class Light:
     """One light NeewerLux knows about. Until 1.5 each light was a positional list read by
-    position, with its state as Neewer command bytes; the fields are named now and the state is
-    values (neewerlux_neewer.LightState), turned into bytes only where bytes are needed.
-    light[i] reaches every field by its old position (light[3] as bytes) until 1.5 m1d removes it."""
-    FIELDS = ("device", "client", "name", "_stateBytes", "cctRange", "cctOnly", "on", "status", "prefId", "rssi")
+    position, with its state as Neewer command bytes; the fields are named now and the states are
+    values (neewerlux_neewer.LightState), turned into bytes only where bytes are needed."""
 
     def __init__(self, device, client="", name="", state=None, cctRange=None, cctOnly=False, on=True,
-                 status=None, prefId=0, rssi=None):
+                 status=None, prefId=0, rssi=None, base=None):
         self.device = device        # the Bleak scan object (.name is the model, .address the MAC)
         self.client = client        # the Bleak connection, "" until linked
         self.name = name            # the custom name, "" when there is none
-        self.state = state          # the LightState last set for it (None: unknown); see neewerlux_neewer
+        self.state = state          # the LightState last set or sent (None: unknown); see neewerlux_neewer
         self.cctRange = cctRange    # [min, max] colour temperature in Kelvin
         self.cctOnly = cctOnly      # an older light: CCT only, brightness and temperature sent separately
         self.on = on                # switched on or off by hand
         self.status = status if status is not None else ["---", "---"]  # power and channel as the light reports them
         self.prefId = prefId        # preferred ID for numbering and sorting, 0 = automatic
         self.rssi = rssi            # last signal strength in dBm from a scan, None when unknown
+        # The last colour set outside the show layers (None: none this session). state also takes
+        # every frame a show sends, so this is what the light returns to; it survives Off and On.
+        self.base = base
 
     @property
     def id(self):
         """The stable ID: the MAC address in upper case."""
         return self.device.address.upper()
-
-    # Positional access, temporary (removed in 1.5 m1d)
-    @property
-    def _stateBytes(self):
-        return neewer.encode(self.state)
-
-    @_stateBytes.setter
-    def _stateBytes(self, data):
-        self.state = neewer.decode(data)
-
-    def __getitem__(self, i):
-        return getattr(self, Light.FIELDS[i])
-
-    def __setitem__(self, i, v):
-        setattr(self, Light.FIELDS[i], v)
-
-    def __len__(self):
-        return len(Light.FIELDS)
 
 
 # Light Preset ***Default*** Settings (for sections below):
@@ -4951,7 +4934,7 @@ def saveLightPrefs(lightID, deleteFile = False): # save a sidecar file with the 
 
         if rememberLightsOnExit == True: # if we're supposed to remember the last settings, then add that to the Prefs file
             # the light's base state, not a frame a sound mode or show happened to be sending
-            lastSettings = showEngine.baseFor(lightID) if showEngine is not None else neewer.encode(availableLights[lightID].state)
+            lastSettings = neewer.encode(showEngine.baseFor(lightID) if showEngine is not None else availableLights[lightID].state)
             if lastSettings: # if we actually have a value stored for this light
                 lastSettingsString = ",".join(map(str, lastSettings)) # combine all the elements of the last set params
                 exportString += "|" + lastSettingsString # add it to the exported string
@@ -6313,11 +6296,11 @@ async def writeToLight(selectedLights=0, updateGUI=True, useGlobalValue=True, fr
                 for a in range(len(selectedLights)): # try to write each light in turn, and show the current data being sent to them in the table
                     # A light driven by a sequence or effect keeps showing it; this write becomes its revert target
                     if not fromShow and showEngine is not None:
-                        baseVal = currentSendValue if useGlobalValue else neewer.encode(availableLights[selectedLights[a]].state)
+                        baseVal = neewer.decode(currentSendValue) if useGlobalValue else availableLights[selectedLights[a]].state
                         blocked, shown = showEngine.interceptBaseWrite(int(selectedLights[a]), baseVal)
                         if blocked:
                             if not useGlobalValue and shown is not None:
-                                availableLights[selectedLights[a]].state = neewer.decode(shown)
+                                availableLights[selectedLights[a]].state = shown
                             if updateGUI and mainWindow is not None:
                                 mainWindow._tableUpdateSignal.emit(["", "", "", "Held: a sequence or effect is driving this light"], int(selectedLights[a]))
                             continue
@@ -6521,10 +6504,10 @@ async def parallelWriteToLights(lightIndices, fromShow=False):
             if idx < len(availableLights) and availableLights[idx].client != "":
                 currentSendValue = neewer.encode(availableLights[idx].state)
                 if not fromShow and showEngine is not None:
-                    blocked, shown = showEngine.interceptBaseWrite(idx, currentSendValue)
+                    blocked, shown = showEngine.interceptBaseWrite(idx, availableLights[idx].state)
                     if blocked:
                         if shown is not None:
-                            availableLights[idx].state = neewer.decode(shown)
+                            availableLights[idx].state = shown
                         return
                 # Apply CCT-only fallback if needed
                 sendVal = applyCCTFallback(idx, currentSendValue)
@@ -6761,12 +6744,12 @@ def workerThread(_loop):
         workerWakeEvent.clear()
 
 def sendShowFrames(_loop, frames):
-    """Write show engine frames ({index: (bytes, parallel)}). Parallel is the synchronized
+    """Write show engine frames ({index: (LightState, parallel)}). Parallel is the synchronized
     send; animations started with Parallel off keep the v1.3.0 one-light-at-a-time path."""
     parallelIdx, serialIdx = [], []
-    for idx, (byteVal, parallel) in frames.items():
+    for idx, (state, parallel) in frames.items():
         if idx < len(availableLights):
-            availableLights[idx].state = neewer.decode(byteVal)
+            availableLights[idx].state = state
             (parallelIdx if parallel else serialIdx).append(idx)
     if parallelIdx:
         _loop.run_until_complete(parallelWriteToLights(parallelIdx, fromShow=True))
@@ -7807,13 +7790,22 @@ class _ShowHooks:
     def lightCount(self):
         return len(availableLights)
 
-    def encode(self, lightIdx, cmd):
-        return commandToByteValue(lightIdx, cmd)
+    def stateFor(self, lightIdx, cmd):
+        return neewer.decode(commandToByteValue(lightIdx, cmd))
 
-    def currentBytes(self, lightIdx):
+    def currentState(self, lightIdx):
         if 0 <= lightIdx < len(availableLights):
-            return neewer.encode(availableLights[lightIdx].state)
+            return availableLights[lightIdx].state
         return None
+
+    def base(self, lightIdx):
+        if 0 <= lightIdx < len(availableLights):
+            return availableLights[lightIdx].base
+        return None
+
+    def setBase(self, lightIdx, state):
+        if 0 <= lightIdx < len(availableLights):
+            availableLights[lightIdx].base = state
 
     def isLocked(self, lightIdx):
         return bool(getLightShowPref(lightIdx, "locked"))
@@ -8299,8 +8291,8 @@ def _sequenceBaseCommand(lightIdx):
     # Fades that start a sequence begin from what the light returns to, not from an effect on top
     base = showEngine.baseStates.get(lightIdx) if showEngine is not None else None
     if base is None and 0 <= lightIdx < len(availableLights):
-        base = neewer.encode(availableLights[lightIdx].state)
-    return show.bytesToCommand(base)
+        base = availableLights[lightIdx].state
+    return show.stateToCommand(base)
 
 
 def findSequenceForSong(artist, song):
@@ -8512,7 +8504,7 @@ def renderSequence(nameOrData, stepMs=None, startMs=0, endMs=None):
                        "locked": bool(getLightShowPref(idx, "locked")), "simulated": sim.isSimulated(light.device)})
         changes[lightID] = []
         intent = showEngine.baseStates.get(idx) if showEngine is not None else None
-        output = _outputBytes(idx, intent if intent is not None else neewer.encode(light.state))
+        output = _outputBytes(idx, neewer.encode(intent if intent is not None else light.state))
         baseShown[idx] = show.bytesToCommand(output) if output is not None else getLightDisplayState(idx)[0]
 
     for t in range(startMs, endMs, step):
