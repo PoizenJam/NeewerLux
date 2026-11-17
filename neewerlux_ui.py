@@ -978,8 +978,10 @@ class Ui_MainWindow(object):
 
         # --- LIGHT TABLE ---
         self.lightTable = QTableWidget()
-        self.lightTable.setColumnCount(4)
-        self.lightTable.setHorizontalHeaderLabels(["Light Name", "MAC Address", "Linked", "Status"])
+        # ID is the last column in the code (so columns 0 to 3 keep their numbers) and the first on
+        # screen; it replaces the row labels, which showed the ID but couldn't be clicked to sort
+        self.lightTable.setColumnCount(5)
+        self.lightTable.setHorizontalHeaderLabels(["Light Name", "MAC Address", "Linked", "Status", "ID"])
         self.lightTable.setSizeAdjustPolicy(QAbstractScrollArea.AdjustToContents)
         self.lightTable.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.lightTable.setAlternatingRowColors(True)
@@ -987,8 +989,10 @@ class Ui_MainWindow(object):
         self.lightTable.verticalHeader().setStretchLastSection(False)
         adjustableColumns(self.lightTable)
         fm = self.lightTable.fontMetrics()
-        for col, sample in ((0, "W" * 30), (1, "WW:WW:WW:WW:WW:WW"), (2, "LINKED  ON / CH. 0")):
+        for col, sample in ((0, "W" * 30), (1, "WW:WW:WW:WW:WW:WW"), (2, "LINKED  ON / CH. 0"), (4, "ID 99")):
             self.lightTable.setColumnWidth(col, fm.horizontalAdvance(sample) + 24)
+        self.lightTable.horizontalHeader().moveSection(4, 0)
+        self.lightTable.verticalHeader().hide()
         self.lightTable.setMinimumHeight(80)
         self.mainSplitter.addWidget(self.lightTable)
 

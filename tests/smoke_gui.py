@@ -286,6 +286,51 @@ def checkSignalInLinkedColumn(nl, app, win):
     print("signal in the Linked column: PASS")
 
 
+def checkIDColumn(nl, app, win):
+    """1.5.0: the ID is a column, first on screen, in place of the row labels: clicking it sorts
+    by ID (preferred IDs first in ID order, then the rest as they were), which was otherwise
+    impossible after sorting by another column. Turning a light off says so in one line while
+    auto-reconnect is on."""
+    hdr = win.lightTable.horizontalHeader()
+    saved = [light.prefId for light in nl.availableLights]
+    savedAuto = nl.autoReconnectOnDisconnect
+    try:
+        assert hdr.visualIndex(4) == 0 and win.lightTable.horizontalHeaderItem(4).text() == "ID", "ID first on screen"
+        assert win.lightTable.verticalHeader().isHidden(), "no row labels beside the ID column"
+        macs = [light.device.address for light in nl.availableLights]
+        nl.availableLights[0].prefId = 3
+        nl.availableLights[2].prefId = 1
+        nl.availableLights.reverse()  # an order that isn't the ID order, as another sort leaves it
+        win.updateLights(False, False)
+        app.processEvents()
+        win.sortByHeader(4)
+        app.processEvents()
+        order = [light.device.address for light in nl.availableLights]
+        assert order[:2] == [macs[2], macs[0]], "preferred IDs 1 and 3 first: %s" % order
+        assert order[2:] == [m for m in reversed(macs) if m not in (macs[0], macs[2])], "the rest as they were: %s" % order
+        ids = [win.returnTableInfo(r, 4) for r in range(len(order))]
+        assert ids == ["1", "3", "3", "4"], "ID cells: preferred ID, else the row number: %s" % ids
+        hdr.setSortIndicator(4, nl.Qt.SortOrder.DescendingOrder)  # what a second real click on the header does
+        win.sortByHeader(4)
+        app.processEvents()
+        assert [light.device.address for light in nl.availableLights][-1] == macs[2], "a second click reverses it"
+        nl.autoReconnectOnDisconnect = True
+        win._showPowerChange(0, False)
+        assert win.returnTableInfo(0, 3) == "Light turned off", "one line with auto-reconnect: %r" % win.returnTableInfo(0, 3)
+        nl.autoReconnectOnDisconnect = False
+        win._showPowerChange(0, False)
+        assert win.returnTableInfo(0, 3).count("\n") == 1, "two lines without it: %r" % win.returnTableInfo(0, 3)
+    finally:
+        nl.autoReconnectOnDisconnect = savedAuto
+        nl.availableLights.sort(key=lambda light: light.device.address)
+        for light, prefId in zip(nl.availableLights, saved):
+            light.prefId = prefId
+        hdr.setSortIndicatorShown(False)
+        win.updateLights(False, False)
+        app.processEvents()
+    print("ID column: PASS")
+
+
 def checkToolbarWraps(nl, app, win):
     """The light buttons wrap rather than hold the main window wide: with large fonts their
     row was 1271 px, past a 1280 x 720 screen once the window's margins were added."""
@@ -425,6 +470,7 @@ def main():
     checkOwnSwatches(nl, app, win)
     checkToolbarWraps(nl, app, win)
     checkSignalInLinkedColumn(nl, app, win)
+    checkIDColumn(nl, app, win)
 
     # Sequences panel and status timer
     nl.savedSequences["Smoke"] = {"format": 1, "name": "Smoke", "duration_ms": 1500,

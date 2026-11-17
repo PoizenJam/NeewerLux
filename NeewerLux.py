@@ -2880,6 +2880,8 @@ try: # try to load the GUI
                 sortingField = 9
             elif theHeader == 2: # the Linked column shows the signal strength: sort by it
                 sortingField = 10
+            elif theHeader == 4: # ID: preferred IDs first in ID order, then the rest as they are (the order at start)
+                sortingField = 11
 
             if sortingField != -1: # we want to sort
                 self.lightTable.horizontalHeader().setSortIndicatorShown(True) # show the sorting indicator
@@ -2904,7 +2906,8 @@ try: # try to load the GUI
 
                 # signal strength as a number (unknown sorts as the weakest); the first sort puts the strongest first
                 sortKeys = {2: lambda light: light.name, 8: lambda light: light.device.name, 9: lambda light: light.device.address,
-                            10: lambda light: _rssiNumber(light) if _rssiNumber(light) is not None else -999}
+                            10: lambda light: _rssiNumber(light) if _rssiNumber(light) is not None else -999,
+                            11: lambda light: (0, light.prefId) if light.prefId > 0 else (1, 0)}
                 availableLights[:] = sorted(availableLights, key=sortKeys[sortingField], reverse=doReverseSort)
                                         
                 self.updateLights(False, False) # redraw the table with the new light list (don't reorder by preferred ID)
@@ -3924,6 +3927,9 @@ try: # try to load the GUI
                 self.lightTable.setItem(currentRow, 1, QTableWidgetItem())
                 self.lightTable.setItem(currentRow, 2, QTableWidgetItem())
                 self.lightTable.setItem(currentRow, 3, QTableWidgetItem())
+                idItem = QTableWidgetItem()
+                idItem.setTextAlignment(Qt.AlignCenter)
+                self.lightTable.setItem(currentRow, 4, idItem)
             else:
                 currentRow = rowToChange # change data for the specified row
 
@@ -3962,7 +3968,8 @@ try: # try to load the GUI
             if on:
                 self.setTheTable(["", "", status.replace("STBY", "ON"), "Light turned on"], row)
             else:
-                self.setTheTable(["", "", status.replace("ON", "STBY"), "Light turned off\nA long period of inactivity may require a re-link to the light"], row)
+                # auto-reconnect relinks a light that drops its link in standby; without it, a re-link by hand
+                self.setTheTable(["", "", status.replace("ON", "STBY"), "Light turned off" if autoReconnectOnDisconnect else "Light turned off\nMay need re-linking later"], row)
 
         def _cacheSelection(self):
             self._selectionCache = self.selectedLights()
@@ -4302,15 +4309,10 @@ try: # try to load the GUI
                         else:
                             self.setTheTable([availableLights[a].device.name, availableLights[a].device.address, "Waiting", "Waiting to connect..."])
 
-            # Update vertical header labels to show effective IDs (preferred ID if set, else row number)
-            headerLabels = []
+            # the ID column: the preferred ID if set, else the row number
             for a in range(len(availableLights)):
                 prefID = availableLights[a].prefId
-                if prefID > 0:
-                    headerLabels.append(str(prefID))
-                else:
-                    headerLabels.append(str(a + 1))
-            self.lightTable.setVerticalHeaderLabels(headerLabels)
+                self.lightTable.item(a, 4).setText(str(prefID) if prefID > 0 else str(a + 1))
 
         # === THEME TOGGLE ===
         def toggleTheme(self):
