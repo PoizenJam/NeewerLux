@@ -19,6 +19,12 @@ Changes relative to upstream [NeewerLite-Python v0.12d](https://github.com/tabur
 - **Sorting the light table no longer blanks the signal strengths.** After sorting by a column header, every light showed "?" for its signal until the next scan. Sorting by signal also compared the numbers as text.
 - **A keyboard brightness or colour nudge on a light that a snapshot preset switched off** no longer stores a value with a wrong checksum, which was sent once the light was switched back on (lights ignore such packets).
 
+## v1.4.4 - 2026-11-17
+
+### Fixed
+- **The HTTP allowlist matches addresses properly (security).** An entry used to match anywhere in the requesting address, so the default `10.` also admitted addresses such as 192.168.10.5 or 172.10.0.1, `127.0.0.1` also admitted 127.0.0.10, and a blank line in the list admitted every address. An entry now matches whole parts of the address from the start: `10.` admits 10.x.x.x only, `192.168.` admits 192.168.x.x, a full address admits only itself, and blank lines are ignored. Applies to every HTTP command and the web dashboard. Thanks to Puppi3 for finding it.
+- **A custom allowlist is kept after a restart.** Global Preferences saved it under a name the preferences loader didn't read, so NeewerLux started with the default list (this computer, `192.168.` and `10.`) every time, and the box showed the defaults. If you changed the list, set it again and save once. Dates from before NeewerLux.
+
 ## v1.4.3 - 2026-11-16
 
 ### Fixed

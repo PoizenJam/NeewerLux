@@ -487,6 +487,20 @@ simulatedCCTOnly = False # also add a simulated CCT-only light, to exercise the 
 simulateFaults = False # --simulate-faults: simulated lights drop some writes and disconnect now and then
 autoReconnectOnDisconnect = True # whether or not to automatically try reconnecting to lights that disconnect (e.g. after sleep/wake)
 acceptable_HTTP_IPs = [] # the acceptable IPs for the HTTP server, set on launch by prefs file
+DEFAULT_HTTP_IPS = ["127.0.0.1", "192.168.", "10."] # this computer and the common private ranges
+
+
+def ipAllowed(clientIP, allowed):
+    """Whether an address is on the HTTP allowlist. An entry matches whole parts of the address from
+    the start: "10." admits 10.x.x.x but not 192.168.10.5, "192.168." admits 192.168.x.x, and
+    "127.0.0.1" admits only itself. Blank entries admit nobody. (Before 1.4.4 an entry matched
+    anywhere in the address, so "10." admitted 192.168.10.5 and a blank line admitted everyone.)"""
+    parts = clientIP.split(".")
+    for entry in allowed:
+        want = entry.strip().rstrip(".").split(".")
+        if want != [""] and parts[:len(want)] == want:
+            return True
+    return False
 customKeys = [] # custom keymappings for keyboard shortcuts, set on launch by the prefs file
 whiteListedMACs = [] # whitelisted list of MAC addresses to add to NeewerLux
 enableTabsOnLaunch = False # whether or not to enable tabs on startup (even with no lights connected)
@@ -3447,7 +3461,7 @@ try: # try to load the GUI
                 self.simulatedLightsCombo.setCurrentIndex(0)
                 self.simulatedCCTOnlyCheck.setChecked(False)
                 self.maxNumOfAttempts_field.setText("6")
-                self.acceptable_HTTP_IPs_field.setText("\n".join(["127.0.0.1", "192.168.", "10."]))
+                self.acceptable_HTTP_IPs_field.setText("\n".join(DEFAULT_HTTP_IPS))
                 self.whiteListedMACs_field.setText("")
                 self.SC_turnOffButton_field.setKeySequence("Ctrl+PgDown")
                 self.SC_turnOnButton_field.setKeySequence("Ctrl+PgUp")
@@ -3667,13 +3681,15 @@ try: # try to load the GUI
                 maxNumOfAttempts = 6
 
             # FIGURE OUT IF THE HTTP IP ADDRESSES HAVE CHANGED
-            returnedList_HTTP_IPs = self.acceptable_HTTP_IPs_field.toPlainText().split("\n")
+            returnedList_HTTP_IPs = [ip.strip() for ip in self.acceptable_HTTP_IPs_field.toPlainText().split("\n") if ip.strip()]
             
-            if returnedList_HTTP_IPs != ["127.0.0.1", "192.168.", "10."]: # if the list of HTTP IPs have changed
+            if returnedList_HTTP_IPs != DEFAULT_HTTP_IPS: # if the list of HTTP IPs have changed
                 acceptable_HTTP_IPs = returnedList_HTTP_IPs # change the global HTTP IPs available
-                finalPrefs.append("acceptable_HTTP_IPs=" + ";".join(acceptable_HTTP_IPs)) # add the new ones to the preferences
+                # saved as acceptableIPs, the name loadPrefsFile reads (it was saved as acceptable_HTTP_IPs,
+                # which the loader drops, so a custom list was back to the defaults after a restart)
+                finalPrefs.append("acceptableIPs=" + ";".join(acceptable_HTTP_IPs))
             else:
-                acceptable_HTTP_IPs = ["127.0.0.1", "192.168.", "10."] # if we reset the IPs, then re-reset the parameter
+                acceptable_HTTP_IPs = list(DEFAULT_HTTP_IPS) # if we reset the IPs, then re-reset the parameter
 
             # ADD WHITELISTED LIGHTS TO PREFERENCES IF THEY EXIST
             returnedList_whiteListedMACs = self.whiteListedMACs_field.toPlainText().replace(" ", "").split("\n") # remove spaces and split on newlines
@@ -9914,15 +9930,9 @@ class NLPythonServer(BaseHTTPRequestHandler):
 
             # CHECK TO SEE IF THE IP REQUESTING ACCESS IS IN THE LIST OF "acceptable_HTTP_IPs"
             clientIP = self.client_address[0] # the IP address of the machine making the request
-            acceptedIP = False
-
-            for check in range(len(acceptable_HTTP_IPs)): # check all the "accepted" IP addresses against the current requesting IP
-                if acceptedIP != True: # if we haven't found the IP in the accepted list, then keep checking
-                    if acceptable_HTTP_IPs[check] in clientIP:
-                        acceptedIP = True # if we're good to go, then we can just move on
 
             # IF THE IP MAKING THE REQUEST IS NOT IN THE LIST OF APPROVED ADDRESSES, THEN RETURN A "FORBIDDEN" ERROR
-            if acceptedIP == False:
+            if not ipAllowed(clientIP, acceptable_HTTP_IPs):
                 self.send_error(403, "The IP of the device you're making the request from (" + clientIP + ") has to be in the list of accepted IP addresses in order to use the NeewerLux HTTP Server, any outside addresses will generate this Forbidden error.  To use this device with NeewerLux, add its IP address (or range of IP addresses) to the list of acceptable IPs")
                 return
             if not self._tokenChecked():
@@ -10254,13 +10264,7 @@ class NLPythonServer(BaseHTTPRequestHandler):
 
         # IP CHECK (same as do_GET)
         clientIP = self.client_address[0]
-        acceptedIP = False
-        for check in range(len(acceptable_HTTP_IPs)):
-            if acceptedIP != True:
-                if acceptable_HTTP_IPs[check] in clientIP:
-                    acceptedIP = True
-
-        if acceptedIP == False:
+        if not ipAllowed(clientIP, acceptable_HTTP_IPs):
             self.send_error(403, "Forbidden - IP " + clientIP + " is not in the list of accepted addresses")
             return
         if not self._tokenChecked():
@@ -10778,7 +10782,7 @@ def loadPrefsFile(globalPrefsFile = ""):
     prefsParser.add_argument("--printDebug", default=1)
     prefsParser.add_argument("--maxNumOfAttempts", default=6)
     prefsParser.add_argument("--rememberLightsOnExit", default=0)
-    prefsParser.add_argument("--acceptableIPs", default=["127.0.0.1", "192.168.", "10."])
+    prefsParser.add_argument("--acceptableIPs", default=list(DEFAULT_HTTP_IPS))
     prefsParser.add_argument("--whiteListedMACs" , default=[])
     prefsParser.add_argument("--rememberPresetsOnExit", default=1)
     prefsParser.add_argument("--livePreview", default=1)

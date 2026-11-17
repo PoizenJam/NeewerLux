@@ -194,7 +194,7 @@ Light commands are never turned away as busy: if a light already has a command w
 
 The Info tab and the dashboard both carry a command reference.
 
-**Security:** access is limited by the IP allowlist in Global Preferences, which by default admits this machine and common private network ranges, and optionally by an access token (Global Preferences > Simulation and HTTP, desktop only): other computers then add `?token=...` to the dashboard address and their commands, or send the `X-NeewerLux-Token` header; this computer never needs it. Don't expose the port to the internet.
+**Security:** access is limited by the IP allowlist in Global Preferences, which by default admits this machine and common private network ranges (an entry such as `192.168.` matches addresses starting with it), and optionally by an access token (Global Preferences > Simulation and HTTP, desktop only): other computers then add `?token=...` to the dashboard address and their commands, or send the `X-NeewerLux-Token` header; this computer never needs it. Don't expose the port to the internet.
 
 ## Other details
 
