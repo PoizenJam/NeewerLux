@@ -331,6 +331,55 @@ def checkIDColumn(nl, app, win):
     print("ID column: PASS")
 
 
+def checkLightColumns(nl, app, win, rig):
+    """1.5.0: colour, name and type in columns of their own, plus role and layer as on the web
+    dashboard; the header's right-click menu shows and hides columns (Name always shows) and is
+    remembered in NeewerLux.prefs; Name sorts by custom name, Type by model, Role key first."""
+    hdr = win.lightTable.horizontalHeader()
+    t = win.lightTable
+    keys = [nl.LIGHT_TABLE_COLUMNS[hdr.logicalIndex(v)][0] for v in range(t.columnCount())]
+    assert keys == ["id", "colour", "name", "type", "mac", "linked", "role", "layer", "status"], "columns on screen: %s" % keys
+    savedNames = [light.name for light in nl.availableLights]
+    savedCols = nl.lightTableColumns
+    try:
+        nl.availableLights[1].name = "Zed"
+        nl.availableLights[3].name = "Alpha"
+        win.updateLights(False, False)
+        win._updateShowStatus()
+        app.processEvents()
+        assert t.item(1, 0).text() == "Zed" and t.item(1, 6).text() == nl.availableLights[1].device.name, \
+            "name and type apart: %r, %r" % (t.item(1, 0).text(), t.item(1, 6).text())
+        assert t.item(0, 0).text() == nl.availableLights[0].device.name, "no custom name: the model, in grey"
+        assert t.item(0, 7).text() == "Key" and t.item(0, 8).text() == "base", "role and layer: %r %r" % (t.item(0, 7).text(), t.item(0, 8).text())
+        # hidden by default: role and layer; the menu shows one and saves it
+        assert t.isColumnHidden(7) and t.isColumnHidden(8) and not t.isColumnHidden(6), "default columns"
+        win.setLightColumnShown("role", True)
+        assert not t.isColumnHidden(7) and nl.lightTableColumns == "id,colour,name,type,mac,linked,role,status", nl.lightTableColumns
+        prefs = open(nl.globalPrefsFile, encoding="utf-8").read()
+        assert "lightTableColumns=id,colour,name,type,mac,linked,role,status" in prefs, "remembered in the prefs file"
+        win.setLightColumnShown("name", False)
+        assert not t.isColumnHidden(0), "Name always shows"
+        win.setLightColumnShown("role", False)
+        assert nl.lightTableColumns == "" and "lightTableColumns" not in open(nl.globalPrefsFile, encoding="utf-8").read(), \
+            "back to the default set: nothing saved"
+        win.sortByHeader(0)
+        names = [light.name for light in nl.availableLights]
+        assert names[:2] == ["Alpha", "Zed"] and names[2:] == ["", ""], "Name sorts custom names first: %s" % names
+        win.sortByHeader(7)
+        roles = [nl.getLightShowPref(i, "role") for i in range(len(nl.availableLights))]
+        assert roles == sorted(roles, key=nl.LIGHT_ROLES.index), "Role sorts key first: %s" % roles
+    finally:
+        nl.availableLights.sort(key=lambda light: light.device.address)
+        for light, name in zip(nl.availableLights, savedNames):
+            light.name = name
+        nl.lightTableColumns = savedCols
+        win.applyLightColumns()
+        hdr.setSortIndicatorShown(False)
+        win.updateLights(False, False)
+        app.processEvents()
+    print("light table columns: PASS")
+
+
 def checkToolbarWraps(nl, app, win):
     """The light buttons wrap rather than hold the main window wide: with large fonts their
     row was 1271 px, past a 1280 x 720 screen once the window's margins were added."""
@@ -471,6 +520,7 @@ def main():
     checkToolbarWraps(nl, app, win)
     checkSignalInLinkedColumn(nl, app, win)
     checkIDColumn(nl, app, win)
+    checkLightColumns(nl, app, win, rig)
 
     # Sequences panel and status timer
     nl.savedSequences["Smoke"] = {"format": 1, "name": "Smoke", "duration_ms": 1500,
@@ -566,7 +616,7 @@ def main():
     stage.grab().save(os.path.join(rig.workdir, "stage_small.png"))
     stage.timer.start(50)
     win._updateShowStatus()
-    swatch = win.lightTable.item(0, 0).data(nl.Qt.DecorationRole)
+    swatch = win.lightTable.item(0, 5).data(nl.Qt.DecorationRole)
     assert swatch is not None, "no swatch on the first light row"
     stage.hide()
     assert not stage.timer.isActive(), "Stage polling must stop while hidden"

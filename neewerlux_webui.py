@@ -111,6 +111,9 @@ a:hover { text-decoration: underline; }
 }
 .card-body { padding: 14px; }
 .card.full-width { grid-column: 1 / -1; }
+#lightColsMenu { position:fixed; z-index:60; background:var(--card); border:1px solid var(--border); border-radius:6px; padding:6px 10px; box-shadow:0 4px 14px rgba(0,0,0,.35); font-size:12px; }
+#lightColsMenu label { display:block; padding:3px 0; white-space:nowrap; }
+.light-table th.sortable { cursor:pointer; }
 .swatch { display:inline-block; width:14px; height:14px; border-radius:3px; border:1px solid var(--border); vertical-align:middle; }
 .stage-grid { display:flex; flex-wrap:wrap; gap:12px; }
 .swatches { display:grid; grid-template-columns:repeat(6, 26px); gap:3px; }
@@ -435,11 +438,11 @@ select:focus, input:focus { border-color: var(--accent); outline: none; }
 <div class="container">
     <!-- LIGHTS -->
     <div class="card full-width">
-        <div class="card-header">Lights</div>
+        <div class="card-header">Lights <button class="btn" id="lightColsBtn" style="float:right;padding:2px 8px;font-size:11px" onclick="openLightCols(event)" title="Choose the columns (or right-click a column header)">Columns</button></div>
         <div class="card-body" style="padding:0">
             <table class="light-table">
-                <thead><tr><th>#</th><th></th><th>Light Name</th><th>MAC Address</th><th>Status</th><th>Role</th><th>Layer</th><th>Current</th><th>Actions</th></tr></thead>
-                <tbody id="lightTableBody"><tr><td colspan="9" style="text-align:center;padding:20px;color:#888">Loading lights...</td></tr></tbody>
+                <thead><tr id="lightTableHead"></tr></thead>
+                <tbody id="lightTableBody"><tr><td colspan="10" style="text-align:center;padding:20px;color:#888">Loading lights...</td></tr></tbody>
             </table>
         </div>
     </div>
@@ -1325,7 +1328,7 @@ async function loadLights() {
         if (data.sequences) renderSeqList(data.sequences);  // no separate request per refresh
     } catch(e) {
         document.getElementById('lightTableBody').innerHTML =
-            '<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--muted)">Could not load light data. <a href="#" onclick="refreshAll();return false;">Retry</a></td></tr>';
+            '<tr><td colspan="10" style="text-align:center;padding:20px;color:var(--muted)">Could not load light data. <a href="#" onclick="refreshAll();return false;">Retry</a></td></tr>';
         logMsg('Load error: ' + e.message, 'err');
     }
 }
@@ -1338,39 +1341,90 @@ function renderLightsJSON(data) {
 
     if (lights.length === 0) {
         document.getElementById('lightTableBody').innerHTML =
-            '<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--muted)">No lights discovered. <a href="#" onclick="scanForLights();return false;">Click to Scan</a></td></tr>';
+            '<tr><td colspan="10" style="text-align:center;padding:20px;color:var(--muted)">No lights discovered. <a href="#" onclick="scanForLights();return false;">Click to Scan</a></td></tr>';
         document.getElementById('connStatus').textContent = '0 lights';
         return;
     }
 
-    let html2 = '', linkedCount = 0;
+    let linkedCount = 0;
     const byId = {};
     (lastStatus && lastStatus.lights || []).forEach(s => byId[s.id] = s);
     lights.forEach(l => {
         if (l.linked) linkedCount++;
-        const displayName = l.name || l.model || l.mac;
+        select.innerHTML += `<option value="${l.id}">${l.id} - ${l.name || l.model || l.mac}</option>`;
+    });
+    // sorting changes the order shown only: light numbers stay as they are
+    const col = LIGHT_COLS.find(c => c.key === lightSort.key && c.sort);
+    const rows = col ? lights.slice().sort((a, b) => {
+        const x = col.sort(a, byId[a.id] || {}), y = col.sort(b, byId[b.id] || {});
+        return (x < y ? -1 : x > y ? 1 : 0) * lightSort.dir;
+    }) : lights;
+    const shown = LIGHT_COLS.filter(c => lightColShown(c.key));
+    document.getElementById('lightTableHead').innerHTML = shown.map(c =>
+        `<th data-col="${c.key}"${c.sort ? ' class="sortable" onclick="sortLights(\'' + c.key + '\')"' : ''}>${c.label}${lightSort.key === c.key ? (lightSort.dir > 0 ? ' &#9650;' : ' &#9660;') : ''}</th>`).join('');
+    let html2 = '';
+    rows.forEach(l => {
         const st = byId[l.id] || {};
-        select.innerHTML += `<option value="${l.id}">${l.id} - ${displayName}</option>`;
-        html2 += `<tr>
-            <td class="light-id">${l.id}</td>
-            <td><span class="swatch" data-swatch="${l.id}" style="background:${st.color || '#464646'}"></span></td>
-            <td>${displayName}${l.model && l.name !== l.model ? ' <span style="color:var(--muted);font-size:11px">(' + l.model + ')</span>' : ''}</td>
-            <td style="font-family:monospace;font-size:11px">${l.mac}</td>
-            <td class="${l.linked ? 'linked' : 'not-linked'}" data-linked="${l.id}">${l.linked ? '● LINKED' : '○ Not linked'}${l.rssi != null ? ' <span style="color:var(--muted);font-size:11px;font-weight:400">(' + l.rssi + ' dBm)</span>' : ''}</td>
-            <td style="font-size:11px" data-role="${l.id}">${esc(cap(st.role || ''))}${st.locked ? ' (locked)' : ''}</td>
-            <td style="font-size:11px" data-layer="${l.id}">${esc(st.layer || '')}</td>
-            <td style="font-size:11px">${l.status}</td>
-            <td>${l.linked
-                ? '<button class="btn" style="padding:3px 8px;font-size:11px" onclick="apiCall(\''+BASE+'light='+l.id+'&mode=CCT&temp=5600&bri=100&nopage\',\'Send: light '+l.id+'\')">Send</button>'
-                : '<button class="btn success" style="padding:3px 8px;font-size:11px" onclick="apiCall(\''+BASE+'link='+l.id+'&nopage\',\'Link: light '+l.id+'\');setTimeout(refreshAll,3000)">Link</button>'
-            }</td>
-        </tr>`;
+        html2 += '<tr>' + shown.map(c => c.cell(l, st)).join('') + '</tr>';
     });
     document.getElementById('lightTableBody').innerHTML = html2;
     document.getElementById('connStatus').textContent = linkedCount + '/' + lights.length + ' linked';
     if (linkedCount > 0) document.getElementById('connStatus').classList.add('connected');
     if (!window._lightsLoadedOnce) { logMsg('Loaded ' + lights.length + ' light(s)', 'ok'); window._lightsLoadedOnce = true; }
 }
+
+// The light table's columns, in order: key, header, sort key (none: the header doesn't sort) and
+// cell. Which show is chosen per browser (the Columns button or a right-click on the header).
+const LIGHT_ROLE_ORDER = ['key', 'fill', 'rim', 'background', 'practical'];
+const lightHasName = l => l.name && l.name !== l.model;
+const LIGHT_COLS = [
+    {key: 'id', label: 'ID', sort: l => l.id, cell: l => `<td class="light-id">${l.id}</td>`},
+    {key: 'colour', label: '', menu: 'Colour', cell: (l, st) => `<td><span class="swatch" data-swatch="${l.id}" style="background:${st.color || '#464646'}"></span></td>`},
+    {key: 'name', label: 'Light Name', sort: l => (lightHasName(l) ? '0' : '1') + (l.name || '').toLowerCase(),
+     cell: l => lightHasName(l) ? `<td data-name="${l.id}">${esc(l.name)}</td>` : `<td data-name="${l.id}" style="color:var(--muted)">${esc(l.model || l.mac)}</td>`},
+    {key: 'type', label: 'Type', sort: l => l.model || '', cell: l => `<td style="font-size:11px" data-type="${l.id}">${esc(l.model || '')}</td>`},
+    {key: 'mac', label: 'MAC Address', sort: l => l.mac, cell: l => `<td style="font-family:monospace;font-size:11px">${l.mac}</td>`},
+    {key: 'linked', label: 'Linked', menu: 'Linked (signal, power, channel)', sort: l => l.rssi == null ? 999 : -l.rssi,
+     cell: l => `<td class="${l.linked ? 'linked' : 'not-linked'}" data-linked="${l.id}">${l.linked ? '&#9679; LINKED' : '&#9675; Not linked'}${l.rssi != null ? ' <span style="color:var(--muted);font-size:11px;font-weight:400">(' + l.rssi + ' dBm)</span>' : ''}`
+        + `<br><span style="color:var(--muted);font-size:11px;font-weight:400">${({on: 'ON', standby: 'STBY'})[l.power] || '---'} / CH. ${l.channel == null ? '---' : l.channel}</span></td>`},
+    {key: 'role', label: 'Role', sort: (l, st) => { const i = LIGHT_ROLE_ORDER.indexOf(st.role); return i < 0 ? 9 : i; },
+     cell: (l, st) => `<td style="font-size:11px" data-role="${l.id}">${esc(cap(st.role || ''))}${st.locked ? ' (locked)' : ''}</td>`},
+    {key: 'layer', label: 'Layer', cell: (l, st) => `<td style="font-size:11px" data-layer="${l.id}">${esc(st.layer || '')}</td>`},
+    {key: 'status', label: 'Status', cell: l => `<td style="font-size:11px">${l.status}</td>`},
+    {key: 'actions', label: 'Actions', cell: l => `<td>${l.linked
+        ? '<button class="btn" style="padding:3px 8px;font-size:11px" onclick="apiCall(\''+BASE+'light='+l.id+'&mode=CCT&temp=5600&bri=100&nopage\',\'Send: light '+l.id+'\')">Send</button>'
+        : '<button class="btn success" style="padding:3px 8px;font-size:11px" onclick="apiCall(\''+BASE+'link='+l.id+'&nopage\',\'Link: light '+l.id+'\');setTimeout(refreshAll,3000)">Link</button>'
+    }</td>`},
+];
+let lightSort = {key: '', dir: 1};
+let lightColsHidden = [];
+try { lightColsHidden = JSON.parse(localStorage.getItem('nlLightColsHidden') || '[]'); } catch (e) {}
+function lightColShown(key) { return key === 'name' || !lightColsHidden.includes(key); }
+function rerenderLights() { if (window._lastLights) renderLightsJSON({lights: window._lastLights}); }
+function sortLights(key) {
+    lightSort = lightSort.key === key ? {key, dir: -lightSort.dir} : {key, dir: 1};
+    rerenderLights();
+}
+function setLightColShown(key, on) {
+    lightColsHidden = lightColsHidden.filter(k => k !== key).concat(on ? [] : [key]);
+    try { localStorage.setItem('nlLightColsHidden', JSON.stringify(lightColsHidden)); } catch (e) {}
+    rerenderLights();
+}
+function openLightCols(ev) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    closeLightCols();
+    const menu = document.createElement('div');
+    menu.id = 'lightColsMenu';
+    menu.innerHTML = LIGHT_COLS.map(c => `<label><input type="checkbox" data-colkey="${c.key}" ${lightColShown(c.key) ? 'checked' : ''} ${c.key === 'name' ? 'disabled' : ''} onchange="setLightColShown('${c.key}', this.checked)"> ${c.menu || c.label}</label>`).join('');
+    menu.onclick = e => e.stopPropagation();
+    document.body.appendChild(menu);
+    menu.style.left = Math.max(4, Math.min(ev.clientX, window.innerWidth - menu.offsetWidth - 4)) + 'px';
+    menu.style.top = Math.max(4, Math.min(ev.clientY, window.innerHeight - menu.offsetHeight - 4)) + 'px';
+}
+function closeLightCols() { const m = document.getElementById('lightColsMenu'); if (m) m.remove(); }
+document.addEventListener('click', closeLightCols);
+document.addEventListener('contextmenu', e => { if (e.target.closest && e.target.closest('#lightTableHead')) openLightCols(e); });
 
 function renderPresetsJSON(data) {
     const presets = data.presets || [];

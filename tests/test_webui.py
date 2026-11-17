@@ -122,9 +122,29 @@ def main():
         waitFor(page, "[...document.querySelectorAll('.stage-box')].every(b => b.style.background.includes('0, 255, 0'))", "green tiles")
         check(js(page, "document.querySelectorAll('[data-swatch]').length") == 4, "table swatches")
         check(js(page, "document.querySelector('[data-swatch]').style.background").startswith("rgb(0, 255, 0"), "swatch colour")
-        # 1.5.0: signal strength in the Linked cell, as on the desktop
+        # 1.5.0: signal strength in the Linked cell, as on the desktop, with power and channel under it
         waitFor(page, "(document.querySelector('[data-linked]') || {}).textContent && document.querySelector('[data-linked]').textContent.includes('(-50 dBm)')",
                 "signal strength in the Linked cell")
+        check("/ CH." in js(page, "document.querySelector('[data-linked]').textContent"), "power and channel under Linked")
+        # name and type in columns of their own; columns chosen per browser; sorting the view
+        # leaves the light numbers alone
+        heads = json.loads(js(page, "JSON.stringify([...document.querySelectorAll('#lightTableHead th')].map(t => t.dataset.col))"))
+        check(heads == ["id", "colour", "name", "type", "mac", "linked", "role", "layer", "status", "actions"], "columns: %s" % heads)
+        check(js(page, "document.querySelector('[data-type=\"1\"]').textContent") == js(page, "window._lastLights[0].model"), "type column")
+        js(page, "setLightColShown('mac', false)")
+        waitFor(page, "!document.querySelector('#lightTableHead th[data-col=\"mac\"]')", "MAC column hidden")
+        spin(1500)  # survives the next refresh
+        check(js(page, "document.querySelector('#lightTableHead th[data-col=\"mac\"]') === null"), "still hidden after a refresh")
+        check(js(page, "JSON.parse(localStorage.getItem('nlLightColsHidden'))[0]") == "mac", "remembered in this browser")
+        js(page, "setLightColShown('name', false)")
+        check(js(page, "document.querySelector('#lightTableHead th[data-col=\"name\"]') !== null"), "Name always shows")
+        js(page, "setLightColShown('mac', true)")
+        js(page, "document.querySelector('#lightTableHead th[data-col=\"role\"]').click()")
+        js(page, "document.querySelector('#lightTableHead th[data-col=\"role\"]').click()")  # practical last, reversed
+        firstId = js(page, "document.querySelector('#lightTableBody tr td.light-id').textContent")
+        check(firstId == "4", "sorted by role, reversed: background first (light 4): %r" % firstId)
+        check([l["id"] for l in rig.getJSON("list_json")["lights"]] == [1, 2, 3, 4], "the light numbers stay as they were")
+        js(page, "lightSort = {key: '', dir: 1}; rerenderLights()")
         # plan view: each light in its cell (the harness rig is fill and background on the left,
         # key and rim on the right, all beside you by default)
         js(page, "setStageView('plan')")

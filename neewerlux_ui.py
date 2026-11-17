@@ -334,6 +334,16 @@ class FlowLayout(QLayout):
         return max(0, y - gap) - rect.y() + m.bottom()
 
 
+# The light table's columns: {number in the code: (key, header, name in the column menu)}, and
+# their order on screen. Name always shows; the rest can be hidden from the header's menu.
+LIGHT_TABLE_COLUMNS = {0: ("name", "Light Name", "Light Name"), 1: ("mac", "MAC Address", "MAC Address"),
+                       2: ("linked", "Linked", "Linked (signal, power, channel)"), 3: ("status", "Status", "Status"),
+                       4: ("id", "ID", "ID"), 5: ("colour", "", "Colour"), 6: ("type", "Type", "Type"),
+                       7: ("role", "Role", "Role"), 8: ("layer", "Layer", "Layer")}
+LIGHT_TABLE_ORDER = (4, 5, 0, 6, 1, 2, 7, 8, 3)
+LIGHT_TABLE_DEFAULT = ("id", "colour", "name", "type", "mac", "linked", "status")
+
+
 def adjustableColumns(table, fixed=()):
     """Columns the user can drag to any width (double-clicking a divider fits the column to its
     contents). The last column takes the room left over: a stretching column further left would
@@ -978,20 +988,25 @@ class Ui_MainWindow(object):
 
         # --- LIGHT TABLE ---
         self.lightTable = QTableWidget()
-        # ID is the last column in the code (so columns 0 to 3 keep their numbers) and the first on
-        # screen; it replaces the row labels, which showed the ID but couldn't be clicked to sort
-        self.lightTable.setColumnCount(5)
-        self.lightTable.setHorizontalHeaderLabels(["Light Name", "MAC Address", "Linked", "Status", "ID"])
+        # Columns keep their numbers in the code (0 to 3 as they always were, the rest added after)
+        # and are moved into LIGHT_TABLE_ORDER on screen; ID replaces the row labels, which showed
+        # the ID but couldn't be clicked to sort
+        self.lightTable.setColumnCount(len(LIGHT_TABLE_COLUMNS))
+        self.lightTable.setHorizontalHeaderLabels([LIGHT_TABLE_COLUMNS[c][1] for c in range(len(LIGHT_TABLE_COLUMNS))])
         self.lightTable.setSizeAdjustPolicy(QAbstractScrollArea.AdjustToContents)
         self.lightTable.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.lightTable.setAlternatingRowColors(True)
         self.lightTable.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.lightTable.verticalHeader().setStretchLastSection(False)
-        adjustableColumns(self.lightTable)
+        adjustableColumns(self.lightTable, fixed=(5,))
         fm = self.lightTable.fontMetrics()
-        for col, sample in ((0, "W" * 30), (1, "WW:WW:WW:WW:WW:WW"), (2, "LINKED  ON / CH. 0"), (4, "ID 99")):
+        for col, sample in ((0, "W" * 14), (1, "WW:WW:WW:WW:WW:WW"), (2, "LINKED (-100 dBm)WW"), (4, "ID 99"),
+                            (5, "WW"), (6, "NEEWER-RGB660 PROW"), (7, "Background (locked)"), (8, "override")):
             self.lightTable.setColumnWidth(col, fm.horizontalAdvance(sample) + 24)
-        self.lightTable.horizontalHeader().moveSection(4, 0)
+        hdr = self.lightTable.horizontalHeader()
+        for visual, col in enumerate(LIGHT_TABLE_ORDER):
+            hdr.moveSection(hdr.visualIndex(col), visual)
+        hdr.setContextMenuPolicy(Qt.CustomContextMenu)  # right-click: choose the columns
         self.lightTable.verticalHeader().hide()
         self.lightTable.setMinimumHeight(80)
         self.mainSplitter.addWidget(self.lightTable)

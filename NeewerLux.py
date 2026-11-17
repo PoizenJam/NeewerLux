@@ -115,7 +115,8 @@ except Exception as e:
 try:
     import neewerlux_ui
     from neewerlux_ui import Ui_MainWindow, SpinBoxWithButtons, hideSpinArrows, adjustableColumns, fitColumnsToWidgets, widePopup, ColourPickDialog, ColourPickRow
-    from neewerlux_theme import getThemeQSS
+    from neewerlux_ui import LIGHT_TABLE_COLUMNS, LIGHT_TABLE_ORDER, LIGHT_TABLE_DEFAULT
+    from neewerlux_theme import getThemeQSS, getThemeTokens
     from neewerlux_webui import getWebDashboardHTML
 except Exception as e:
     print(f"  [DEBUG] GUI module import failed: {type(e).__name__}: {e}")
@@ -477,6 +478,7 @@ class ReconnectBackoff:
             self.lastRescue = now
             return True
         return False
+lightTableColumns = ""     # the desktop light table's shown columns, by key ("" = the default set)
 stageView = "plan"        # the desktop Stage window's view, and its size and place ("x,y,w,h"), remembered
 stageGeometry = ""
 fadeInMs = 0              # fade when a preset, animation or sequence takes lights over; 0 = cut (each can set its own)
@@ -2284,16 +2286,77 @@ try: # try to load the GUI
             self._stageWindow.raise_()
             self._stageWindow.activateWindow()
 
+        def _refreshIdentityCells(self):
+            """ID (the preferred ID, else the row number), type (the model), and the name in grey
+            when it is only the model because there's no custom name."""
+            grey = QColor(getThemeTokens(self._isDarkTheme)["textDim"])
+            for a in range(min(self.lightTable.rowCount(), len(availableLights))):
+                light = availableLights[a]
+                self.lightTable.item(a, 4).setText(str(light.prefId) if light.prefId > 0 else str(a + 1))
+                self.lightTable.item(a, 6).setText(light.device.name)
+                nameItem = self.lightTable.item(a, 0)
+                if light.name:
+                    nameItem.setData(Qt.ForegroundRole, None)
+                else:
+                    nameItem.setForeground(grey)
+
         def _updateSwatches(self):
-            """Colour square beside each light's name: what it's showing, approximately."""
+            """The colour, role and layer columns: what each light shows (approximately), its role,
+            and the layer driving it. Only cells that changed are touched."""
+            layers = showEngine.status()["owners"] if showEngine is not None else {}
             for row in range(min(self.lightTable.rowCount(), len(availableLights))):
-                item = self.lightTable.item(row, 0)
+                item = self.lightTable.item(row, 5)
                 if item is None:
                     continue
                 rgb = getLightDisplayState(row)[1]
                 if self._swatches.get(row) != rgb or item.data(Qt.DecorationRole) is None:
                     self._swatches[row] = rgb
                     item.setData(Qt.DecorationRole, QColor(*rgb) if rgb is not None else QColor(70, 70, 70))
+                role = str(getLightShowPref(row, "role")).capitalize() + (" (locked)" if getLightShowPref(row, "locked") else "")
+                layer = show.LAYER_NAMES[layers.get(row, 0)]
+                for col, text in ((7, role), (8, layer)):
+                    if self.lightTable.item(row, col).text() != text:
+                        self.lightTable.item(row, col).setText(text)
+
+        def shownLightColumns(self):
+            """The light table's columns to show, by key (Name always)."""
+            keys = lightTableColumns.split(",") if lightTableColumns else LIGHT_TABLE_DEFAULT
+            return {k for k in keys if k} | {"name"}
+
+        def applyLightColumns(self):
+            shown = self.shownLightColumns()
+            for col, (key, _, _) in LIGHT_TABLE_COLUMNS.items():
+                self.lightTable.setColumnHidden(col, key not in shown)
+
+        def lightColumnsMenu(self, pos):
+            """Right-click on the light table's header: tick the columns to show."""
+            hdr = self.lightTable.horizontalHeader()
+            shown = self.shownLightColumns()
+            menu = QMenu(self)
+            for col in LIGHT_TABLE_ORDER:
+                key, _, label = LIGHT_TABLE_COLUMNS[col]
+                action = menu.addAction(label)
+                action.setCheckable(True)
+                action.setChecked(key in shown)
+                action.setEnabled(key != "name")
+                action.toggled.connect(lambda on, k=key: self.setLightColumnShown(k, on))
+            menu.exec(hdr.mapToGlobal(pos))
+
+        def setLightColumnShown(self, key, on):
+            """Show or hide one column, remembered in NeewerLux.prefs (nothing saved for the default set)."""
+            global lightTableColumns
+            shown = self.shownLightColumns()
+            if on:
+                shown.add(key)
+            else:
+                shown.discard(key)
+            keys = [LIGHT_TABLE_COLUMNS[c][0] for c in LIGHT_TABLE_ORDER if LIGHT_TABLE_COLUMNS[c][0] in shown]
+            lightTableColumns = "" if set(keys) == set(LIGHT_TABLE_DEFAULT) else ",".join(keys)
+            self.applyLightColumns()
+            try:
+                _updatePrefsFile({"lightTableColumns": lightTableColumns or None})
+            except OSError as e:
+                printDebugString("Couldn't remember the light table's columns (" + str(e) + ")")
 
         def _updateShowStatus(self):
             """Runs on the GUI thread every 250 ms; only touches widgets when something changed."""
@@ -2693,6 +2756,8 @@ try: # try to load the GUI
             horizHeaders = self.lightTable.horizontalHeader()
             horizHeaders.setSectionsClickable(True)
             horizHeaders.sectionClicked.connect(self.sortByHeader)
+            horizHeaders.customContextMenuRequested.connect(self.lightColumnsMenu)
+            self.applyLightColumns()
 
             # SEQUENCE PANEL CONNECTIONS
             self.seqPlayButton.clicked.connect(self.seqPlay)
@@ -2855,27 +2920,13 @@ try: # try to load the GUI
             global availableLights
             global lastSortingField
 
-            sortingField = -1 # the Status header doesn't sort
-            if theHeader == 0:
-                checkForCustomNames = any(light.name != "" for light in availableLights) # only offer sorting by custom name when there are any
-                sortDlg = QMessageBox(self)
-                sortDlg.setIcon(QMessageBox.Question)
-                sortDlg.setWindowTitle("Sort by...")
-                sortDlg.setText("Which do you want to sort by?")
-                   
-                sortDlg.addButton(" Type of Light ", QMessageBox.ButtonRole.AcceptRole)
-
-                if checkForCustomNames == True: # if we have custom names available, then add that as an option
-                    sortDlg.addButton("Custom Name", QMessageBox.ButtonRole.AcceptRole)    
-                    
-                sortDlg.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
-                sortDlg.setIcon(QMessageBox.Warning)
-                clickedButton = pyside_exec(sortDlg)
-
-                if clickedButton == 0:
-                    sortingField = 8 # sort by type of light
-                elif clickedButton == 1 and checkForCustomNames == True:
-                    sortingField = 2 # sort by custom name
+            sortingField = -1 # the colour, status and layer headers don't sort
+            if theHeader == 0: # by name: custom names A to Z, then lights shown by model
+                sortingField = 2
+            elif theHeader == 6: # by type of light
+                sortingField = 8
+            elif theHeader == 7: # by role, key to practical
+                sortingField = 12
             elif theHeader == 1: # sort by MAC Address/GUID
                 sortingField = 9
             elif theHeader == 2: # the Linked column shows the signal strength: sort by it
@@ -2905,7 +2956,10 @@ try: # try to load the GUI
                             doReverseSort = True
 
                 # signal strength as a number (unknown sorts as the weakest); the first sort puts the strongest first
-                sortKeys = {2: lambda light: light.name, 8: lambda light: light.device.name, 9: lambda light: light.device.address,
+                roleOrder = {id(light): (LIGHT_ROLES + [getLightShowPref(i, "role")]).index(getLightShowPref(i, "role"))
+                             for i, light in enumerate(availableLights)}
+                sortKeys = {2: lambda light: (light.name == "", light.name.lower() or light.device.name), 8: lambda light: light.device.name, 9: lambda light: light.device.address,
+                            12: lambda light: roleOrder[id(light)],
                             10: lambda light: _rssiNumber(light) if _rssiNumber(light) is not None else -999,
                             11: lambda light: (0, light.prefId) if light.prefId > 0 else (1, 0)}
                 availableLights[:] = sorted(availableLights, key=sortKeys[sortingField], reverse=doReverseSort)
@@ -3214,11 +3268,10 @@ try: # try to load the GUI
 
                 # IF A CUSTOM NAME IS SET UP FOR THIS LIGHT, THEN CHANGE THE TABLE TO REFLECT THAT
                 if availableLights[selectedRows[0]].name != "":
-                    self.setTheTable([availableLights[selectedRows[0]].name + " (" + availableLights[selectedRows[0]].device.name + ")",
-                                    "", "", ""], selectedRows[0])
+                    self.setTheTable([availableLights[selectedRows[0]].name, "", "", ""], selectedRows[0])
                 else: # if there is no custom name, then reset the table to show that
-                    self.setTheTable([availableLights[selectedRows[0]].device.name,
-                                    "", "", ""], selectedRows[0])
+                    self.setTheTable([availableLights[selectedRows[0]].device.name, "", "", ""], selectedRows[0])
+                self._refreshIdentityCells()
 
                 if self.colorTempRange.isChecked(): # if we've asked to save a custom temperature range for this light
                     if availableLights[selectedRows[0]].cctRange != newRange: # change the range in the available lights table if they are different
@@ -3573,6 +3626,8 @@ try: # try to load the GUI
                 finalPrefs.append("stageView=" + stageView)
             if stageGeometry:
                 finalPrefs.append("stageGeometry=" + stageGeometry)
+            if lightTableColumns:  # chosen from the light table's header menu, kept when saving here
+                finalPrefs.append("lightTableColumns=" + lightTableColumns)
             if soundMode != "Pulse":  # set by starting a sound mode, kept when saving here
                 finalPrefs.append("soundMode=" + soundMode)
             if soundDevice:
@@ -3927,9 +3982,9 @@ try: # try to load the GUI
                 self.lightTable.setItem(currentRow, 1, QTableWidgetItem())
                 self.lightTable.setItem(currentRow, 2, QTableWidgetItem())
                 self.lightTable.setItem(currentRow, 3, QTableWidgetItem())
-                idItem = QTableWidgetItem()
-                idItem.setTextAlignment(Qt.AlignCenter)
-                self.lightTable.setItem(currentRow, 4, idItem)
+                for col in range(4, self.lightTable.columnCount()):  # ID, colour, type, role, layer
+                    self.lightTable.setItem(currentRow, col, QTableWidgetItem())
+                self.lightTable.item(currentRow, 4).setTextAlignment(Qt.AlignCenter)
             else:
                 currentRow = rowToChange # change data for the specified row
 
@@ -4294,25 +4349,22 @@ try: # try to load the GUI
             for a in range(len(availableLights)):
                 if availableLights[a].client == "": # the light does not currently have a Bleak object connected to it
                     if availableLights[a].name != "": # the light has a custom name, so add the custom name to the light
-                        self.setTheTable([availableLights[a].name + " (" + availableLights[a].device.name + ")", availableLights[a].device.address, "Waiting", "Waiting to connect..."])
+                        self.setTheTable([availableLights[a].name, availableLights[a].device.address, "Waiting", "Waiting to connect..."])
                     else: # the light does not have a custom name, so just use the model # of the light
                         self.setTheTable([availableLights[a].device.name, availableLights[a].device.address, "Waiting", "Waiting to connect..."])
                 else: # the light does have a Bleak object connected to it
                     if availableLights[a].name != "": # the light has a custom name, so add the custom name to the light
                         if availableLights[a].client.is_connected: # we have a connection to the light
-                            self.setTheTable([availableLights[a].name + " (" + availableLights[a].device.name + ")", availableLights[a].device.address, "LINKED", "Waiting to send..."])
+                            self.setTheTable([availableLights[a].name, availableLights[a].device.address, "LINKED", "Waiting to send..."])
                         else: # we're still trying to connect, or haven't started trying yet
-                            self.setTheTable([availableLights[a].name + " (" + availableLights[a].device.name + ")", availableLights[a].device.address, "Waiting", "Waiting to connect..."])
+                            self.setTheTable([availableLights[a].name, availableLights[a].device.address, "Waiting", "Waiting to connect..."])
                     else: # the light does not have a custom name, so just use the model # of the light
                         if availableLights[a].client.is_connected:
                             self.setTheTable([availableLights[a].device.name, availableLights[a].device.address, "LINKED", "Waiting to send..."])
                         else:
                             self.setTheTable([availableLights[a].device.name, availableLights[a].device.address, "Waiting", "Waiting to connect..."])
 
-            # the ID column: the preferred ID if set, else the row number
-            for a in range(len(availableLights)):
-                prefID = availableLights[a].prefId
-                self.lightTable.item(a, 4).setText(str(prefID) if prefID > 0 else str(a + 1))
+            self._refreshIdentityCells()
 
         # === THEME TOGGLE ===
         def toggleTheme(self):
@@ -4321,6 +4373,7 @@ try: # try to load the GUI
             QApplication.instance().setStyleSheet(qss)
             self.themeToggleBtn.setText("\u263E" if self._isDarkTheme else "\u2600")
             self.themeToggleBtn.setToolTip("Switch to light theme" if self._isDarkTheme else "Switch to dark theme")
+            self._refreshIdentityCells()  # the grey of names that are only the model
 
         # === HTTP SERVER TOGGLE ===
         def toggleHTTPServer(self):
@@ -10687,7 +10740,7 @@ def loadPrefsFile(globalPrefsFile = ""):
            rememberLightsOnExit, acceptable_HTTP_IPs, customKeys, enableTabsOnLaunch, \
            whiteListedMACs, rememberPresetsOnExit, autoReconnectOnDisconnect, livePreview, hideConsoleOnLaunch, minimizeToTrayOnClose, httpAutoStart, httpPort, httpAccessToken, cctFallbackMode, enableLogTab, logToFile, logHeartbeat, globalCCTMin, globalCCTMax, \
            envMaxBri, envMinBri, seqFrameRate, effectMaxSeconds, simulatedLights, simulatedCCTOnly, flashGuardEnabled, \
-           cameraPosition, eyelineFlash, handbackFadeMs, fadeInMs, stageView, stageGeometry, soundMode, soundDevice, soundTempoRange, midiDevice, midiTransport, songSectionCommand, songFinderNames, songSectionCommandOn
+           cameraPosition, eyelineFlash, handbackFadeMs, fadeInMs, stageView, stageGeometry, lightTableColumns, soundMode, soundDevice, soundTempoRange, midiDevice, midiTransport, songSectionCommand, songFinderNames, songSectionCommandOn
 
     if globalPrefsFile != "":
         printDebugString("Loading global preferences from file...")
@@ -10702,7 +10755,7 @@ def loadPrefsFile(globalPrefsFile = ""):
             "SC_Dec_1_Large", "SC_Inc_1_Large", "SC_Dec_2_Large", "SC_Inc_2_Large", "SC_Dec_3_Large", "SC_Inc_3_Large", \
             "enableTabsOnLaunch", "whiteListedMACs", "rememberPresetsOnExit", "autoReconnectOnDisconnect", "hideConsoleOnLaunch", "minimizeToTrayOnClose", "livePreview", "httpAutoStart", "httpPort", "httpAccessToken", "cctFallbackMode", "enableLogTab", "logToFile", "logHeartbeat", "globalCCTMin", "globalCCTMax", \
             "envMaxBri", "envMinBri", "seqFrameRate", "effectMaxSeconds", "simulatedLights", "simulatedCCTOnly", "flashGuard", \
-            "cameraPosition", "eyelineFlash", "handbackFadeMs", "fadeInMs", "stageView", "stageGeometry", "soundMode", "soundDevice", "soundTempoRange", "midiDevice", "midiTransport", "songSectionCommand", "songFinderNames", "songSectionCommandOn"]
+            "cameraPosition", "eyelineFlash", "handbackFadeMs", "fadeInMs", "stageView", "stageGeometry", "lightTableColumns", "soundMode", "soundDevice", "soundTempoRange", "midiDevice", "midiTransport", "songSectionCommand", "songFinderNames", "songSectionCommandOn"]
 
         # KICK OUT ANY PARAMETERS THAT AREN'T IN THE "ACCEPTABLE ARGUMENTS" LIST ABOVE
         # THIS SECTION OF CODE IS *SLIGHTLY* DIFFERENT THAN THE CLI KICK OUT CODE
@@ -10750,6 +10803,7 @@ def loadPrefsFile(globalPrefsFile = ""):
     prefsParser.add_argument("--fadeInMs", default=0)
     prefsParser.add_argument("--stageView", default="plan")
     prefsParser.add_argument("--stageGeometry", default="")
+    prefsParser.add_argument("--lightTableColumns", default="")
     prefsParser.add_argument("--soundMode", default="Pulse")
     prefsParser.add_argument("--soundDevice", default="")
     prefsParser.add_argument("--soundTempoRange", default="")
@@ -10841,6 +10895,7 @@ def loadPrefsFile(globalPrefsFile = ""):
     fadeInMs = _intPref(mainPrefs.fadeInMs, 0, 0, 5000)
     stageView = mainPrefs.stageView if mainPrefs.stageView in ("plan", "height", "strip") else "plan"
     stageGeometry = str(mainPrefs.stageGeometry or "")
+    lightTableColumns = str(mainPrefs.lightTableColumns or "")
     soundMode = str(mainPrefs.soundMode or "Pulse")
     soundDevice = str(mainPrefs.soundDevice or "")
     soundTempoRange = audio.validTempoRange(*(str(mainPrefs.soundTempoRange).split("-") + ["", ""])[:2]) or (audio.BPM_MIN, audio.BPM_MAX)
