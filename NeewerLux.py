@@ -15,7 +15,7 @@
 ##          Windows, Linux/Ubuntu, MacOS and RPi
 ############################################################
 
-NEEWERLUX_VERSION = "1.4.1"
+NEEWERLUX_VERSION = "1.4.2"
 NEEWERLUX_REPO_URL = "https://github.com/poizenjam/NeewerLux/"
 NEEWERLUX_RELEASES_API = "https://api.github.com/repos/poizenjam/NeewerLux/releases/latest"
 
@@ -5058,7 +5058,7 @@ def recallCustomPreset(numOfPreset, updateGUI=True, loop=None):
 
                 if updateGUI == True and mainWindow is not None:
                     showOnSliders(colorMode=p_colorMode, brightness=p_brightness, scene=p_scene)
-                computedValue = calculateByteString(True, colorMode=p_colorMode, brightness=p_brightness, scene=p_scene)
+                computedValue = calculateByteString(True, colorMode=p_colorMode, brightness=p_brightness, animation=p_scene)
 
             if updateGUI == False or guiFade:
                 for b in (mainWindow.selectedLights() if guiFade else range(len(availableLights))):

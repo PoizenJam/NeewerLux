@@ -2,6 +2,12 @@
 
 Changes relative to upstream [NeewerLite-Python v0.12d](https://github.com/taburineagle/NeewerLite-Python).
 
+## v1.4.2
+
+### Fixed
+- **A global preset in Scene mode can be recalled again.** Recalling it (from the desktop's preset buttons, `use_preset=N` or the presets POST `recall`) stopped with an error and changed no light, because the scene number went to the byte encoder under the wrong name. The bug dates from upstream NeewerLite-Python (2022). Snapshot presets with scenes were not affected.
+- **The Source download starts.** The 1.4.1 Source zip left out `neewerlux_midi.py`, which NeewerLux.py needs, so it stopped at start with "No module named 'neewerlux_midi'". The release workflow now takes every `neewerlux_*.py` module, so a new module can't be left out again. The Windows executable was not affected.
+
 ## v1.4.1 - 2026-11-16
 
 ### Added

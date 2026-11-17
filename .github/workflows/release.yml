@@ -72,19 +72,12 @@ jobs:
       - name: Create source zip
         run: |
           VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -1)
+          # Modules by glob: a list by name missed neewerlux_midi.py in 1.4.1, and NeewerLux.py imports every module.
           zip -r "NeewerLux-${VERSION}-Source.zip" \
             NeewerLux.py \
             light_models.toml \
             LICENSE \
-            neewerlux_ui.py \
-            neewerlux_theme.py \
-            neewerlux_webui.py \
-            neewerlux_anim_editor.py \
-            neewerlux_show.py \
-            neewerlux_audio.py \
-            neewerlux_sim.py \
-            neewerlux_stage.py \
-            neewerlux_timeline.py \
+            neewerlux_*.py \
             NeewerLux.bat \
             NeewerLux-HTTP.bat \
             pyproject.toml \

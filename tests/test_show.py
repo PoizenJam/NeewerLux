@@ -2152,6 +2152,16 @@ def t_presetAsEffect(rig):
     check(anim["keyframes"][0]["lights"] == {"*": {"mode": "HSI", "hue": 300, "sat": 100, "bri": 70}} and anim["keyframes"][0]["hold_ms"] == 300, str(anim))
 
 
+def t_globalScenePreset(rig):
+    """1.4.2: a global preset in Scene mode recalls (it raised KeyError from 2022 to 1.4.1)."""
+    P = "/NeewerLux/presets"
+    rig.post(P, {"action": "save", "index": 3, "entries": [{"target": "-1", "mode": "Scene", "scene": 5, "bri": 40}]})
+    t0 = time.monotonic()
+    rig.get("use_preset=3")
+    w = waitFor(rig, RIM, t0, lambda d: d[1] == 136, 2)
+    check(any(d[1] == 136 and d[3] == 40 and d[4] == 5 for d in w), "scene 5 at 40%% written: %s" % w[-2:])
+
+
 def t_accessToken(rig):
     """1.4.0: with an access token set, other computers need it (header or token=); this
     computer doesn't; token= never reaches the commands."""
@@ -2529,7 +2539,7 @@ TESTS = [t_maxBrightnessHTTP, t_maxBrightnessAnimationAndSequence, t_minBrightne
          t_addSimulatedRig, t_compositorWakesOnlyWhenDue, t_handBackToRunningLayerFades,
          t_soundModeHTTP, t_soundUnderShowAndEffects, t_soundRespectsLimitsAndLocks, t_soundUnavailable, t_soundModeFilesHTTP,
          t_offWinsDuringShows, t_animationFlashRates, t_shippedAnimationTags, t_soundCues, t_soundHandsBackToBase, t_manualWriteReleasesSound, t_presetFadeTakesLightsFromSound, t_soundOnSomeLights,
-         t_presetSounds, t_paletteLibrary, t_songDrafts, t_draftStyles, t_playBrightness, t_clockFollow, t_presetAsEffect, t_accessToken, t_reconnectBackoff, t_songHTTP, t_swatches, t_songTags, t_midiClockHTTP]
+         t_presetSounds, t_paletteLibrary, t_songDrafts, t_draftStyles, t_playBrightness, t_clockFollow, t_presetAsEffect, t_globalScenePreset, t_accessToken, t_reconnectBackoff, t_songHTTP, t_swatches, t_songTags, t_midiClockHTTP]
 
 
 def main():
