@@ -214,16 +214,20 @@ class FlashCounter:
             return False
         lum, red = level
         gap = window / (2.0 * limit)
+        # One transition (half a flash) is the least a window can count. A paced limit under
+        # half a flash a window (eye-line "calm") is kept by the gap alone; counting it would
+        # hold every transition, and the light would never change.
+        perWindow = max(limit, 0.5) if paced else limit
         d = self._wouldTransition(lum)
         if d and d != self.direction:
             recent = [x for x in self.transitions if t - x < window]
-            if (len(recent) + 1) / 2.0 > limit:
+            if (len(recent) + 1) / 2.0 > perWindow:
                 return True
             if paced and self.transitions and t - self.transitions[-1] < gap:
                 return True
         if self.lastRed is not None and red != self.lastRed:
             recent = [x for x in self.redTransitions if t - x < window]
-            if (len(recent) + 1) / 2.0 > limit:
+            if (len(recent) + 1) / 2.0 > perWindow:
                 return True
             if paced and self.redTransitions and t - self.redTransitions[-1] < gap:
                 return True
