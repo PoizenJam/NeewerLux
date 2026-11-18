@@ -342,6 +342,7 @@ LIGHT_TABLE_COLUMNS = {0: ("name", "Light Name", "Light Name"), 1: ("mac", "MAC 
                        7: ("role", "Role", "Role"), 8: ("layer", "Layer", "Layer")}
 LIGHT_TABLE_ORDER = (4, 5, 0, 6, 1, 2, 7, 8, 3)
 LIGHT_TABLE_DEFAULT = ("id", "colour", "name", "type", "mac", "linked", "status")
+TABLE_SWATCH_SIZE = (34, 22)  # the Colour column's swatch, big enough to read a scene's marks
 
 
 def adjustableColumns(table, fixed=()):
@@ -1001,8 +1002,15 @@ class Ui_MainWindow(object):
         adjustableColumns(self.lightTable, fixed=(5,))
         fm = self.lightTable.fontMetrics()
         for col, sample in ((0, "W" * 14), (1, "WW:WW:WW:WW:WW:WW"), (2, "LINKED (-100 dBm)WW"), (4, "ID 99"),
-                            (5, "WW"), (6, "NEEWER-RGB660 PROW"), (7, "Background (locked)"), (8, "override")):
+                            (6, "NEEWER-RGB660 PROW"), (7, "Background (locked)"), (8, "override")):
             self.lightTable.setColumnWidth(col, fm.horizontalAdvance(sample) + 24)
+        self.lightTable.setIconSize(QSize(*TABLE_SWATCH_SIZE))
+        self.lightTable.setColumnWidth(5, TABLE_SWATCH_SIZE[0] + 18)
+        # rows two lines high, the Linked column's; sizing them to their text made them jump
+        # whenever the Status text changed length
+        rows = self.lightTable.verticalHeader()
+        rows.setSectionResizeMode(QHeaderView.Fixed)
+        rows.setDefaultSectionSize(fm.lineSpacing() * 2 + 14)
         hdr = self.lightTable.horizontalHeader()
         for visual, col in enumerate(LIGHT_TABLE_ORDER):
             hdr.moveSection(hdr.visualIndex(col), visual)

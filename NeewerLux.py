@@ -115,7 +115,7 @@ except Exception as e:
 try:
     import neewerlux_ui
     from neewerlux_ui import Ui_MainWindow, SpinBoxWithButtons, hideSpinArrows, adjustableColumns, fitColumnsToWidgets, widePopup, ColourPickDialog, ColourPickRow
-    from neewerlux_ui import LIGHT_TABLE_COLUMNS, LIGHT_TABLE_ORDER, LIGHT_TABLE_DEFAULT
+    from neewerlux_ui import LIGHT_TABLE_COLUMNS, LIGHT_TABLE_ORDER, LIGHT_TABLE_DEFAULT, TABLE_SWATCH_SIZE
     from neewerlux_theme import getThemeQSS, getThemeTokens
     from neewerlux_webui import getWebDashboardHTML
 except Exception as e:
@@ -2312,7 +2312,7 @@ try: # try to load the GUI
                 if self._swatches.get(row) != sw or item.data(Qt.DecorationRole) is None:
                     from neewerlux_stage import swatchPixmap
                     self._swatches[row] = sw
-                    item.setData(Qt.DecorationRole, swatchPixmap(sw, self.devicePixelRatioF()))
+                    item.setData(Qt.DecorationRole, swatchPixmap(sw, self.devicePixelRatioF(), TABLE_SWATCH_SIZE))
                     item.setToolTip(swatchTip(sw))
                 role = str(getLightShowPref(row, "role")).capitalize() + (" (locked)" if getLightShowPref(row, "locked") else "")
                 layer = show.LAYER_NAMES[layers.get(row, 0)]
@@ -2936,6 +2936,10 @@ try: # try to load the GUI
             elif theHeader == 4: # ID: preferred IDs first in ID order, then the rest as they are (the order at start)
                 sortingField = 11
 
+            if sortingField != -1 and showEngine is not None and showEngine.anyActive():
+                # the show engine tracks lights by their place in the list, which a sort changes
+                self.statusBar.showMessage("Sorting waits until shows, sound modes and effects have stopped")
+                sortingField = -1
             if sortingField != -1: # we want to sort
                 self.lightTable.horizontalHeader().setSortIndicatorShown(True) # show the sorting indicator
 
@@ -4007,8 +4011,7 @@ try: # try to load the GUI
             if infoArray[3] != "": # the current status message of the light
                 if rowToChange == -1 or (rowToChange != -1 and infoArray[3] != self.returnTableInfo(rowToChange, 3)):
                     self.lightTable.item(currentRow, 3).setText(infoArray[3])
-
-            self.lightTable.resizeRowsToContents()
+                    self.lightTable.item(currentRow, 3).setToolTip(infoArray[3])  # rows are two lines high; longer text shows on hover
 
         def _withSignal(self, row, linkedText):
             """The Linked cell's text with the light's signal strength on its first line, replacing
@@ -4359,12 +4362,12 @@ try: # try to load the GUI
                 else: # the light does have a Bleak object connected to it
                     if availableLights[a].name != "": # the light has a custom name, so add the custom name to the light
                         if availableLights[a].client.is_connected: # we have a connection to the light
-                            self.setTheTable([availableLights[a].name, availableLights[a].device.address, "LINKED", "Waiting to send..."])
+                            self.setTheTable([availableLights[a].name, availableLights[a].device.address, "LINKED", idleStatus(a)])
                         else: # we're still trying to connect, or haven't started trying yet
                             self.setTheTable([availableLights[a].name, availableLights[a].device.address, "Waiting", "Waiting to connect..."])
                     else: # the light does not have a custom name, so just use the model # of the light
                         if availableLights[a].client.is_connected:
-                            self.setTheTable([availableLights[a].device.name, availableLights[a].device.address, "LINKED", "Waiting to send..."])
+                            self.setTheTable([availableLights[a].device.name, availableLights[a].device.address, "LINKED", idleStatus(a)])
                         else:
                             self.setTheTable([availableLights[a].device.name, availableLights[a].device.address, "Waiting", "Waiting to connect..."])
 
@@ -5833,6 +5836,30 @@ def updateStatus(splitString = False, customValue=False):
 
         return currentHexString
 
+def statusLine(state):
+    """One line for the light table's Status column (desktop and web): what the light was last set to."""
+    if state is None:
+        return ""
+    if not state.power:
+        return "Off"
+    if state.mode == "CCT":
+        return "CCT %dK, %d%%" % (state.kelvin, state.bri)
+    if state.mode == "HSI":
+        return "HSI %d\N{DEGREE SIGN}, sat %d%%, %d%%" % (state.hue, state.sat, state.bri)
+    if state.mode == "SCENE":
+        return "Scene %d, %d%%" % (state.scene, state.bri)
+    return "On"
+
+
+def idleStatus(idx):
+    """The Status text of a linked light nothing is being sent to: what it was last set to this
+    session, else Ready (the old "Waiting to send..." read as if something were stuck)."""
+    light = availableLights[idx]
+    if light.device.address in _lastWritten or light.device.address in _lightsOff:
+        return statusLine(light.state)
+    return "Ready"
+
+
 # CALCULATE THE CHECKSUM FROM THE BYTESTRING
 def calculateChecksum(sendValue):
     return neewer.checksum(sendValue)
@@ -6122,7 +6149,7 @@ async def connectToLight(selectedLight, updateGUI=True):
                             if mainWindow is not None: mainWindow._tableUpdateSignal.emit(["", "", "", "Connecting..."], lightIdx)
                         else:
                             # Subsequent failures are worth reporting
-                            if mainWindow is not None: mainWindow._tableUpdateSignal.emit(["", "", "NOT\nLINKED", "There was an error connecting to the light, trying again (Attempt " + str(currentAttempt + 1) + " of " + str(maxNumOfAttempts) + ")..."], lightIdx)
+                            if mainWindow is not None: mainWindow._tableUpdateSignal.emit(["", "", "NOT\nLINKED", "Couldn't link; trying again (" + str(currentAttempt + 1) + " of " + str(maxNumOfAttempts) + ")"], lightIdx)
                 else:
                     returnValue = False # if we're in CLI mode, and there is an error connecting to the light, return False
 
@@ -6141,7 +6168,7 @@ async def connectToLight(selectedLight, updateGUI=True):
             printDebugString("Successful link on light [" + lightName + "] " + returnMACname() + " " + lightMAC)
 
             if updateGUI == True:
-                if mainWindow is not None: mainWindow._tableUpdateSignal.emit(["", "", "LINKED", "Waiting to send..."], returnLightIndexesFromMacAddress(lightMAC)[0]) # if it's successful, show that in the table
+                if mainWindow is not None: mainWindow._tableUpdateSignal.emit(["", "", "LINKED", idleStatus(returnLightIndexesFromMacAddress(lightMAC)[0])], returnLightIndexesFromMacAddress(lightMAC)[0]) # if it's successful, show that in the table
             else:
                 returnValue = True  # if we're in CLI mode, and there is no error connecting to the light, return True
         else:
@@ -6375,7 +6402,7 @@ async def writeToLight(selectedLights=0, updateGUI=True, useGlobalValue=True, fr
                                 # if we're not looking at an old light, or if we are, we're not in either HSI or ANM modes, then update the status of that light
                                 if not (availableLights[(int(selectedLights[a]))].cctOnly == True and (currentSendValue[1] == 134 or currentSendValue[1] == 136)):
                                     if currentSendValue[1] != 129: # if we're not turning the light on or off
-                                        if mainWindow is not None: mainWindow._tableUpdateSignal.emit(["", "", "", updateStatus(True, currentSendValue)], int(selectedLights[a]))
+                                        if mainWindow is not None: mainWindow._tableUpdateSignal.emit(["", "", "", statusLine(neewer.decode(currentSendValue))], int(selectedLights[a]))
                                     else: # we ARE turning the light on or off
                                         if currentSendValue[3] == 1: # we turned the light on
                                             availableLights[int(selectedLights[a])].on = True # toggle the "light on" parameter of this light to ON
@@ -6613,9 +6640,9 @@ def workerThread(_loop):
                                         _loop.run_until_complete(getLightChannelandPower(a)) # then check the power and light status of that light
                                     except Exception as e:
                                         printDebugString("Error reading power/channel for light " + str(a + 1) + ": " + str(e))
-                                    if hasGUI: mainWindow._tableUpdateSignal.emit(["", "", "LINKED\n" + availableLights[a].status[0] + " / ᴄʜ. " + str(availableLights[a].status[1]), "Waiting to send..."], a)
+                                    if hasGUI: mainWindow._tableUpdateSignal.emit(["", "", "LINKED\n" + availableLights[a].status[0] + " / ᴄʜ. " + str(availableLights[a].status[1]), ""], a)  # Status keeps the last send
                                 else: # if the light we're scanning doesn't supply power or channel status, then just show "LINKED"
-                                    if hasGUI: mainWindow._tableUpdateSignal.emit(["", "", "LINKED", "Waiting to send..."], a)
+                                    if hasGUI: mainWindow._tableUpdateSignal.emit(["", "", "LINKED", ""], a)
                         else:
                             # Bleak object is empty - light was previously cleared; retry when its wait is up
                             if autoReconnectOnDisconnect and backoff.due(availableLights[a].device.address):
@@ -6711,7 +6738,7 @@ def workerThread(_loop):
                 if mainWindow is not None:
                     for idx in lightIndices:
                         if idx < len(availableLights) and availableLights[idx].state is not None:
-                            if hasGUI: mainWindow._tableUpdateSignal.emit(["", "", "", updateStatus(True, neewer.encode(availableLights[idx].state))], idx)
+                            if hasGUI: mainWindow._tableUpdateSignal.emit(["", "", "", statusLine(availableLights[idx].state)], idx)
             except Exception:
                 pass
             threadAction = ""
@@ -6727,7 +6754,7 @@ def workerThread(_loop):
                 if mainWindow is not None:
                     for idx in pending:
                         if idx < len(availableLights) and availableLights[idx].state is not None:
-                            mainWindow._tableUpdateSignal.emit(["", "", "", updateStatus(True, neewer.encode(availableLights[idx].state))], idx)
+                            mainWindow._tableUpdateSignal.emit(["", "", "", statusLine(availableLights[idx].state)], idx)
 
         # VALUES THE FLASH GUARD HELD BACK: resend each light's latest value once allowed.
         # fromShow=True: the value already passed the show/base arbitration when it was held.
@@ -6760,7 +6787,7 @@ def sendShowFrames(_loop, frames):
         _loop.run_until_complete(parallelWriteToLights(parallelIdx, fromShow=True))
         if mainWindow is not None:
             for idx in parallelIdx:
-                mainWindow._tableUpdateSignal.emit(["", "", "", updateStatus(True, neewer.encode(availableLights[idx].state))], idx)
+                mainWindow._tableUpdateSignal.emit(["", "", "", statusLine(availableLights[idx].state)], idx)
     if serialIdx:
         _loop.run_until_complete(writeToLight(serialIdx, True, False, fromShow=True))
 
@@ -10047,7 +10074,7 @@ class NLPythonServer(BaseHTTPRequestHandler):
                         linked = bool(light.client != "" and hasattr(light.client, 'is_connected') and light.client.is_connected)
                         try:
                             if light.state is not None:
-                                status = updateStatus(True, neewer.encode(light.state))
+                                status = statusLine(light.state)
                             else:
                                 status = ""
                         except Exception:

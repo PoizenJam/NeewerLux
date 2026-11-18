@@ -331,6 +331,41 @@ def checkIDColumn(nl, app, win):
     print("ID column: PASS")
 
 
+def checkStatusRows(nl, app, win, rig):
+    """1.5.0: the Status column is one line and rows keep one height (rows sized to their text
+    jumped between two and three lines as the status check rewrote it); the swatch is big enough
+    to read; sorting waits while a show drives the lights, since the show engine tracks them by
+    their place in the list."""
+    table = win.lightTable
+    heights = {table.rowHeight(r) for r in range(table.rowCount())}
+    lineH = table.fontMetrics().lineSpacing()
+    assert len(heights) == 1 and heights.pop() >= 2 * lineH, "rows one height, two lines: %s" % [table.rowHeight(r) for r in range(table.rowCount())]
+    before = table.rowHeight(0)
+    win.setTheTable(["", "", "", "a long message\nover\nthree lines"], 0)
+    app.processEvents()
+    assert table.rowHeight(0) == before, "a three-line status doesn't grow the row"
+    assert table.item(0, 3).toolTip() == "a long message\nover\nthree lines", "the whole text on hover"
+    rig.get("light=1&mode=CCT&temp=56&bri=80", 0.6)
+    app.processEvents()
+    assert win.returnTableInfo(0, 3) == "CCT 5600K, 80%", "one line after a send: %r" % win.returnTableInfo(0, 3)
+    assert nl.statusLine(nl.neewer.decode([120, 136, 2, 100, 6])) == "Scene 6, 100%", "scene line"
+    w, h = nl.TABLE_SWATCH_SIZE
+    assert table.iconSize().width() == w and table.iconSize().height() == h and w >= 30, "swatch %dx%d" % (w, h)
+    pm = table.item(0, 5).data(nl.Qt.DecorationRole)
+    assert int(pm.width() / pm.devicePixelRatio()) == w, "the swatch pixmap fills the icon size"
+    order = [light.device.address for light in nl.availableLights]
+    rig.post("/NeewerLux/animate", {"action": "play", "name": "Breathe"}, 0.3)
+    app.processEvents()
+    try:
+        win.sortByHeader(1)
+        app.processEvents()
+        assert [light.device.address for light in nl.availableLights] == order, "no sort while a show plays"
+        assert "Sorting waits" in win.statusBar.currentMessage(), "and the status bar says why"
+    finally:
+        rig.post("/NeewerLux/animate", {"action": "stop"}, 0.3)
+        app.processEvents()
+
+
 def checkLightColumns(nl, app, win, rig):
     """1.5.0: colour, name and type in columns of their own, plus role and layer as on the web
     dashboard; the header's right-click menu shows and hides columns (Name always shows) and is
@@ -521,6 +556,7 @@ def main():
     checkSignalInLinkedColumn(nl, app, win)
     checkIDColumn(nl, app, win)
     checkLightColumns(nl, app, win, rig)
+    checkStatusRows(nl, app, win, rig)
 
     # Sequences panel and status timer
     nl.savedSequences["Smoke"] = {"format": 1, "name": "Smoke", "duration_ms": 1500,

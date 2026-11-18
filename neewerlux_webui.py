@@ -115,9 +115,10 @@ a:hover { text-decoration: underline; }
 #lightColsMenu label { display:block; padding:3px 0; white-space:nowrap; }
 .light-table th.sortable { cursor:pointer; }
 .swatch { display:inline-block; position:relative; overflow:hidden; width:14px; height:14px; border-radius:3px; border:1px solid var(--border); vertical-align:middle; }
+.swatch.table-swatch { width:32px; height:20px; border-radius:4px; }  /* the light table's: big enough to read its marks */
 /* swatch marks: a built-in scene playing, a colour not known */
-.sw-play { position:absolute; right:1px; bottom:1px; width:0; height:0; border-left:6px solid #fff; border-top:4px solid transparent; border-bottom:4px solid transparent; filter:drop-shadow(0 0 1px #000); }
-.sw-q { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#ccc; font-size:10px; font-style:normal; }
+.sw-play { position:absolute; right:2px; bottom:2px; width:0; height:0; border-left:9px solid #fff; border-top:6px solid transparent; border-bottom:6px solid transparent; filter:drop-shadow(0 0 1px #000); }
+.sw-q { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#ccc; font-size:14px; font-weight:600; font-style:normal; }
 .stage-box .sw-play { right:6px; bottom:6px; border-left-width:16px; border-top-width:10px; border-bottom-width:10px; }
 .stage-grid { display:flex; flex-wrap:wrap; gap:12px; }
 .swatches { display:grid; grid-template-columns:repeat(6, 26px); gap:3px; }
@@ -1383,8 +1384,8 @@ const LIGHT_ROLE_ORDER = ['key', 'fill', 'rim', 'background', 'practical'];
 const lightHasName = l => l.name && l.name !== l.model;
 const LIGHT_COLS = [
     {key: 'id', label: 'ID', sort: l => l.id, cell: l => `<td class="light-id">${l.id}</td>`},
-    {key: 'colour', label: '', menu: 'Colour', cell: (l, st) => { const [style, inner] = swatchLook(st.swatch, 3);
-        return `<td><span class="swatch" data-swatch="${l.id}" style="${style}" title="${swatchTip(st.swatch)}">${inner}</span></td>`; }},
+    {key: 'colour', label: '', menu: 'Colour', cell: (l, st) => { const [style, inner] = swatchLook(st.swatch, 5);
+        return `<td><span class="swatch table-swatch" data-swatch="${l.id}" style="${style}" title="${swatchTip(st.swatch)}">${inner}</span></td>`; }},
     {key: 'name', label: 'Light Name', sort: l => (lightHasName(l) ? '0' : '1') + (l.name || '').toLowerCase(),
      cell: l => lightHasName(l) ? `<td data-name="${l.id}">${esc(l.name)}</td>` : `<td data-name="${l.id}" style="color:var(--muted)">${esc(l.model || l.mac)}</td>`},
     {key: 'type', label: 'Type', sort: l => l.model || '', cell: l => `<td style="font-size:11px" data-type="${l.id}">${esc(l.model || '')}</td>`},
@@ -1608,7 +1609,7 @@ async function pollStatus() {
     (lastStatus.lights || []).forEach(l => {
         const sw = document.querySelector('[data-swatch="' + l.id + '"]');
         if (sw) {
-            const [style, inner] = swatchLook(l.swatch, 3);
+            const [style, inner] = swatchLook(l.swatch, 5);
             if (sw.getAttribute('style') !== style) sw.setAttribute('style', style);
             if (sw.innerHTML !== inner) sw.innerHTML = inner;
             sw.title = swatchTip(l.swatch);

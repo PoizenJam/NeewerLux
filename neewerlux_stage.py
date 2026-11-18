@@ -113,14 +113,15 @@ def paintSwatch(p, rect, sw, radius, dim=False):
     p.restore()
 
 
-def swatchPixmap(sw, dpr=1.0, size=16):
-    """A swatch as a pixmap for a table cell's decoration."""
-    pm = QPixmap(int(size * dpr), int(size * dpr))
+def swatchPixmap(sw, dpr=1.0, size=(16, 16)):
+    """A swatch as a pixmap for a table cell's decoration, size (width, height)."""
+    w, h = size
+    pm = QPixmap(int(w * dpr), int(h * dpr))
     pm.setDevicePixelRatio(dpr)
     pm.fill(Qt.transparent)
     p = QPainter(pm)
     p.setRenderHint(QPainter.Antialiasing)
-    paintSwatch(p, QRectF(0, 0, size, size), sw, 3)
+    paintSwatch(p, QRectF(0, 0, w, h), sw, 4)
     p.end()
     return pm
 
