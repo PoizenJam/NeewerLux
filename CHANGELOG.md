@@ -6,6 +6,7 @@ Changes relative to upstream [NeewerLite-Python v0.12d](https://github.com/tabur
 
 ### Fixed
 - **An RGB660 PRO in standby shows as off.** It answers the power query with a different value from the plain RGB660 (0 rather than 2), which NeewerLux didn't recognise, so the Linked column showed "---" for its power and its swatch showed it as on.
+- **A long status no longer makes its row in the light table taller.** Text too long for its column wrapped onto another line (at large text sizes, "May need re-linking later" did); it is now cut short, with the whole text on hover.
 
 ## v1.5.0 - 2026-11-17
 

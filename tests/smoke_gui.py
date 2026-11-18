@@ -350,7 +350,10 @@ def checkStatusRows(nl, app, win, rig):
         app.processEvents()
         assert table.rowHeight(0) >= table.sizeHintForRow(0), "two lines fit at a larger font: %d < %d" % (table.rowHeight(0), table.sizeHintForRow(0))
         before = table.rowHeight(0)
-        for text in ("Scene 6, 100%", "Light turned off\nMay need re-linking later", "Couldn't link; trying again (3 of 6)", "Ready"):
+        # the last is longer than any column is wide: wrapped, it made its row taller (on Robert's
+        # PC the two-line off message wrapped onto a third line at this font size)
+        for text in ("Scene 6, 100%", "Light turned off\nMay need re-linking later", "Couldn't link; trying again (3 of 6)",
+                     "Ready", "Light turned off\n" + "May need re-linking later " * 12):
             win.setTheTable(["", "", "", text], 0)
             app.processEvents()
             assert table.rowHeight(0) == before, "status %r changes the row height" % text

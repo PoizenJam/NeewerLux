@@ -1011,6 +1011,9 @@ class Ui_MainWindow(object):
         # point cut the second line off on a scaled screen); the Status column keeps to one line
         # (two at most), so rows no longer jump between two and three lines
         rows = self.lightTable.verticalHeader()
+        # cells keep to the lines their text has: a long line is cut short (in full on hover)
+        # rather than wrapped onto a third line, which made its row taller than the rest
+        self.lightTable.setWordWrap(False)
         rows.setMinimumSectionSize(fm.lineSpacing() * 2 + 14)
         rows.setSectionResizeMode(QHeaderView.ResizeToContents)
         hdr = self.lightTable.horizontalHeader()
