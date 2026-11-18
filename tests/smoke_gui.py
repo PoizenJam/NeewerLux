@@ -337,14 +337,36 @@ def checkStatusRows(nl, app, win, rig):
     to read; sorting waits while a show drives the lights, since the show engine tracks them by
     their place in the list."""
     table = win.lightTable
-    heights = {table.rowHeight(r) for r in range(table.rowCount())}
     lineH = table.fontMetrics().lineSpacing()
-    assert len(heights) == 1 and heights.pop() >= 2 * lineH, "rows one height, two lines: %s" % [table.rowHeight(r) for r in range(table.rowCount())]
-    before = table.rowHeight(0)
+    assert all(table.rowHeight(r) >= 2 * lineH for r in range(table.rowCount())), "rows at least two lines high"
+    # sized with the real font: a larger one (a scaled screen, the theme) must not cut the
+    # Linked column's second line off, as the first version's fixed height did
+    font = table.font()
+    big = nl.QFont(font)
+    big.setPointSizeF(font.pointSizeF() * 1.6)
+    table.setFont(big)
+    try:
+        win.setTheTable(["", "", "LINKED (-50 dBm)\nON / ᴄʜ. 0", "Ready"], 0)
+        app.processEvents()
+        assert table.rowHeight(0) >= table.sizeHintForRow(0), "two lines fit at a larger font: %d < %d" % (table.rowHeight(0), table.sizeHintForRow(0))
+        before = table.rowHeight(0)
+        for text in ("Scene 6, 100%", "Light turned off\nMay need re-linking later", "Couldn't link; trying again (3 of 6)", "Ready"):
+            win.setTheTable(["", "", "", text], 0)
+            app.processEvents()
+            assert table.rowHeight(0) == before, "status %r changes the row height" % text
+    finally:
+        table.setFont(font)
+        app.processEvents()
     win.setTheTable(["", "", "", "a long message\nover\nthree lines"], 0)
     app.processEvents()
-    assert table.rowHeight(0) == before, "a three-line status doesn't grow the row"
     assert table.item(0, 3).toolTip() == "a long message\nover\nthree lines", "the whole text on hover"
+    # the status check replaces a stale link error once the light is linked (Windows relinks by itself after sleep)
+    win.setTheTable(["", "", "", "There was an error connecting to the light"], 0)
+    deadline = time.time() + 8
+    while win.returnTableInfo(0, 3) == "There was an error connecting to the light" and time.time() < deadline:
+        app.processEvents()
+        time.sleep(0.1)
+    assert win.returnTableInfo(0, 3) != "There was an error connecting to the light", "a linked light's link error clears"
     rig.get("light=1&mode=CCT&temp=56&bri=80", 0.6)
     app.processEvents()
     assert win.returnTableInfo(0, 3) == "CCT 5600K, 80%", "one line after a send: %r" % win.returnTableInfo(0, 3)

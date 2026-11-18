@@ -5855,7 +5855,9 @@ def idleStatus(idx):
     """The Status text of a linked light nothing is being sent to: what it was last set to this
     session, else Ready (the old "Waiting to send..." read as if something were stuck)."""
     light = availableLights[idx]
-    if light.device.address in _lastWritten or light.device.address in _lightsOff:
+    if light.device.address in _lightsOff or light.status[0] == "STBY":
+        return "Off" if autoReconnectOnDisconnect else "Off; may need re-linking later"
+    if light.device.address in _lastWritten:
         return statusLine(light.state)
     return "Ready"
 
@@ -6229,6 +6231,8 @@ def _forgetNotify(mac):
     _notifyClients.pop(mac, None)
     _notifyData.pop(mac, None)
 
+_powerReplyLogged = set()  # MACs whose first power reply has been logged this session
+
 async def getLightChannelandPower(selectedLight):
     global availableLights
     returnInfo = ["---", "---"] # the information to return to the light
@@ -6236,6 +6240,13 @@ async def getLightChannelandPower(selectedLight):
     powerInfo = await readNotifyCharacteristic(selectedLight, [120, 133, 0, 253], 2)
     if powerInfo is None:
         return  # interrupted by a command or a show: keep the last status
+    mac = availableLights[selectedLight].device.address
+    if mac not in _powerReplyLogged:
+        # each light's first answer, once a session: models may answer differently in standby
+        # (the fourth byte is 1 for on and 2 for standby on the lights tested so far)
+        _powerReplyLogged.add(mac)
+        printDebugString("Power query: light [" + availableLights[selectedLight].device.name + "] " + mac + " answered "
+                         + ("nothing" if powerInfo == "" else str(list(powerInfo))))
 
     try:
         if powerInfo != "":
@@ -6640,9 +6651,9 @@ def workerThread(_loop):
                                         _loop.run_until_complete(getLightChannelandPower(a)) # then check the power and light status of that light
                                     except Exception as e:
                                         printDebugString("Error reading power/channel for light " + str(a + 1) + ": " + str(e))
-                                    if hasGUI: mainWindow._tableUpdateSignal.emit(["", "", "LINKED\n" + availableLights[a].status[0] + " / ᴄʜ. " + str(availableLights[a].status[1]), ""], a)  # Status keeps the last send
+                                    if hasGUI: mainWindow._tableUpdateSignal.emit(["", "", "LINKED\n" + availableLights[a].status[0] + " / ᴄʜ. " + str(availableLights[a].status[1]), idleStatus(a)], a)  # clears a link error once Windows has relinked by itself (after sleep)
                                 else: # if the light we're scanning doesn't supply power or channel status, then just show "LINKED"
-                                    if hasGUI: mainWindow._tableUpdateSignal.emit(["", "", "LINKED", ""], a)
+                                    if hasGUI: mainWindow._tableUpdateSignal.emit(["", "", "LINKED", idleStatus(a)], a)
                         else:
                             # Bleak object is empty - light was previously cleared; retry when its wait is up
                             if autoReconnectOnDisconnect and backoff.due(availableLights[a].device.address):

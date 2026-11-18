@@ -1006,11 +1006,13 @@ class Ui_MainWindow(object):
             self.lightTable.setColumnWidth(col, fm.horizontalAdvance(sample) + 24)
         self.lightTable.setIconSize(QSize(*TABLE_SWATCH_SIZE))
         self.lightTable.setColumnWidth(5, TABLE_SWATCH_SIZE[0] + 18)
-        # rows two lines high, the Linked column's; sizing them to their text made them jump
-        # whenever the Status text changed length
+        # rows at least two lines high (the Linked column's) and sized to their text by the header
+        # itself, with the theme's real font and padding (a height fixed from the font at this
+        # point cut the second line off on a scaled screen); the Status column keeps to one line
+        # (two at most), so rows no longer jump between two and three lines
         rows = self.lightTable.verticalHeader()
-        rows.setSectionResizeMode(QHeaderView.Fixed)
-        rows.setDefaultSectionSize(fm.lineSpacing() * 2 + 14)
+        rows.setMinimumSectionSize(fm.lineSpacing() * 2 + 14)
+        rows.setSectionResizeMode(QHeaderView.ResizeToContents)
         hdr = self.lightTable.horizontalHeader()
         for visual, col in enumerate(LIGHT_TABLE_ORDER):
             hdr.moveSection(hdr.visualIndex(col), visual)
