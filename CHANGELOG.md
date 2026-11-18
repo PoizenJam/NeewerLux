@@ -2,6 +2,11 @@
 
 Changes relative to upstream [NeewerLite-Python v0.12d](https://github.com/taburineagle/NeewerLite-Python).
 
+## v1.5.1 - 2026-11-17
+
+### Fixed
+- **An RGB660 PRO in standby shows as off.** It answers the power query with a different value from the plain RGB660 (0 rather than 2), which NeewerLux didn't recognise, so the Linked column showed "---" for its power and its swatch showed it as on.
+
 ## v1.5.0 - 2026-11-17
 
 ### Added
@@ -21,7 +26,6 @@ Changes relative to upstream [NeewerLite-Python v0.12d](https://github.com/tabur
 
 ### Fixed
 - **Sorting the light table no longer mixes up what lights return to.** The show engine kept each light's last colour set outside a show by its position in the list, and a sort on the desktop reorders the list, so after a sort a light could return to another light's colour when a show, sound mode or effect let go of it, and Remember light settings on exit could save another light's colour. Each light now keeps that colour itself, and sorting waits while a show plays (see Changed). Dates from 1.4.0.
-- **An RGB660 PRO in standby shows as off.** It answers the power query with a different value from the plain RGB660 (0 rather than 2), which NeewerLux didn't recognise, so the Linked column showed "---" for its power and its swatch showed it as on.
 - **Sorting the light table no longer blanks the signal strengths.** After sorting by a column header, every light showed "?" for its signal until the next scan. Sorting by signal also compared the numbers as text.
 - **A keyboard brightness or colour nudge on a light that a snapshot preset switched off** no longer stores a value with a wrong checksum, which was sent once the light was switched back on (lights ignore such packets).
 
