@@ -6243,7 +6243,7 @@ async def getLightChannelandPower(selectedLight):
     mac = availableLights[selectedLight].device.address
     if mac not in _powerReplyLogged:
         # each light's first answer, once a session: models may answer differently in standby
-        # (the fourth byte is 1 for on and 2 for standby on the lights tested so far)
+        # (the fourth byte is 1 for on; standby is 2 on the RGB660 and 0 on the RGB660 PRO)
         _powerReplyLogged.add(mac)
         printDebugString("Power query: light [" + availableLights[selectedLight].device.name + "] " + mac + " answered "
                          + ("nothing" if powerInfo == "" else str(list(powerInfo))))
@@ -6252,7 +6252,7 @@ async def getLightChannelandPower(selectedLight):
         if powerInfo != "":
             if powerInfo[3] == 1:
                 returnInfo[0] = "ON"
-            elif powerInfo[3] == 2:
+            elif powerInfo[3] in (0, 2):  # standby: 2 on the RGB660, 0 on the RGB660 PRO
                 returnInfo[0] = "STBY"
         
             # IF THE LIGHT IS ON, THEN ATTEMPT TO READ THE CURRENT CHANNEL

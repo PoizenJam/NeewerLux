@@ -18,6 +18,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 sys.path.insert(0, ROOT)
+import asyncio  # noqa: E402
 import harness  # noqa: E402
 import neewerlux_neewer as neewer  # noqa: E402
 
@@ -1767,6 +1768,31 @@ def t_soundCues(rig):
     check(not nl.audioEngine.running, "capture stops when the sequence ends (nothing else listens)")
 
 
+def t_powerReplies(rig):
+    """1.5.0: the power query's answer. On is 1 in the fourth byte; standby is 2 on the RGB660
+    but 0 on the RGB660 PRO, which NeewerLux read as unknown, so a PRO in standby showed as on
+    (answers logged from Robert's lights)."""
+    nl = rig.nl
+    light = nl.availableLights[RIM]
+    saved, savedStatus = nl.readNotifyCharacteristic, list(light.status)
+    replies = {}
+
+    async def fakeRead(selectedLight, diagCommand, typeOfData):
+        return replies[diagCommand[1]]
+
+    nl.readNotifyCharacteristic = fakeRead
+    loop = asyncio.new_event_loop()
+    try:
+        for power, expect in (([120, 2, 1, 1, 124], "ON"), ([120, 2, 1, 2, 125], "STBY"), ([120, 2, 1, 0, 123], "STBY")):
+            replies.update({133: power, 132: [120, 1, 1, 3, 125]})
+            loop.run_until_complete(nl.getLightChannelandPower(RIM))
+            check(light.status[0] == expect, "power answer %s reads %s: %s" % (power, expect, light.status))
+    finally:
+        loop.close()
+        nl.readNotifyCharacteristic = saved
+        light.status = savedStatus
+
+
 def t_lightSwatches(rig):
     """1.5: the swatch says when it isn't the light's true colour 1:1. Neewer lights report power
     and channel but no colour, so a light nothing has set this session (and with no saved
@@ -2702,7 +2728,7 @@ TESTS = [t_maxBrightnessHTTP, t_maxBrightnessAnimationAndSequence, t_minBrightne
          t_fadesOnlyBetweenItems,
          t_addSimulatedRig, t_compositorWakesOnlyWhenDue, t_handBackToRunningLayerFades,
          t_soundModeHTTP, t_soundUnderShowAndEffects, t_soundRespectsLimitsAndLocks, t_soundUnavailable, t_soundModeFilesHTTP,
-         t_offWinsDuringShows, t_animationFlashRates, t_shippedAnimationTags, t_soundCues, t_baseFollowsLightAfterSort, t_lightSwatches, t_soundHandsBackToBase, t_manualWriteReleasesSound, t_presetFadeTakesLightsFromSound, t_soundOnSomeLights,
+         t_offWinsDuringShows, t_animationFlashRates, t_shippedAnimationTags, t_soundCues, t_baseFollowsLightAfterSort, t_lightSwatches, t_powerReplies, t_soundHandsBackToBase, t_manualWriteReleasesSound, t_presetFadeTakesLightsFromSound, t_soundOnSomeLights,
          t_presetSounds, t_paletteLibrary, t_songDrafts, t_draftStyles, t_playBrightness, t_clockFollow, t_presetAsEffect, t_globalScenePreset, t_httpAllowlist, t_accessToken, t_reconnectBackoff, t_songHTTP, t_swatches, t_songTags, t_midiClockHTTP]
 
 
