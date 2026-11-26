@@ -2237,9 +2237,17 @@ def t_draftTempoMap(rig):
     check(b[:7] == [0, 500, 1000, 1500, 2000, 2500, 3000] and not errors, "a 2/4 bar inside 4/4: %s" % b)
     b, br, errors = show.tempoMap({"bars": [0, 2000, 4000, 9000]}, 5000)
     check(br == [0, 2000, 4000] and max(b) < 5000, "times past the end are dropped: %s %s" % (b, br))
+    b, br, errors = show.tempoMap({"bars": [0, 2000, 4000, 6000]}, 5000)
+    check(b == [0, 500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500], "the last bar is measured to the next given one, past the end: %s" % b)
     check(show.tempoMap({}, 5000) == (None, None, []), "no lists: no map")
+    # two sections snapping onto one bar: each keeps its own label (the snap used to pair a short
+    # section with the next one's span and lose the last section)
+    snapped = show._snapSections([{"start_ms": 0, "end_ms": 11000, "label": "Intro"}, {"start_ms": 11000, "end_ms": 11400, "label": "Build"},
+                                  {"start_ms": 11400, "end_ms": 30000, "label": "Drop"}], list(range(1000, 30000, 2000)), 30000)
+    check([(x["start_ms"], x["end_ms"], x["label"]) for x in snapped] == [(0, 11000, "Intro"), (11000, 30000, "Drop")],
+          "a short section snapped onto the next one's bar gives way to it: %s" % snapped)
     for bad, word in (({"bars": [0, 2000, 1500]}, "rise"), ({"bars": [0, 2000, 2000]}, "rise"), ({"beats": [0, 500, 400], "bars": [0]}, "rise"),
-                      ({"bars": "0,2000"}, "list"), ({"bars": [0, "x"]}, "list"), ({"bars": [-5, 2000]}, "before 0"),
+                      ({"bars": "0,2000"}, "list"), ({"bars": [0, "x"]}, "list"), ({"bars": [0, float("nan")]}, "list"), ({"bars": [-5, 2000]}, "before 0"),
                       ({"beats": [0, 500, 1000], "bars": [0, 700]}, "start on one"), ({"bars": [0, 2000], "beats_per_bar": 0}, "beats_per_bar"),
                       ({"bars": [0, 2000, 4000], "beats_per_bar": [4, 4]}, "beats_per_bar")):
         got = show.tempoMap(bad, 9000)

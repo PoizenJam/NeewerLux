@@ -7,6 +7,9 @@ Changes relative to upstream [NeewerLite-Python v0.12d](https://github.com/tabur
 ### Added
 - **Drafts on a real tempo map.** A song draft already put its cues on the beats and bars its analysis carried; that is now documented and checked, so a client with exact bar times (a game chart, a DAW export) can put them in the analysis and get a draft that follows a song that drifts or changes tempo. `bars` alone is enough (beats are spaced inside each bar; `beats_per_bar` for odd bars), sections move onto the given bars, and a list out of order or with repeats is refused with the reason instead of drafting nonsense. Lengths and the editors' grid still follow one tempo ([docs/SEQUENCE_FORMAT.md](docs/SEQUENCE_FORMAT.md), Drafting from a song).
 
+### Fixed
+- **Song drafts keep every section when two start on the same bar.** Moving section starts onto bars (with a tempo correction, and now with a tempo map) paired a short section with the next one's span when both landed on one bar, so a Build just before a Drop took the Drop's place and the last section was lost. The short one now gives way and the rest keep their own labels. Dates from 1.4.0.
+
 ## v1.5.1 - 2026-11-17
 
 ### Fixed

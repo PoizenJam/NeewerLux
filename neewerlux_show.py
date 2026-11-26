@@ -1387,7 +1387,7 @@ def tempoMap(analysis, durationMs):
         raw = analysis.get(key)
         if raw is None or raw == []:
             continue
-        if not isinstance(raw, (list, tuple)) or not all(isinstance(t, (int, float)) and not isinstance(t, bool) for t in raw):
+        if not isinstance(raw, (list, tuple)) or not all(isinstance(t, (int, float)) and not isinstance(t, bool) and math.isfinite(t) for t in raw):
             errors.append("analysis.%s must be a list of times in milliseconds" % key)
             continue
         times = [int(round(t)) for t in raw]
@@ -1396,10 +1396,13 @@ def tempoMap(analysis, durationMs):
         bad = next((i for i in range(1, len(times)) if times[i] <= times[i - 1]), None)
         if bad is not None:
             errors.append("analysis.%s must rise with no repeats (%d ms follows %d ms at entry %d)" % (key, times[bad], times[bad - 1], bad + 1))
-        lists[key] = [t for t in times if t < durationMs]
+        lists[key] = times
     if errors:
         return None, None, errors
     beats, bars = lists.get("beats"), lists.get("bars")
+    given = bars  # bar lengths come from the bars given, including one past the end
+    bars = [t for t in bars if t < durationMs] if bars else bars
+    beats = [t for t in beats if t < durationMs] if beats else beats
     if bars and not beats:
         per = analysis.get("beats_per_bar", 4)
         counts = list(per) if isinstance(per, (list, tuple)) else [per] * len(bars)
@@ -1407,7 +1410,7 @@ def tempoMap(analysis, durationMs):
             return None, None, ["analysis.beats_per_bar must be a whole number from 1 to 32, or a list of them with one for each bar"]
         beats = []
         for i, start in enumerate(bars):
-            length = bars[i + 1] - start if i + 1 < len(bars) else (start - bars[i - 1] if i else durationMs - start)
+            length = given[i + 1] - start if i + 1 < len(given) else (start - bars[i - 1] if i else durationMs - start)
             beats += [int(round(start + length * k / float(counts[i]))) for k in range(counts[i])]
         beats = sorted({t for t in beats if t < durationMs})
     elif bars and beats:
@@ -1416,6 +1419,22 @@ def tempoMap(analysis, durationMs):
         if stray is not None:
             return None, None, ["analysis.bars: the bar at %d ms doesn't start on one of analysis.beats" % stray]
     return beats or None, bars or None, []
+
+
+def _snapSections(sections, bars, durationMs):
+    """Each section moved to start on the bar nearest its start (the first at 0). Sections are
+    kept in order with their own labels: one that snaps onto the same bar as the next one is
+    left out, so the later, longer one keeps its label and its span. (Snapping the starts as a
+    set and zipping them back once paired a section with the next one's span, so a short Build
+    just before a Drop took the Drop's place and the last section was lost.)"""
+    starts = [0] + [min(bars, key=lambda b: abs(b - int(s["start_ms"]))) for s in sections[1:]]
+    kept = [(sec, a) for i, (sec, a) in enumerate(zip(sections, starts)) if i + 1 == len(starts) or starts[i + 1] > a]
+    out = []
+    for i, (sec, a) in enumerate(kept):
+        b = kept[i + 1][1] if i + 1 < len(kept) else durationMs
+        if b > a:
+            out.append(dict(sec, start_ms=a, end_ms=b))
+    return out
 
 
 def _draftKind(sec):
@@ -1472,8 +1491,7 @@ def draftSequence(analysis, style, name=None, bpm=None, offsetMs=None, animation
     period = 60000.0 / tempo
     if bpm or offsetMs is not None:
         beats, bars = songGrid(durationMs, tempo, analysis.get("offset_ms", 0) if offsetMs is None else offsetMs)
-        snapped = sorted({0} | {min(bars, key=lambda b: abs(b - s["start_ms"])) for s in sections[1:]})
-        sections = [dict(s, start_ms=a, end_ms=b) for s, a, b in zip(sections, snapped, snapped[1:] + [durationMs]) if b > a]
+        sections = _snapSections(sections, bars, durationMs)
     else:
         # the analysis's own beats and bars are the tempo map: a steady grid from analyzeSong, or real
         # times a client put there (tempoMap), which the cues below then land on
@@ -1486,8 +1504,7 @@ def draftSequence(analysis, style, name=None, bpm=None, offsetMs=None, animation
         # after the analysis (a no-op otherwise, checked so an analysis's own draft is unchanged)
         onBar = set(bars)
         if any(int(s["start_ms"]) not in onBar for s in sections[1:]):
-            snapped = sorted({0} | {min(bars, key=lambda b: abs(b - s["start_ms"])) for s in sections[1:]})
-            sections = [dict(s, start_ms=a, end_ms=b) for s, a, b in zip(sections, snapped, snapped[1:] + [durationMs]) if b > a]
+            sections = _snapSections(sections, bars, durationMs)
     animations = animations or {}
     soundModes = soundModes or {}
     roles = set(roles) if roles else set(DRAFT_GROUPS)
