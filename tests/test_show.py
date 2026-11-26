@@ -2183,6 +2183,79 @@ def t_songDrafts(rig):
     check({c["target"] for c in seq["cues"] if "state" in c} <= {"@fill", "@rim"}, "only the roles the rig has")
 
 
+def t_draftTempoMap(rig):
+    """A draft goes on the beats and bars its analysis carries, so a client with a real tempo map (a
+    chart's bar times) gets cues on the real bars: with beats and bars, with bars alone (beats spaced
+    evenly inside each bar, 4 or beats_per_bar of them), and over HTTP; a malformed map is refused
+    with a reason, and bpm or offset_ms still ask for a steady grid."""
+    import bisect
+    nl = rig.nl
+    show = nl.show
+    a = _labelled(show, 128)
+    dur = a["duration_ms"]
+    # 120 BPM for 20 bars, a step to 140, then a ritardando over the last bars
+    bars = [0.0]
+    while True:
+        n = len(bars)
+        bpm = 120 if n <= 20 else 140
+        if bars[-1] > dur - 16000:
+            bpm = max(90, bpm - 8 * sum(1 for b in bars if b > dur - 16000))
+        nxt = bars[-1] + 4 * 60000.0 / bpm
+        if nxt >= dur:
+            break
+        bars.append(nxt)
+    bars = [int(round(b)) for b in bars]
+    beats = sorted({int(round(s + (e - s) * k / 4.0)) for s, e in zip(bars, bars[1:] + [2 * bars[-1] - bars[-2]]) for k in range(4)})
+    beats = [t for t in beats if t < dur]
+    style = nl.draftStyleNamed("Concert")[0]
+
+    def offGrid(seq, grid):
+        times = sorted({c["at_ms"] for c in seq["cues"]})
+        def near(t):
+            i = bisect.bisect_left(grid, t)
+            return min(abs(t - grid[j]) for j in (i - 1, i) if 0 <= j < len(grid))
+        return [t for t in times if near(t) > 1], len(times)
+    steady, errors = show.draftSequence(a, style, "Steady", animations=nl.savedAnimations)
+    check(steady is not None, errors)
+    # cues that sit between beats by design (a pulse's end, a ramp) do so on a steady grid too
+    byDesign = len(offGrid(steady, sorted(set(a["beats"]) | set(a["bars"])))[0])
+    for label, given in (("beats and bars", {"beats": beats, "bars": bars}), ("bars alone", {"bars": bars, "beats": None})):
+        mapped, errors = show.draftSequence(dict(a, **given), style, "Mapped", animations=nl.savedAnimations)
+        check(mapped is not None, "%s: %s" % (label, errors))
+        off, total = offGrid(mapped, sorted(set(beats) | set(bars)))
+        # one cue time a section more: its opening look is timed a beat in by the one tempo, not the bar's own
+        check(total > 50 and len(off) <= byDesign + len(mapped["sections"]),
+              "%s: cues land on the given map (%d of %d off it; %d by design on a steady grid)" % (label, len(off), total, byDesign))
+        check(all(int(sec["start_ms"]) in set(bars) | {0} for sec in mapped["sections"]), "%s: sections start on the given bars" % label)
+        check(mapped["tempo"]["offset_ms"] == bars[0], "the tempo's offset is the first given bar")
+        downbeats = set(bars)
+        check(sum(1 for c in mapped["cues"] if c["at_ms"] in downbeats) >= len(bars) // 2, "%s: cues on the given bar starts" % label)
+    # odd bars: 3 beats in every bar, and a list with one short bar
+    b, _, errors = show.tempoMap({"bars": [0, 1500, 3000], "beats_per_bar": 3}, 6000)
+    check(b == [0, 500, 1000, 1500, 2000, 2500, 3000, 3500, 4000] and not errors, "3 beats a bar: %s %s" % (b, errors))
+    b, _, errors = show.tempoMap({"bars": [0, 2000, 3000, 5000], "beats_per_bar": [4, 2, 4, 4]}, 9000)
+    check(b[:7] == [0, 500, 1000, 1500, 2000, 2500, 3000] and not errors, "a 2/4 bar inside 4/4: %s" % b)
+    b, br, errors = show.tempoMap({"bars": [0, 2000, 4000, 9000]}, 5000)
+    check(br == [0, 2000, 4000] and max(b) < 5000, "times past the end are dropped: %s %s" % (b, br))
+    check(show.tempoMap({}, 5000) == (None, None, []), "no lists: no map")
+    for bad, word in (({"bars": [0, 2000, 1500]}, "rise"), ({"bars": [0, 2000, 2000]}, "rise"), ({"beats": [0, 500, 400], "bars": [0]}, "rise"),
+                      ({"bars": "0,2000"}, "list"), ({"bars": [0, "x"]}, "list"), ({"bars": [-5, 2000]}, "before 0"),
+                      ({"beats": [0, 500, 1000], "bars": [0, 700]}, "start on one"), ({"bars": [0, 2000], "beats_per_bar": 0}, "beats_per_bar"),
+                      ({"bars": [0, 2000, 4000], "beats_per_bar": [4, 4]}, "beats_per_bar")):
+        got = show.tempoMap(bad, 9000)
+        check(got[0] is None and got[2] and word in got[2][0], "%s refused: %s" % (bad, got[2]))
+        seq, errors = show.draftSequence(dict(a, **dict({"beats": None}, **bad)), style, "Bad")
+        check(seq is None and errors, "a draft refuses %s" % bad)
+    # over HTTP, and bpm still means a steady grid
+    d = rig.post("/NeewerLux/sequence", {"action": "draft", "analysis": dict(a, beats=None, bars=bars), "style": "Concert", "name": "Mapped"})
+    check(d["success"] and len(offGrid(d["sequence"], sorted(set(beats) | set(bars)))[0]) <= byDesign + len(d["sequence"]["sections"]), "the draft action takes a map: %s" % d.get("errors"))
+    d = rig.post("/NeewerLux/sequence", {"action": "draft", "analysis": dict(a, beats=None, bars=[0, 2000, 1500]), "style": "Concert", "name": "Bad"})
+    check(not d["success"] and "rise" in d["errors"][0], "and refuses a bad one: %s" % d.get("errors"))
+    d = rig.post("/NeewerLux/sequence", {"action": "draft", "analysis": dict(a, beats=beats, bars=bars), "style": "Concert", "name": "Regrid", "bpm": 128, "offset_ms": 0})
+    grid = show.songGrid(dur, 128, 0)[0]
+    check(d["success"] and len(offGrid(d["sequence"], grid)[0]) <= byDesign + 2, "bpm and offset_ms ask for a steady grid, as before")
+
+
 def t_draftStyles(rig):
     """1.4.0: draft styles are checked, saved, listed, matched by genre and deleted over HTTP."""
     nl = rig.nl
@@ -2729,7 +2802,7 @@ TESTS = [t_maxBrightnessHTTP, t_maxBrightnessAnimationAndSequence, t_minBrightne
          t_addSimulatedRig, t_compositorWakesOnlyWhenDue, t_handBackToRunningLayerFades,
          t_soundModeHTTP, t_soundUnderShowAndEffects, t_soundRespectsLimitsAndLocks, t_soundUnavailable, t_soundModeFilesHTTP,
          t_offWinsDuringShows, t_animationFlashRates, t_shippedAnimationTags, t_soundCues, t_baseFollowsLightAfterSort, t_lightSwatches, t_powerReplies, t_soundHandsBackToBase, t_manualWriteReleasesSound, t_presetFadeTakesLightsFromSound, t_soundOnSomeLights,
-         t_presetSounds, t_paletteLibrary, t_songDrafts, t_draftStyles, t_playBrightness, t_clockFollow, t_presetAsEffect, t_globalScenePreset, t_httpAllowlist, t_accessToken, t_reconnectBackoff, t_songHTTP, t_swatches, t_songTags, t_midiClockHTTP]
+         t_presetSounds, t_paletteLibrary, t_songDrafts, t_draftTempoMap, t_draftStyles, t_playBrightness, t_clockFollow, t_presetAsEffect, t_globalScenePreset, t_httpAllowlist, t_accessToken, t_reconnectBackoff, t_songHTTP, t_swatches, t_songTags, t_midiClockHTTP]
 
 
 def main():

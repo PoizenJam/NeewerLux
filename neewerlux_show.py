@@ -1373,6 +1373,51 @@ def songGrid(durationMs, bpm, offsetMs):
     return beats, beats[::4]
 
 
+def tempoMap(analysis, durationMs):
+    """The beat and bar times (ms) an analysis carries, checked, or (None, None, errors). A client with
+    an exact tempo map (a game chart, a DAW export, a MIDI file) puts it in the analysis in place of
+    analyzeSong's steady grid, and the draft's cues then land on the real beats and bars.
+    "bars" without "beats": the beats are spaced evenly inside each bar, "beats_per_bar" of them (4,
+    or a whole number, or a list with one entry a bar for odd bars); the last bar is taken to be as
+    long as the one before. Each list must rise with no repeats, and with both given every bar must
+    start on a beat. Times at or past the song's end are dropped. Neither list: (None, None, [])."""
+    errors = []
+    lists = {}
+    for key in ("beats", "bars"):
+        raw = analysis.get(key)
+        if raw is None or raw == []:
+            continue
+        if not isinstance(raw, (list, tuple)) or not all(isinstance(t, (int, float)) and not isinstance(t, bool) for t in raw):
+            errors.append("analysis.%s must be a list of times in milliseconds" % key)
+            continue
+        times = [int(round(t)) for t in raw]
+        if times[0] < 0:
+            errors.append("analysis.%s can't start before 0" % key)
+        bad = next((i for i in range(1, len(times)) if times[i] <= times[i - 1]), None)
+        if bad is not None:
+            errors.append("analysis.%s must rise with no repeats (%d ms follows %d ms at entry %d)" % (key, times[bad], times[bad - 1], bad + 1))
+        lists[key] = [t for t in times if t < durationMs]
+    if errors:
+        return None, None, errors
+    beats, bars = lists.get("beats"), lists.get("bars")
+    if bars and not beats:
+        per = analysis.get("beats_per_bar", 4)
+        counts = list(per) if isinstance(per, (list, tuple)) else [per] * len(bars)
+        if len(counts) < len(bars) or not all(isinstance(n, int) and not isinstance(n, bool) and 1 <= n <= 32 for n in counts):
+            return None, None, ["analysis.beats_per_bar must be a whole number from 1 to 32, or a list of them with one for each bar"]
+        beats = []
+        for i, start in enumerate(bars):
+            length = bars[i + 1] - start if i + 1 < len(bars) else (start - bars[i - 1] if i else durationMs - start)
+            beats += [int(round(start + length * k / float(counts[i]))) for k in range(counts[i])]
+        beats = sorted({t for t in beats if t < durationMs})
+    elif bars and beats:
+        onBeat = set(beats)
+        stray = next((t for t in bars if t not in onBeat), None)
+        if stray is not None:
+            return None, None, ["analysis.bars: the bar at %d ms doesn't start on one of analysis.beats" % stray]
+    return beats or None, bars or None, []
+
+
 def _draftKind(sec):
     for raw in (sec.get("kind"), sec.get("label")):
         word = str(raw or "").strip().lower()
@@ -1410,7 +1455,9 @@ def draftSequence(analysis, style, name=None, bpm=None, offsetMs=None, animation
     ({name: data}) are the pools' sources; roles is the set of roles the rig has (the chase
     skips missing ones). Drives the fill, rim, background and practical lights, never the key,
     and keeps each light at or under 2 flashes a second. bpm and offsetMs (a bar's first beat)
-    replace the analysed tempo, moving the sections to the nearest bar line. Returns
+    replace the analysed tempo with a steady grid, moving the sections to the nearest bar line;
+    without them the cues go on the analysis's own beats and bars, which can be a real tempo map
+    (tempoMap). Lengths (fades, pulses, clip speeds) still come from the one tempo. Returns
     (sequence, errors)."""
     if not isinstance(style, dict) or "sections" not in style:
         return None, ["style must be a draft style"]
@@ -1428,8 +1475,19 @@ def draftSequence(analysis, style, name=None, bpm=None, offsetMs=None, animation
         snapped = sorted({0} | {min(bars, key=lambda b: abs(b - s["start_ms"])) for s in sections[1:]})
         sections = [dict(s, start_ms=a, end_ms=b) for s, a, b in zip(sections, snapped, snapped[1:] + [durationMs]) if b > a]
     else:
-        beats = list(analysis.get("beats") or songGrid(durationMs, tempo, analysis.get("offset_ms", 0))[0])
-        bars = list(analysis.get("bars") or beats[::4])
+        # the analysis's own beats and bars are the tempo map: a steady grid from analyzeSong, or real
+        # times a client put there (tempoMap), which the cues below then land on
+        beats, bars, mapErrors = tempoMap(analysis, durationMs)
+        if mapErrors:
+            return None, mapErrors
+        beats = beats or songGrid(durationMs, tempo, analysis.get("offset_ms", 0))[0]
+        bars = bars or beats[::4]
+        # sections start on bars: analyzeSong's already do, so this moves only those of a map put in
+        # after the analysis (a no-op otherwise, checked so an analysis's own draft is unchanged)
+        onBar = set(bars)
+        if any(int(s["start_ms"]) not in onBar for s in sections[1:]):
+            snapped = sorted({0} | {min(bars, key=lambda b: abs(b - s["start_ms"])) for s in sections[1:]})
+            sections = [dict(s, start_ms=a, end_ms=b) for s, a, b in zip(sections, snapped, snapped[1:] + [durationMs]) if b > a]
     animations = animations or {}
     soundModes = soundModes or {}
     roles = set(roles) if roles else set(DRAFT_GROUPS)

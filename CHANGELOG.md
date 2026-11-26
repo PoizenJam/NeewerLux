@@ -2,6 +2,11 @@
 
 Changes relative to upstream [NeewerLite-Python v0.12d](https://github.com/taburineagle/NeewerLite-Python).
 
+## v1.5.2 - unreleased
+
+### Added
+- **Drafts on a real tempo map.** A song draft already put its cues on the beats and bars its analysis carried; that is now documented and checked, so a client with exact bar times (a game chart, a DAW export) can put them in the analysis and get a draft that follows a song that drifts or changes tempo. `bars` alone is enough (beats are spaced inside each bar; `beats_per_bar` for odd bars), sections move onto the given bars, and a list out of order or with repeats is refused with the reason instead of drafting nonsense. Lengths and the editors' grid still follow one tempo ([docs/SEQUENCE_FORMAT.md](docs/SEQUENCE_FORMAT.md), Drafting from a song).
+
 ## v1.5.1 - 2026-11-17
 
 ### Fixed
